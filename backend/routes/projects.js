@@ -460,10 +460,10 @@ router.post('/:id/tickets', authenticate, async (req, res) => {
       [project.company_id, req.user.id, title.trim(), description || '', priority || 'medium']
     );
 
-    // Get the inserted ticket
+    // Get the inserted ticket with all fields needed by mobile
     const result = await client.query(
-      `SELECT t.id, t.title, t.description, t.status, t.priority,
-              t.created_at, t.updated_at,
+      `SELECT t.id, t.company_id, t.creator_id, t.assigned_to, t.title, t.description, t.status, t.priority,
+              t.created_at, t.updated_at, t.resolved_at,
               creator.handle as creator_handle,
               creator.first_name as creator_first_name,
               creator.last_name as creator_last_name
