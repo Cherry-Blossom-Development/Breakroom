@@ -2,15 +2,16 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
+const { extractToken } = require('../utilities/auth');
 
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
 
-// Auth middleware
+// Auth middleware - supports both cookie (web) and Authorization header (mobile)
 const authenticate = async (req, res, next) => {
   try {
-    const token = req.cookies.jwtToken;
+    const token = extractToken(req);
     if (!token) {
       return res.status(401).json({ message: 'Not authenticated' });
     }
@@ -65,7 +66,7 @@ router.get('/tickets/:companyId', authenticate, async (req, res) => {
 
   try {
     const result = await client.query(
-      `SELECT t.id, t.title, t.description, t.status, t.priority,
+      `SELECT t.id, t.company_id, t.creator_id, t.assigned_to, t.title, t.description, t.status, t.priority,
               t.created_at, t.updated_at, t.resolved_at,
               c.name as company_name,
               creator.handle as creator_handle, creator.first_name as creator_first_name,
@@ -160,11 +161,12 @@ router.post('/tickets', authenticate, async (req, res) => {
       [company_id, req.user.id, title.trim(), description || '', priority || 'medium']
     );
 
-    // Get the inserted ticket
+    // Get the inserted ticket with all fields needed by mobile
     const result = await client.query(
-      `SELECT t.id, t.title, t.description, t.status, t.priority,
-              t.created_at, t.updated_at,
-              creator.handle as creator_handle
+      `SELECT t.id, t.company_id, t.creator_id, t.assigned_to, t.title, t.description, t.status, t.priority,
+              t.created_at, t.updated_at, t.resolved_at,
+              creator.handle as creator_handle, creator.first_name as creator_first_name,
+              creator.last_name as creator_last_name
        FROM tickets t
        JOIN users creator ON t.creator_id = creator.id
        WHERE t.creator_id = $1
@@ -246,11 +248,18 @@ router.put('/ticket/:id', authenticate, async (req, res) => {
       values
     );
 
-    // Get updated ticket
+    // Get updated ticket with all fields needed by mobile
     const result = await client.query(
-      `SELECT t.id, t.title, t.description, t.status, t.priority,
-              t.created_at, t.updated_at, t.resolved_at
-       FROM tickets t WHERE t.id = $1`,
+      `SELECT t.id, t.company_id, t.creator_id, t.assigned_to, t.title, t.description, t.status, t.priority,
+              t.created_at, t.updated_at, t.resolved_at,
+              creator.handle as creator_handle, creator.first_name as creator_first_name,
+              creator.last_name as creator_last_name,
+              assignee.handle as assignee_handle, assignee.first_name as assignee_first_name,
+              assignee.last_name as assignee_last_name
+       FROM tickets t
+       JOIN users creator ON t.creator_id = creator.id
+       LEFT JOIN users assignee ON t.assigned_to = assignee.id
+       WHERE t.id = $1`,
       [id]
     );
 

@@ -2,15 +2,16 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
+const { extractToken } = require('../utilities/auth');
 
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
 
-// Auth middleware
+// Auth middleware - supports both cookie (web) and Authorization header (mobile)
 const authenticate = async (req, res, next) => {
   try {
-    const token = req.cookies.jwtToken;
+    const token = extractToken(req);
     if (!token) {
       return res.status(401).json({ message: 'Not authenticated' });
     }
@@ -80,8 +81,8 @@ router.get('/:id', authenticate, async (req, res) => {
     }
 
     const ticketsResult = await client.query(
-      `SELECT t.id, t.title, t.description, t.status, t.priority,
-              t.created_at, t.updated_at,
+      `SELECT t.id, t.company_id, t.creator_id, t.assigned_to, t.title, t.description, t.status, t.priority,
+              t.created_at, t.updated_at, t.resolved_at,
               creator.handle as creator_handle, creator.first_name as creator_first_name,
               creator.last_name as creator_last_name,
               assignee.handle as assignee_handle, assignee.first_name as assignee_first_name,
