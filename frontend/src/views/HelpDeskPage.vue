@@ -21,6 +21,15 @@ const submitting = ref(false)
 // Selected ticket for detail view
 const selectedTicket = ref(null)
 
+// Edit ticket state
+const editingTicket = ref(false)
+const editForm = ref({
+  title: '',
+  description: '',
+  priority: 'medium'
+})
+const savingTicket = ref(false)
+
 const priorityColors = {
   low: '#6c757d',
   medium: '#0d6efd',
@@ -141,11 +150,62 @@ async function updateTicketStatus(ticketId, newStatus) {
 }
 
 function selectTicket(ticket) {
-  selectedTicket.value = ticket
+  selectedTicket.value = { ...ticket }
+  editingTicket.value = false
 }
 
 function closeDetail() {
   selectedTicket.value = null
+  editingTicket.value = false
+}
+
+function startEditTicket() {
+  editForm.value = {
+    title: selectedTicket.value.title,
+    description: selectedTicket.value.description || '',
+    priority: selectedTicket.value.priority
+  }
+  editingTicket.value = true
+}
+
+function cancelEdit() {
+  editingTicket.value = false
+}
+
+async function saveTicket() {
+  if (!editForm.value.title.trim()) {
+    return
+  }
+
+  savingTicket.value = true
+
+  try {
+    const res = await authFetch(`/api/helpdesk/ticket/${selectedTicket.value.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: editForm.value.title,
+        description: editForm.value.description,
+        priority: editForm.value.priority
+      })
+    })
+
+    if (res.ok) {
+      const data = await res.json()
+      // Update selected ticket with new data
+      selectedTicket.value = { ...selectedTicket.value, ...data.ticket }
+      // Update in tickets list
+      const index = tickets.value.findIndex(t => t.id === selectedTicket.value.id)
+      if (index !== -1) {
+        tickets.value[index] = { ...tickets.value[index], ...data.ticket }
+      }
+      editingTicket.value = false
+    }
+  } catch (err) {
+    console.error('Error saving ticket:', err)
+  } finally {
+    savingTicket.value = false
+  }
 }
 
 onMounted(() => {
@@ -218,56 +278,106 @@ onMounted(() => {
     <div v-if="selectedTicket" class="modal-overlay" @click.self="closeDetail">
       <div class="modal ticket-detail">
         <div class="detail-header">
-          <h2>{{ selectedTicket.title }}</h2>
-          <button class="close-btn" @click="closeDetail">&times;</button>
-        </div>
-
-        <div class="detail-meta">
-          <span class="status-badge" :style="{ background: statusColors[selectedTicket.status] }">
-            {{ selectedTicket.status.replace('_', ' ') }}
-          </span>
-          <span class="priority-badge" :style="{ background: priorityColors[selectedTicket.priority] }">
-            {{ selectedTicket.priority }}
-          </span>
-        </div>
-
-        <div class="detail-info">
-          <p><strong>Created by:</strong> {{ getCreatorName(selectedTicket) }}</p>
-          <p><strong>Created:</strong> {{ formatDate(selectedTicket.created_at) }}</p>
-          <p v-if="selectedTicket.resolved_at"><strong>Resolved:</strong> {{ formatDate(selectedTicket.resolved_at) }}</p>
-        </div>
-
-        <div class="detail-description">
-          <h3>Description</h3>
-          <p>{{ selectedTicket.description || 'No description provided.' }}</p>
-        </div>
-
-        <div class="detail-actions" v-if="selectedTicket.status !== 'closed'">
-          <h3>Update Status</h3>
-          <div class="status-buttons">
-            <button
-              v-if="selectedTicket.status === 'open' || selectedTicket.status === 'backlog'"
-              @click="updateTicketStatus(selectedTicket.id, 'in_progress')"
-              class="btn-status in-progress"
-            >
-              Mark In Progress
-            </button>
-            <button
-              v-if="selectedTicket.status === 'open' || selectedTicket.status === 'backlog' || selectedTicket.status === 'in_progress'"
-              @click="updateTicketStatus(selectedTicket.id, 'resolved')"
-              class="btn-status resolved"
-            >
-              Mark Resolved
-            </button>
-            <button
-              v-if="selectedTicket.status === 'resolved'"
-              @click="updateTicketStatus(selectedTicket.id, 'closed')"
-              class="btn-status closed"
-            >
-              Close Ticket
-            </button>
+          <h2 v-if="!editingTicket">{{ selectedTicket.title }}</h2>
+          <h2 v-else>Edit Ticket</h2>
+          <div class="header-buttons">
+            <button v-if="!editingTicket" class="btn-edit" @click="startEditTicket">Edit</button>
+            <button class="close-btn" @click="closeDetail">&times;</button>
           </div>
         </div>
+
+        <!-- View Mode -->
+        <template v-if="!editingTicket">
+          <div class="detail-meta">
+            <span class="status-badge" :style="{ background: statusColors[selectedTicket.status] }">
+              {{ selectedTicket.status.replace('_', ' ') }}
+            </span>
+            <span class="priority-badge" :style="{ background: priorityColors[selectedTicket.priority] }">
+              {{ selectedTicket.priority }}
+            </span>
+          </div>
+
+          <div class="detail-info">
+            <p><strong>Created by:</strong> {{ getCreatorName(selectedTicket) }}</p>
+            <p><strong>Created:</strong> {{ formatDate(selectedTicket.created_at) }}</p>
+            <p v-if="selectedTicket.resolved_at"><strong>Resolved:</strong> {{ formatDate(selectedTicket.resolved_at) }}</p>
+          </div>
+
+          <div class="detail-description">
+            <h3>Description</h3>
+            <p>{{ selectedTicket.description || 'No description provided.' }}</p>
+          </div>
+
+          <div class="detail-actions" v-if="selectedTicket.status !== 'closed'">
+            <h3>Update Status</h3>
+            <div class="status-buttons">
+              <button
+                v-if="selectedTicket.status === 'open' || selectedTicket.status === 'backlog'"
+                @click="updateTicketStatus(selectedTicket.id, 'in_progress')"
+                class="btn-status in-progress"
+              >
+                Mark In Progress
+              </button>
+              <button
+                v-if="selectedTicket.status === 'open' || selectedTicket.status === 'backlog' || selectedTicket.status === 'in_progress'"
+                @click="updateTicketStatus(selectedTicket.id, 'resolved')"
+                class="btn-status resolved"
+              >
+                Mark Resolved
+              </button>
+              <button
+                v-if="selectedTicket.status === 'resolved'"
+                @click="updateTicketStatus(selectedTicket.id, 'closed')"
+                class="btn-status closed"
+              >
+                Close Ticket
+              </button>
+            </div>
+          </div>
+        </template>
+
+        <!-- Edit Mode -->
+        <form v-else @submit.prevent="saveTicket" class="edit-form">
+          <div class="form-group">
+            <label for="edit-title">Title</label>
+            <input
+              id="edit-title"
+              v-model="editForm.title"
+              type="text"
+              placeholder="Ticket title"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="edit-description">Description</label>
+            <textarea
+              id="edit-description"
+              v-model="editForm.description"
+              rows="5"
+              placeholder="Ticket description..."
+            ></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="edit-priority">Priority</label>
+            <select id="edit-priority" v-model="editForm.priority">
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="urgent">Urgent</option>
+            </select>
+          </div>
+
+          <div class="modal-actions">
+            <button type="submit" class="btn-primary" :disabled="savingTicket">
+              {{ savingTicket ? 'Saving...' : 'Save Changes' }}
+            </button>
+            <button type="button" class="btn-secondary" @click="cancelEdit">
+              Cancel
+            </button>
+          </div>
+        </form>
       </div>
     </div>
 
@@ -503,6 +613,27 @@ onMounted(() => {
   padding-right: 20px;
 }
 
+.header-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-edit {
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.btn-edit:hover {
+  background: var(--color-accent-hover);
+}
+
 .close-btn {
   background: none;
   border: none;
@@ -514,6 +645,10 @@ onMounted(() => {
 
 .close-btn:hover {
   color: var(--color-text);
+}
+
+.edit-form {
+  margin-top: 10px;
 }
 
 .detail-meta {
