@@ -4,10 +4,12 @@ import { RouterLink } from 'vue-router'
 import { GridLayout, GridItem } from 'grid-layout-plus'
 import { breakroom } from '@/stores/breakroom.js'
 import { user } from '@/stores/user.js'
+import { authFetch } from '@/utilities/authFetch'
 import BreakroomBlock from '@/components/BreakroomBlock.vue'
 import AddBlockModal from '@/components/AddBlockModal.vue'
 
 const showAddModal = ref(false)
+const shortcuts = ref([])
 const layoutKey = ref(0)
 
 // Mobile detection
@@ -95,10 +97,26 @@ const onBlockAdded = () => {
   layoutKey.value++
 }
 
+// Fetch user shortcuts
+async function fetchShortcuts() {
+  try {
+    const res = await authFetch('/api/shortcuts')
+    if (res.ok) {
+      const data = await res.json()
+      shortcuts.value = data.shortcuts
+    }
+  } catch (err) {
+    console.error('Error fetching shortcuts:', err)
+  }
+}
+
 onMounted(async () => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
-  await breakroom.fetchLayout()
+  await Promise.all([
+    breakroom.fetchLayout(),
+    fetchShortcuts()
+  ])
   initializeLayout()
 })
 
@@ -111,9 +129,21 @@ onUnmounted(() => {
   <section class="breakroom-page">
     <header class="breakroom-header page-container">
       <h1>Breakroom</h1>
-      <button class="add-block-btn" @click="showAddModal = true">
-        + Add Block
-      </button>
+      <div class="header-right">
+        <div v-if="shortcuts.length > 0" class="shortcuts-list">
+          <RouterLink
+            v-for="shortcut in shortcuts"
+            :key="shortcut.id"
+            :to="shortcut.url"
+            class="shortcut-link"
+          >
+            {{ shortcut.name }}
+          </RouterLink>
+        </div>
+        <button class="add-block-btn" @click="showAddModal = true">
+          + Add Block
+        </button>
+      </div>
     </header>
 
     <div v-if="breakroom.loading" class="loading">
@@ -231,6 +261,37 @@ onUnmounted(() => {
   letter-spacing: -0.5px;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.shortcuts-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.shortcut-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  text-decoration: none;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.shortcut-link:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
 .add-block-btn {
   background: var(--color-accent);
   color: white;
@@ -240,6 +301,7 @@ onUnmounted(() => {
   cursor: pointer;
   font-size: 1rem;
   font-weight: 500;
+  flex-shrink: 0;
 }
 
 .add-block-btn:hover {

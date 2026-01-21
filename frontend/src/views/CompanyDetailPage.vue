@@ -59,6 +59,9 @@ const projectForm = ref({
 const savingProject = ref(false)
 const projectError = ref('')
 
+// Shortcut tracking for projects
+const projectShortcuts = ref({}) // Maps project URL to shortcut id
+
 const canManageProjects = computed(() => {
   return userRole.value && (userRole.value.is_owner || userRole.value.is_admin)
 })
@@ -670,8 +673,85 @@ function getProjectHomepageLink(project) {
   return `/project/${project.id}`
 }
 
+// Check if a project has an existing shortcut
+function hasShortcut(project) {
+  const url = getProjectHomepageLink(project)
+  return !!projectShortcuts.value[url]
+}
+
+// Fetch shortcuts for all projects
+async function fetchProjectShortcuts() {
+  try {
+    const res = await authFetch('/api/shortcuts')
+    if (res.ok) {
+      const data = await res.json()
+      // Build a map of URL -> shortcut id
+      const shortcutMap = {}
+      data.shortcuts.forEach(s => {
+        shortcutMap[s.url] = s.id
+      })
+      projectShortcuts.value = shortcutMap
+    }
+  } catch (err) {
+    console.error('Error fetching shortcuts:', err)
+  }
+}
+
+// Toggle shortcut for a project
+async function toggleShortcut(project) {
+  const url = getProjectHomepageLink(project)
+
+  if (hasShortcut(project)) {
+    // Remove shortcut
+    try {
+      const shortcutId = projectShortcuts.value[url]
+      const res = await authFetch(`/api/shortcuts/${shortcutId}`, {
+        method: 'DELETE'
+      })
+
+      if (res.ok) {
+        delete projectShortcuts.value[url]
+        // Trigger reactivity
+        projectShortcuts.value = { ...projectShortcuts.value }
+      } else {
+        const data = await res.json()
+        alert(data.message || 'Failed to remove shortcut')
+      }
+    } catch (err) {
+      console.error('Error removing shortcut:', err)
+      alert('Failed to remove shortcut')
+    }
+  } else {
+    // Create shortcut
+    try {
+      const res = await authFetch('/api/shortcuts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: project.title,
+          url: url
+        })
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        projectShortcuts.value[url] = data.shortcut.id
+        // Trigger reactivity
+        projectShortcuts.value = { ...projectShortcuts.value }
+      } else {
+        const data = await res.json()
+        alert(data.message || 'Failed to create shortcut')
+      }
+    } catch (err) {
+      console.error('Error creating shortcut:', err)
+      alert('Failed to create shortcut')
+    }
+  }
+}
+
 onMounted(() => {
   fetchCompany()
+  fetchProjectShortcuts()
 })
 </script>
 
@@ -952,6 +1032,14 @@ onMounted(() => {
                   >
                     View Tickets
                   </router-link>
+                  <button
+                    v-if="proj.is_active"
+                    @click="toggleShortcut(proj)"
+                    class="btn-small"
+                    :class="{ 'btn-shortcut-active': hasShortcut(proj) }"
+                  >
+                    {{ hasShortcut(proj) ? 'Remove Shortcut' : 'Create Shortcut' }}
+                  </button>
                   <button v-if="canManageProjects" @click="openProjectModal(proj)" class="btn-small">Edit</button>
                   <button v-if="canManageProjects && !proj.is_default" @click="toggleProjectStatus(proj)" class="btn-small">
                     {{ proj.is_active ? 'Deactivate' : 'Activate' }}
@@ -1571,6 +1659,17 @@ onMounted(() => {
 .btn-small.btn-homepage:hover {
   background: var(--color-accent-hover);
   border-color: var(--color-accent-hover);
+}
+
+.btn-small.btn-shortcut-active {
+  background: #764ba2;
+  color: white;
+  border-color: #764ba2;
+}
+
+.btn-small.btn-shortcut-active:hover {
+  background: #5a3a7e;
+  border-color: #5a3a7e;
 }
 
 /* Buttons */
