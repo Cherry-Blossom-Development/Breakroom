@@ -93,7 +93,20 @@ services:
     # looks for changes live (that won't happen in production)
     command: sh -c "npm run dev"
 
-  # reverse-proxy removed - using host nginx instead
+  # Nginx reverse proxy with SSL
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    networks:
+      - app-network
+    depends_on:
+      - frontend
+      - backend
 
 networks:
 

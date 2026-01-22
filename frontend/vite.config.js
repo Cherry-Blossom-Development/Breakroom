@@ -14,7 +14,16 @@ export default defineConfig(({ mode }) => {
       host: '0.0.0.0',
       allowedHosts: [env.VITE_ALLOWED_HOST],
       proxy: {
-        '/api': 'https://localhost:3000',
+        '/api': {
+          target: 'http://backend:3000',
+          changeOrigin: true,
+          secure: false
+        },
+        '/socket.io': {
+          target: 'http://backend:3000',
+          changeOrigin: true,
+          ws: true
+        }
       },
       watch: {
         usePolling: true,
