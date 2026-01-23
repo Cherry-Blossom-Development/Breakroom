@@ -10,6 +10,7 @@
           <li><RouterLink to="/admin/notifications">Notifications</RouterLink></li>
           <li><RouterLink to="/admin/system-emails">System Emails</RouterLink></li>
           <li><RouterLink to="/admin/billing">Billing</RouterLink></li>
+          <li><RouterLink to="/admin/test-results">Test Results</RouterLink></li>
         </ul>
       </nav>
     </aside>
