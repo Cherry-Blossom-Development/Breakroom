@@ -11,6 +11,9 @@
       <div v-if="passwordError" class="error">{{ passwordError }}</div>
     </div>
     <button type="submit">Login</button>
+    <p class="signup-prompt">
+      Don't have an account? <RouterLink to="/signup">Sign up</RouterLink>
+    </p>
   </form>
 </template>
 
@@ -87,5 +90,18 @@ export default {
     margin-top: 10px;
     font-size: 0.8em;
     font-weight: bold;
+  }
+  .signup-prompt {
+    margin-top: 20px;
+    text-align: center;
+    color: var(--color-text-light);
+    font-size: 0.9em;
+  }
+  .signup-prompt a {
+    color: var(--color-accent);
+    text-decoration: none;
+  }
+  .signup-prompt a:hover {
+    text-decoration: underline;
   }
 </style>
