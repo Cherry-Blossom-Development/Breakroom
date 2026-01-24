@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const fs = require('fs');
+const path = require('path');
 
 const { getClient } = require('../utilities/db');
 const { sendMail } = require('../utilities/aws-ses-email');
@@ -102,7 +104,30 @@ router.post('/signup', async (req, res) => {
       const { from_address, subject, html_content } = emailTemplate.rows[0];
       // Replace placeholder with actual verification token
       const processedContent = html_content.replace(/\{\{verification_token\}\}/g, verificationToken);
-      sendMail(req.body.email, from_address, subject, processedContent);
+
+      // Test mode: write email to file instead of sending when NODE_ENV=test
+      if (process.env.NODE_ENV === 'test') {
+        // Write to backend/test-emails which is mounted in Docker
+        const testEmailDir = path.join(__dirname, '..', 'test-emails');
+        if (!fs.existsSync(testEmailDir)) {
+          fs.mkdirSync(testEmailDir, { recursive: true });
+        }
+        const emailData = {
+          to: req.body.email,
+          from: from_address,
+          subject: subject,
+          html: processedContent,
+          verificationToken: verificationToken,
+          timestamp: new Date().toISOString()
+        };
+        fs.writeFileSync(
+          path.join(testEmailDir, `${req.body.email}.json`),
+          JSON.stringify(emailData, null, 2)
+        );
+        console.log(`[TEST MODE] Email written to backend/test-emails/${req.body.email}.json`);
+      } else {
+        sendMail(req.body.email, from_address, subject, processedContent);
+      }
     }
 
     client.release();
@@ -186,7 +211,30 @@ router.post('/resend-verification', async (req, res) => {
   if (emailTemplate.rowCount > 0) {
     const { from_address, subject, html_content } = emailTemplate.rows[0];
     const processedContent = html_content.replace(/\{\{verification_token\}\}/g, newToken);
-    sendMail(userData.email, from_address, subject, processedContent);
+
+    // Test mode: write email to file instead of sending when NODE_ENV=test
+    if (process.env.NODE_ENV === 'test') {
+      // Write to backend/test-emails which is mounted in Docker
+      const testEmailDir = path.join(__dirname, '..', 'test-emails');
+      if (!fs.existsSync(testEmailDir)) {
+        fs.mkdirSync(testEmailDir, { recursive: true });
+      }
+      const emailData = {
+        to: userData.email,
+        from: from_address,
+        subject: subject,
+        html: processedContent,
+        verificationToken: newToken,
+        timestamp: new Date().toISOString()
+      };
+      fs.writeFileSync(
+        path.join(testEmailDir, `${userData.email}.json`),
+        JSON.stringify(emailData, null, 2)
+      );
+      console.log(`[TEST MODE] Email written to backend/test-emails/${userData.email}.json`);
+    } else {
+      sendMail(userData.email, from_address, subject, processedContent);
+    }
   }
 
   client.release();

@@ -1,0 +1,6 @@
+{
+  "watch": ["."],
+  "ext": "js,json",
+  "ignore": ["test-emails/*", "test-emails/**", "node_modules/*"],
+  "legacyWatch": true
+}
