@@ -149,8 +149,8 @@
           <div v-for="suite in suites" :key="suite.id" class="suite">
             <div class="suite-header" @click="toggleSuite(suite.id)">
               <span class="status-indicator" :class="suite.status"></span>
+              <span class="category-badge" v-if="suite.category">{{ suite.category }}</span>
               <span class="suite-name">{{ suite.name }}</span>
-              <span class="suite-file" v-if="suite.file_path">{{ suite.file_path }}</span>
               <span class="suite-stats">
                 {{ suite.passed_tests }}/{{ suite.total_tests }} passed
               </span>
@@ -659,6 +659,16 @@ td.failed {
 
 .status-indicator.skipped {
   background: #6c757d;
+}
+
+.category-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.8em;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: #17a2b8;
+  color: white;
 }
 
 .suite-name {

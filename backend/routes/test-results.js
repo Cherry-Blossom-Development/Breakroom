@@ -278,10 +278,10 @@ router.post('/runs/bulk', apiKeyAuth, async (req, res) => {
       const suiteStatus = suiteFailed > 0 ? 'failed' : 'passed';
 
       await client.query(
-        `INSERT INTO test_suites (test_run_id, name, file_path, started_at, ended_at, duration_ms,
+        `INSERT INTO test_suites (test_run_id, name, file_path, category, started_at, ended_at, duration_ms,
            total_tests, passed_tests, failed_tests, skipped_tests, status)
-         VALUES ($1, $2, $3, NOW(), NOW(), $4, $5, $6, $7, $8, $9)`,
-        [runId, suite.name, suite.file_path || null, suite.duration_ms || null,
+         VALUES ($1, $2, $3, $4, NOW(), NOW(), $5, $6, $7, $8, $9, $10)`,
+        [runId, suite.name, suite.file_path || null, suite.category || null, suite.duration_ms || null,
          suite.tests?.length || 0, suitePassed, suiteFailed, suiteSkipped, suiteStatus]
       );
 

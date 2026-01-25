@@ -24,6 +24,7 @@ CREATE TABLE test_suites (
   test_run_id INT NOT NULL,
   name VARCHAR(255) NOT NULL,
   file_path VARCHAR(512),
+  category VARCHAR(64),
   started_at TIMESTAMP NULL,
   ended_at TIMESTAMP NULL,
   duration_ms INT,
@@ -54,5 +55,6 @@ CREATE INDEX idx_test_runs_platform ON test_runs(platform);
 CREATE INDEX idx_test_runs_status ON test_runs(status);
 CREATE INDEX idx_test_runs_created_at ON test_runs(created_at);
 CREATE INDEX idx_test_suites_run_id ON test_suites(test_run_id);
+CREATE INDEX idx_test_suites_category ON test_suites(category);
 CREATE INDEX idx_test_cases_suite_id ON test_cases(test_suite_id);
 CREATE INDEX idx_test_cases_status ON test_cases(status);
