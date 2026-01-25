@@ -358,8 +358,30 @@ router.get('/runs', authenticate, async (req, res) => {
       params
     );
 
+    // Get categories for each run
+    const runIds = result.rows.map(r => r.id);
+    let categoriesMap = {};
+    if (runIds.length > 0) {
+      const catResult = await client.query(
+        `SELECT test_run_id, GROUP_CONCAT(DISTINCT category ORDER BY category SEPARATOR ',') as categories
+         FROM test_suites
+         WHERE test_run_id IN (${runIds.map((_, i) => `$${i + 1}`).join(',')}) AND category IS NOT NULL
+         GROUP BY test_run_id`,
+        runIds
+      );
+      catResult.rows.forEach(row => {
+        categoriesMap[row.test_run_id] = row.categories ? row.categories.split(',') : [];
+      });
+    }
+
+    // Attach categories to runs
+    const runsWithCategories = result.rows.map(run => ({
+      ...run,
+      categories: categoriesMap[run.id] || []
+    }));
+
     res.json({
-      runs: result.rows,
+      runs: runsWithCategories,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),

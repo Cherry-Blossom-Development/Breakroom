@@ -30,7 +30,7 @@
         <tr>
           <th>ID</th>
           <th>Platform</th>
-          <th>Environment</th>
+          <th>Categories</th>
           <th>Status</th>
           <th>Tests</th>
           <th>Passed</th>
@@ -47,7 +47,12 @@
               {{ run.platform }}
             </span>
           </td>
-          <td>{{ run.environment }}</td>
+          <td>
+            <span v-for="cat in run.categories" :key="cat" class="category-badge table-badge">
+              {{ cat }}
+            </span>
+            <span v-if="!run.categories || run.categories.length === 0" class="no-categories">-</span>
+          </td>
           <td>
             <span class="status-badge" :class="run.status">
               {{ run.status }}
@@ -669,6 +674,16 @@ td.failed {
   text-transform: uppercase;
   background: #17a2b8;
   color: white;
+}
+
+.category-badge.table-badge {
+  margin-right: 4px;
+  margin-bottom: 2px;
+  display: inline-block;
+}
+
+.no-categories {
+  color: var(--color-text-muted, #6c757d);
 }
 
 .suite-name {
