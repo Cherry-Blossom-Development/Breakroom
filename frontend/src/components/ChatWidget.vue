@@ -18,6 +18,8 @@ const error = ref(null)
 const messagesContainer = ref(null)
 const imageInput = ref(null)
 const uploadingImage = ref(false)
+const videoInput = ref(null)
+const uploadingVideo = ref(false)
 
 // Socket reference
 let socket = null
@@ -147,6 +149,12 @@ const getImageUrl = (imagePath) => {
   return `/api/uploads/${imagePath}`
 }
 
+// Get video URL
+const getVideoUrl = (videoPath) => {
+  if (!videoPath) return null
+  return `/api/uploads/${videoPath}`
+}
+
 // Trigger image file input
 const triggerImageUpload = () => {
   imageInput.value?.click()
@@ -189,6 +197,52 @@ const onImageSelected = async (event) => {
     error.value = err.message
   } finally {
     uploadingImage.value = false
+    event.target.value = ''
+  }
+}
+
+// Trigger video file input
+const triggerVideoUpload = () => {
+  videoInput.value?.click()
+}
+
+// Handle video selection and upload
+const onVideoSelected = async (event) => {
+  const file = event.target.files[0]
+  if (!file) return
+
+  uploadingVideo.value = true
+  error.value = null
+
+  const formData = new FormData()
+  formData.append('video', file)
+
+  try {
+    const res = await fetch(`/api/chat/rooms/${props.roomId}/video`, {
+      method: 'POST',
+      credentials: 'include',
+      body: formData
+    })
+
+    if (!res.ok) {
+      const data = await res.json()
+      throw new Error(data.message || 'Failed to upload video')
+    }
+
+    const data = await res.json()
+    // Add message locally if socket not connected
+    if (!socket || !socket.connected) {
+      const exists = messages.value.some(m => m.id === data.message.id)
+      if (!exists) {
+        messages.value.push(data.message)
+        scrollToBottom()
+      }
+    }
+  } catch (err) {
+    console.error('ChatWidget: Error uploading video:', err)
+    error.value = err.message
+  } finally {
+    uploadingVideo.value = false
     event.target.value = ''
   }
 }
@@ -297,6 +351,11 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
               <img :src="getImageUrl(msg.image_path)" alt="Shared image" />
             </a>
           </div>
+          <div v-if="msg.video_path" class="message-video">
+            <video controls :src="getVideoUrl(msg.video_path)">
+              Your browser does not support video playback.
+            </video>
+          </div>
           <div v-if="msg.message" class="message-content">{{ msg.message }}</div>
         </div>
       </div>
@@ -313,6 +372,13 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
           class="hidden-input"
           @change="onImageSelected"
         />
+        <input
+          ref="videoInput"
+          type="file"
+          accept="video/*"
+          class="hidden-input"
+          @change="onVideoSelected"
+        />
         <button
           type="button"
           class="image-btn"
@@ -321,6 +387,15 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
           title="Upload image"
         >
           {{ uploadingImage ? '...' : 'Img' }}
+        </button>
+        <button
+          type="button"
+          class="image-btn"
+          @click="triggerVideoUpload"
+          :disabled="uploadingVideo"
+          title="Upload video"
+        >
+          {{ uploadingVideo ? '...' : 'Vid' }}
         </button>
         <input
           v-model="newMessage"
@@ -423,6 +498,16 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
 
 .message-image a {
   display: block;
+}
+
+.message-video {
+  margin: 6px 0;
+}
+
+.message-video video {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 4px;
 }
 
 .hidden-input {

@@ -29,6 +29,22 @@ const upload = multer({
   }
 });
 
+// Configure multer for video uploads
+const videoUpload = multer({
+  storage,
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit for videos
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = /mp4|webm|mov|avi|mkv/;
+    const ext = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mime = /video/.test(file.mimetype);
+    if (ext && mime) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only video files are allowed'));
+    }
+  }
+});
+
 const SECRET_KEY = process.env.SECRET_KEY;
 
 // Middleware to verify JWT and get user info
@@ -102,7 +118,7 @@ router.get('/rooms/:roomId/messages', authenticateToken, async (req, res) => {
       // Get messages before a specific message ID (for loading older messages)
       query = `
         SELECT
-          m.id, m.message, m.image_path, m.created_at,
+          m.id, m.message, m.image_path, m.video_path, m.created_at,
           u.id as user_id, u.handle
         FROM chat_messages m
         JOIN users u ON m.user_id = u.id
@@ -115,7 +131,7 @@ router.get('/rooms/:roomId/messages', authenticateToken, async (req, res) => {
       // Get most recent messages
       query = `
         SELECT
-          m.id, m.message, m.image_path, m.created_at,
+          m.id, m.message, m.image_path, m.video_path, m.created_at,
           u.id as user_id, u.handle
         FROM chat_messages m
         JOIN users u ON m.user_id = u.id
@@ -170,7 +186,7 @@ router.post('/rooms/:roomId/messages', authenticateToken, async (req, res) => {
     // Get the inserted message with user info
     const newMessage = await client.query(
       `SELECT
-        m.id, m.message, m.image_path, m.created_at,
+        m.id, m.message, m.image_path, m.video_path, m.created_at,
         u.id as user_id, u.handle
       FROM chat_messages m
       JOIN users u ON m.user_id = u.id
@@ -226,7 +242,7 @@ router.post('/rooms/:roomId/image', authenticateToken, upload.single('image'), a
     // Get the inserted message with user info
     const newMessage = await client.query(
       `SELECT
-        m.id, m.message, m.image_path, m.created_at,
+        m.id, m.message, m.image_path, m.video_path, m.created_at,
         u.id as user_id, u.handle
       FROM chat_messages m
       JOIN users u ON m.user_id = u.id
@@ -251,6 +267,73 @@ router.post('/rooms/:roomId/image', authenticateToken, upload.single('image'), a
   } catch (err) {
     console.error('Error uploading image:', err);
     res.status(500).json({ message: 'Failed to upload image' });
+  } finally {
+    client.release();
+  }
+});
+
+// Upload a video to a room
+router.post('/rooms/:roomId/video', authenticateToken, videoUpload.single('video'), async (req, res) => {
+  const { roomId } = req.params;
+  const { message } = req.body; // Optional text message with the video
+
+  if (!req.file) {
+    return res.status(400).json({ message: 'No video uploaded' });
+  }
+
+  const client = await getClient();
+  try {
+    // Verify room exists
+    const room = await client.query('SELECT id FROM chat_rooms WHERE id = $1 AND is_active = true', [roomId]);
+    if (room.rowCount === 0) {
+      return res.status(404).json({ message: 'Chat room not found' });
+    }
+
+    // Generate S3 key
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    const s3Key = `chat/video_${req.user.id}_${Date.now()}${ext}`;
+
+    // Upload to S3
+    const uploadResult = await uploadToS3(req.file.buffer, s3Key, req.file.mimetype);
+
+    if (!uploadResult.success) {
+      return res.status(500).json({ message: 'Failed to upload video: ' + uploadResult.error });
+    }
+
+    // Insert message with S3 key as video_path
+    const result = await client.query(
+      'INSERT INTO chat_messages (room_id, user_id, message, video_path) VALUES ($1, $2, $3, $4)',
+      [roomId, req.user.id, message?.trim() || null, s3Key]
+    );
+
+    // Get the inserted message with user info
+    const newMessage = await client.query(
+      `SELECT
+        m.id, m.message, m.image_path, m.video_path, m.created_at,
+        u.id as user_id, u.handle
+      FROM chat_messages m
+      JOIN users u ON m.user_id = u.id
+      WHERE m.id = $1`,
+      [result.insertId]
+    );
+
+    const messageData = newMessage.rows[0];
+
+    // Broadcast message to everyone in the room via socket
+    const io = getIO();
+    if (io) {
+      io.to(`room_${roomId}`).emit('new_message', {
+        roomId: parseInt(roomId),
+        message: messageData
+      });
+    }
+
+    res.status(201).json({
+      message: messageData
+    });
+  } catch (err) {
+    console.error('Error uploading video:', err);
+    res.status(500).json({ message: 'Failed to upload video' });
   } finally {
     client.release();
   }

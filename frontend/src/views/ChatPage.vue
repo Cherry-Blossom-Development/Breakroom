@@ -9,6 +9,8 @@ const messagesContainer = ref(null)
 const typingTimeout = ref(null)
 const imageInput = ref(null)
 const uploadingImage = ref(false)
+const videoInput = ref(null)
+const uploadingVideo = ref(false)
 
 // Get current room info
 const currentRoom = computed(() => {
@@ -101,6 +103,12 @@ const getImageUrl = (imagePath) => {
   return `/api/uploads/${imagePath}`
 }
 
+// Get video URL
+const getVideoUrl = (videoPath) => {
+  if (!videoPath) return null
+  return `/api/uploads/${videoPath}`
+}
+
 // Trigger image file input
 const triggerImageUpload = () => {
   imageInput.value?.click()
@@ -139,6 +147,48 @@ const onImageSelected = async (event) => {
     chat.error = err.message
   } finally {
     uploadingImage.value = false
+    event.target.value = ''
+  }
+}
+
+// Trigger video file input
+const triggerVideoUpload = () => {
+  videoInput.value?.click()
+}
+
+// Handle video selection and upload
+const onVideoSelected = async (event) => {
+  const file = event.target.files[0]
+  if (!file) return
+
+  if (!chat.currentRoom) {
+    chat.error = 'Please join a room first'
+    return
+  }
+
+  uploadingVideo.value = true
+
+  const formData = new FormData()
+  formData.append('video', file)
+
+  try {
+    const res = await fetch(`/api/chat/rooms/${chat.currentRoom}/video`, {
+      method: 'POST',
+      credentials: 'include',
+      body: formData
+    })
+
+    if (!res.ok) {
+      const data = await res.json()
+      throw new Error(data.message || 'Failed to upload video')
+    }
+
+    // Message will be received via socket
+  } catch (err) {
+    console.error('Error uploading video:', err)
+    chat.error = err.message
+  } finally {
+    uploadingVideo.value = false
     event.target.value = ''
   }
 }
@@ -202,6 +252,11 @@ onUnmounted(() => {
               <img :src="getImageUrl(msg.image_path)" alt="Shared image" />
             </a>
           </div>
+          <div v-if="msg.video_path" class="message-video">
+            <video controls :src="getVideoUrl(msg.video_path)">
+              Your browser does not support video playback.
+            </video>
+          </div>
           <div v-if="msg.message" class="message-content">{{ msg.message }}</div>
         </div>
       </div>
@@ -218,6 +273,13 @@ onUnmounted(() => {
           class="hidden-input"
           @change="onImageSelected"
         />
+        <input
+          ref="videoInput"
+          type="file"
+          accept="video/*"
+          class="hidden-input"
+          @change="onVideoSelected"
+        />
         <button
           type="button"
           class="image-btn"
@@ -226,6 +288,15 @@ onUnmounted(() => {
           title="Upload image"
         >
           {{ uploadingImage ? '...' : 'Img' }}
+        </button>
+        <button
+          type="button"
+          class="image-btn"
+          @click="triggerVideoUpload"
+          :disabled="!chat.connected || uploadingVideo"
+          title="Upload video"
+        >
+          {{ uploadingVideo ? '...' : 'Vid' }}
         </button>
         <input
           v-model="messageInput"
@@ -370,6 +441,16 @@ onUnmounted(() => {
 
 .message-image a {
   display: block;
+}
+
+.message-video {
+  margin: 6px 0;
+}
+
+.message-video video {
+  max-width: 100%;
+  max-height: 300px;
+  border-radius: 8px;
 }
 
 .typing-indicator {
