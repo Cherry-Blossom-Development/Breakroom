@@ -166,6 +166,12 @@ const router = createRouter({
       name: 'toolShed',
       component: () => import('../views/ToolShedPage.vue'),
       meta: { requiresAuth: true },
+    },
+    {
+      path: '/lyrics',
+      name: 'lyrics',
+      component: () => import('../views/LyricsPage.vue'),
+      meta: { requiresAuth: true },
     }
   ],
 })
