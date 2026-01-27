@@ -130,7 +130,10 @@ onUnmounted(() => {
     <header class="breakroom-header page-container">
       <h1>Breakroom</h1>
       <div class="header-right">
-        <div v-if="shortcuts.length > 0" class="shortcuts-list">
+        <div class="shortcuts-list">
+          <RouterLink to="/tool-shed" class="shortcut-link">
+            Tool Shed
+          </RouterLink>
           <RouterLink
             v-for="shortcut in shortcuts"
             :key="shortcut.id"

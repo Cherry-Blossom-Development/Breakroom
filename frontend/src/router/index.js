@@ -160,6 +160,12 @@ const router = createRouter({
       name: 'projectDetail',
       component: () => import('../views/ProjectPage.vue'),
       meta: { requiresAuth: true },
+    },
+    {
+      path: '/tool-shed',
+      name: 'toolShed',
+      component: () => import('../views/ToolShedPage.vue'),
+      meta: { requiresAuth: true },
     }
   ],
 })
