@@ -26,11 +26,19 @@ const getClient = async () => {
       async query(sql, params = []) {
         // Convert PostgreSQL-style $1, $2 placeholders to MySQL ? placeholders
         // Also convert PostgreSQL double-quoted identifiers to MySQL backticks
+        // We need to reorder params to match the order placeholders appear in the SQL
+        const placeholderOrder = [];
         const convertedSql = sql
-          .replace(/\$(\d+)/g, '?')
+          .replace(/\$(\d+)/g, (match, num) => {
+            placeholderOrder.push(parseInt(num, 10) - 1); // $1 -> index 0, $2 -> index 1
+            return '?';
+          })
           .replace(/"(\w+)"/g, '`$1`');
 
-        const [rows, fields] = await connection.execute(convertedSql, params);
+        // Reorder params to match the order placeholders appeared in the query
+        const reorderedParams = placeholderOrder.map(index => params[index]);
+
+        const [rows, fields] = await connection.execute(convertedSql, reorderedParams);
 
         // Return an object that mimics pg's result format
         return {
