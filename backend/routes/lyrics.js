@@ -97,9 +97,9 @@ router.get('/songs', authenticate, async (req, res) => {
        FROM songs s
        JOIN users u ON s.user_id = u.id
        JOIN song_collaborators sc ON sc.song_id = s.id
-       WHERE sc.user_id = $1
+       WHERE sc.user_id = $2
        ORDER BY updated_at DESC`,
-      [req.user.id]
+      [req.user.id, req.user.id]
     );
 
     res.json({ songs: result.rows });
