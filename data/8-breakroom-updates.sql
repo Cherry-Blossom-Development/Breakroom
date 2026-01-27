@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS breakroom_updates (
 
 -- Seed with initial updates based on recent development
 INSERT INTO breakroom_updates (commit_hash, summary, created_at) VALUES
+(NULL, 'Introducing the Tool Shed! A new hub for productivity tools. First up: Lyric Lab - a tool for musicians to capture lyric ideas, organize them into songs, and collaborate with other songwriters.', '2025-01-27 12:00:00'),
 (NULL, 'Added Widget blocks to the Breakroom! You can now add Placeholder, Breakroom Updates, Calendar/Time, and Weather widgets to your dashboard layout.', '2024-12-30 12:00:00'),
 (NULL, 'Email verification page redesigned with a modern look featuring loading spinners, success/error states with gradient icons, and styled action buttons.', '2024-12-30 10:00:00'),
 (NULL, 'Professional email templates now live! Signup verification emails feature branded styling with gradient headers, value propositions, and call-to-action buttons.', '2024-12-30 08:00:00'),
