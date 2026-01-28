@@ -40,6 +40,8 @@ export default {
         await axios.post(`${import.meta.env.VITE_API_BASE_URL || ''}/api/auth/login`, {
           handle: this.handle,
           password: this.password
+        }, {
+          withCredentials: true
         })
 
         await user.fetchUser() // Fetch the username after login

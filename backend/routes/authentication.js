@@ -92,6 +92,10 @@ router.post('/signup', async (req, res) => {
     res.cookie('jwtToken', token, {
       maxAge: 28800000, // 8 hours
       domain: process.env.NODE_ENV === 'production' ? '.prosaurus.com' : undefined,
+      path: '/',
+      httpOnly: false,
+      secure: process.env.CORS_ORIGIN?.startsWith('https') || process.env.NODE_ENV === 'production',
+      sameSite: 'lax'
     });
 
     // Fetch email template from database
@@ -285,6 +289,10 @@ router.post('/login', async (req, res) => {
         res.cookie('jwtToken', token, {
           maxAge: 28800000, // 8 hours
           domain: process.env.NODE_ENV === 'production' ? '.prosaurus.com' : undefined,
+          path: '/',
+          httpOnly: false,
+          secure: process.env.CORS_ORIGIN?.startsWith('https') || process.env.NODE_ENV === 'production',
+          sameSite: 'lax'
         });
         res.json({ message: 'Logged in successfully', token: token });
       } else {
@@ -390,7 +398,11 @@ router.get('/can/:permission', async (req, res) => {
 
 router.post('/logout', (req, res) => {
   res.clearCookie('jwtToken', {
-    domain: process.env.NODE_ENV === 'production' ? '.prosaurus.com' : undefined
+    domain: process.env.NODE_ENV === 'production' ? '.prosaurus.com' : undefined,
+    path: '/',
+    httpOnly: false,
+    secure: process.env.CORS_ORIGIN?.startsWith('https') || process.env.NODE_ENV === 'production',
+    sameSite: 'lax'
   });
 
   res.json({ message: 'Logged out successfully' });

@@ -36,14 +36,30 @@ const categories = ref([
     name: 'Writer Tools',
     description: 'Utilities for writers, bloggers, and content creators',
     icon: 'pen',
-    tools: [] // Coming soon
+    tools: [
+      {
+        id: 'blog',
+        name: 'Blog',
+        description: 'Create and publish blog posts to share your thoughts with the world.',
+        route: '/blog',
+        shortcutName: 'Blog'
+      }
+    ]
   },
   {
     id: 'developer',
     name: 'Developer Tools',
     description: 'Productivity tools for programmers and developers',
     icon: 'code',
-    tools: [] // Coming soon
+    tools: [
+      {
+        id: 'kanban',
+        name: 'Kanban',
+        description: 'Organize your projects with a visual kanban board for tracking tasks and progress.',
+        route: '/kanban',
+        shortcutName: 'Kanban'
+      }
+    ]
   }
 ])
 

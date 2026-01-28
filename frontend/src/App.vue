@@ -11,6 +11,22 @@ import { io } from 'socket.io-client'
 const router = useRouter()
 const route = useRoute()
 const showMenu = ref(false)
+const userMenuRef = ref(null)
+
+// Close menu when clicking outside
+function handleClickOutside(event) {
+  if (userMenuRef.value && !userMenuRef.value.contains(event.target)) {
+    showMenu.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', handleClickOutside)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
+})
 const isAdmin = ref(false)
 
 async function checkAdminPermission() {
@@ -129,7 +145,7 @@ setInterval(() => {
           <RouterLink to="/chat">Chat</RouterLink>
           <RouterLink to="/friends">Friends</RouterLink>
           <RouterLink v-if="isAdmin" to="/admin">Admin</RouterLink>
-          <div class="user-menu">
+          <div class="user-menu" ref="userMenuRef">
             <div @click="toggleMenu">
               <span class="username-text">{{ user.username }}</span>
               <svg class="user-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
@@ -141,7 +157,7 @@ setInterval(() => {
               class="dropdown"
               @click.stop
             >
-              <RouterLink to="/profile">Profile</RouterLink>
+              <RouterLink to="/profile" @click="showMenu = false">Profile</RouterLink>
               <a href="#" @click.prevent="logout">Logout</a>
             </div>
           </div>

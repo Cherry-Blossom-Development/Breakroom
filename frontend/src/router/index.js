@@ -172,6 +172,12 @@ const router = createRouter({
       name: 'lyrics',
       component: () => import('../views/LyricsPage.vue'),
       meta: { requiresAuth: true },
+    },
+    {
+      path: '/kanban',
+      name: 'kanban',
+      component: () => import('../views/KanbanPage.vue'),
+      meta: { requiresAuth: true },
     }
   ],
 })

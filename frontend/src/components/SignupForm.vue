@@ -130,6 +130,8 @@ export default {
             email: this.email,
             hash: hash,
             salt: salt
+          }, {
+            withCredentials: true
           });
 
           // Fetch user to update nav with logged-in state
