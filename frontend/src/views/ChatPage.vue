@@ -11,6 +11,15 @@ const imageInput = ref(null)
 const uploadingImage = ref(false)
 const videoInput = ref(null)
 const uploadingVideo = ref(false)
+const showAttachMenu = ref(false)
+
+const toggleAttachMenu = () => {
+  showAttachMenu.value = !showAttachMenu.value
+}
+
+const closeAttachMenu = () => {
+  showAttachMenu.value = false
+}
 
 // Mobile view state
 const isMobile = ref(false)
@@ -42,26 +51,34 @@ const currentRoomDescription = computed(() => {
 })
 
 // Auto-scroll to bottom when new messages arrive
-const scrollToBottom = (immediate = false) => {
+const scrollToBottom = () => {
   const doScroll = () => {
     if (messagesContainer.value) {
       messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
     }
   }
 
-  if (immediate) {
-    doScroll()
-  } else {
-    // Use nextTick + small delay to ensure DOM is fully updated
-    nextTick(() => {
-      setTimeout(doScroll, 50)
-    })
-  }
+  // Use nextTick + delay to ensure DOM is fully updated
+  nextTick(() => {
+    setTimeout(doScroll, 100)
+  })
 }
 
-// Watch for new messages
+// Watch for new messages (length change = new message added)
 watch(() => chat.messages.length, () => {
   scrollToBottom()
+}, { flush: 'post' })
+
+// Watch for messages array replacement (happens when joining/switching rooms)
+watch(() => chat.messages, () => {
+  scrollToBottom()
+}, { flush: 'post' })
+
+// Watch for mobile chat becoming visible - need to scroll after it's shown
+watch(showMobileChat, (isVisible) => {
+  if (isVisible) {
+    scrollToBottom()
+  }
 })
 
 // Handle sending a message
@@ -296,51 +313,69 @@ onUnmounted(() => {
         {{ chat.typingUsers.join(', ') }} {{ chat.typingUsers.length === 1 ? 'is' : 'are' }} typing...
       </div>
 
-      <div class="message-input-container">
-        <input
-          ref="imageInput"
-          type="file"
-          accept="image/*"
-          class="hidden-input"
-          @change="onImageSelected"
-        />
-        <input
-          ref="videoInput"
-          type="file"
-          accept="video/*"
-          class="hidden-input"
-          @change="onVideoSelected"
-        />
-        <button
-          type="button"
-          class="image-btn"
-          @click="triggerImageUpload"
-          :disabled="!chat.connected || uploadingImage"
-          title="Upload image"
-        >
-          {{ uploadingImage ? '...' : 'Img' }}
-        </button>
-        <button
-          type="button"
-          class="image-btn"
-          @click="triggerVideoUpload"
-          :disabled="!chat.connected || uploadingVideo"
-          title="Upload video"
-        >
-          {{ uploadingVideo ? '...' : 'Vid' }}
-        </button>
-        <input
-          v-model="messageInput"
-          @keyup.enter="sendMessage"
-          @input="handleTyping"
-          type="text"
-          placeholder="Type a message..."
-          maxlength="1000"
-          :disabled="!chat.connected"
-        />
-        <button @click="sendMessage" :disabled="!chat.connected || !messageInput.trim()">
-          Send
-        </button>
+      <div class="message-input-wrapper">
+        <!-- Attachment menu popup -->
+        <div v-if="showAttachMenu" class="attach-menu">
+          <button
+            type="button"
+            class="attach-option"
+            @click="triggerImageUpload(); closeAttachMenu()"
+            :disabled="!chat.connected || uploadingImage"
+          >
+            <span class="attach-icon">🖼️</span>
+            <span>Image</span>
+          </button>
+          <button
+            type="button"
+            class="attach-option"
+            @click="triggerVideoUpload(); closeAttachMenu()"
+            :disabled="!chat.connected || uploadingVideo"
+          >
+            <span class="attach-icon">🎬</span>
+            <span>Video</span>
+          </button>
+        </div>
+
+        <div class="message-input-container">
+          <input
+            ref="imageInput"
+            type="file"
+            accept="image/*"
+            class="hidden-input"
+            @change="onImageSelected"
+          />
+          <input
+            ref="videoInput"
+            type="file"
+            accept="video/*"
+            class="hidden-input"
+            @change="onVideoSelected"
+          />
+          <button
+            type="button"
+            class="attach-btn"
+            @click="toggleAttachMenu"
+            :disabled="!chat.connected"
+            :class="{ active: showAttachMenu }"
+            title="Add attachment"
+          >
+            <span v-if="uploadingImage || uploadingVideo" class="uploading">...</span>
+            <span v-else class="plus-icon">+</span>
+          </button>
+          <input
+            v-model="messageInput"
+            @keyup.enter="sendMessage"
+            @input="handleTyping"
+            @focus="closeAttachMenu"
+            type="text"
+            placeholder="Type a message..."
+            maxlength="1000"
+            :disabled="!chat.connected"
+          />
+          <button class="send-btn" @click="sendMessage" :disabled="!chat.connected || !messageInput.trim()">
+            Send
+          </button>
+        </div>
       </div>
 
       <div v-if="chat.error" class="error-message">
@@ -491,16 +526,22 @@ onUnmounted(() => {
   font-style: italic;
 }
 
-.message-input-container {
-  display: flex;
-  padding: 15px;
+.message-input-wrapper {
+  position: relative;
   border-top: 1px solid var(--color-border);
-  gap: 10px;
 }
 
-.message-input-container input {
+.message-input-container {
+  display: flex;
+  padding: 12px;
+  gap: 8px;
+  align-items: center;
+}
+
+.message-input-container input[type="text"] {
   flex: 1;
-  padding: 12px 15px;
+  min-width: 0;
+  padding: 10px 15px;
   border: 1px solid var(--color-border);
   border-radius: 25px;
   font-size: 1em;
@@ -509,55 +550,121 @@ onUnmounted(() => {
   color: var(--color-text);
 }
 
-.message-input-container input:focus {
+.message-input-container input[type="text"]:focus {
   border-color: var(--color-accent);
 }
 
-.message-input-container input:disabled {
+.message-input-container input[type="text"]:disabled {
   background: var(--color-background-soft);
-}
-
-.message-input-container button {
-  padding: 12px 25px;
-  background: var(--color-accent);
-  color: white;
-  border: none;
-  border-radius: 25px;
-  cursor: pointer;
-  font-size: 1em;
-}
-
-.message-input-container button:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-}
-
-.message-input-container button:disabled {
-  background: var(--color-button-disabled);
-  cursor: not-allowed;
 }
 
 .hidden-input {
   display: none;
 }
 
-.image-btn {
-  padding: 12px 15px;
+.attach-btn {
+  width: 42px;
+  height: 42px;
+  padding: 0;
   background: var(--color-button-secondary);
   color: var(--color-text);
   border: none;
-  border-radius: 25px;
+  border-radius: 50%;
   cursor: pointer;
-  font-size: 0.9em;
-  font-weight: 500;
+  font-size: 1.5em;
+  font-weight: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: transform 0.2s ease, background-color 0.2s ease;
 }
 
-.image-btn:hover:not(:disabled) {
+.attach-btn:hover:not(:disabled) {
   background: var(--color-button-secondary-hover);
 }
 
-.image-btn:disabled {
+.attach-btn.active {
+  background: var(--color-accent);
+  color: white;
+  transform: rotate(45deg);
+}
+
+.attach-btn:disabled {
   background: var(--color-button-disabled);
   cursor: not-allowed;
+}
+
+.attach-btn .plus-icon {
+  line-height: 1;
+}
+
+.attach-btn .uploading {
+  font-size: 0.8em;
+}
+
+.send-btn {
+  padding: 10px 20px;
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  border-radius: 25px;
+  cursor: pointer;
+  font-size: 0.95em;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.send-btn:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.send-btn:disabled {
+  background: var(--color-button-disabled);
+  cursor: not-allowed;
+}
+
+.attach-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 12px;
+  background: var(--color-background-card);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  padding: 8px;
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  z-index: 10;
+}
+
+.attach-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 20px;
+  background: var(--color-background-soft);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--color-text);
+  font-size: 0.85em;
+  transition: background-color 0.15s ease;
+}
+
+.attach-option:hover:not(:disabled) {
+  background: var(--color-background-hover);
+}
+
+.attach-option:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.attach-icon {
+  font-size: 1.5em;
 }
 
 .error-message {
@@ -626,20 +733,32 @@ onUnmounted(() => {
   }
 
   .message-input-container {
-    padding: 10px;
+    padding: 8px;
     gap: 6px;
   }
 
-  .message-input-container input {
-    padding: 10px 12px;
+  .message-input-container input[type="text"] {
+    padding: 8px 12px;
+    font-size: 0.95em;
   }
 
-  .message-input-container button {
-    padding: 10px 15px;
+  .attach-btn {
+    width: 38px;
+    height: 38px;
+    font-size: 1.3em;
   }
 
-  .image-btn {
-    padding: 10px 12px;
+  .send-btn {
+    padding: 8px 14px;
+    font-size: 0.9em;
+  }
+
+  .attach-menu {
+    left: 8px;
+  }
+
+  .attach-option {
+    padding: 10px 16px;
   }
 
   .message {

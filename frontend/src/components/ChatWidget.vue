@@ -20,6 +20,15 @@ const imageInput = ref(null)
 const uploadingImage = ref(false)
 const videoInput = ref(null)
 const uploadingVideo = ref(false)
+const showAttachMenu = ref(false)
+
+const toggleAttachMenu = () => {
+  showAttachMenu.value = !showAttachMenu.value
+}
+
+const closeAttachMenu = () => {
+  showAttachMenu.value = false
+}
 
 // Socket reference
 let socket = null
@@ -364,50 +373,67 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
         {{ typingUsers.join(', ') }} {{ typingUsers.length === 1 ? 'is' : 'are' }} typing...
       </div>
 
-      <form class="input-area" @submit.prevent="sendMessage">
-        <input
-          ref="imageInput"
-          type="file"
-          accept="image/*"
-          class="hidden-input"
-          @change="onImageSelected"
-        />
-        <input
-          ref="videoInput"
-          type="file"
-          accept="video/*"
-          class="hidden-input"
-          @change="onVideoSelected"
-        />
-        <button
-          type="button"
-          class="image-btn"
-          @click="triggerImageUpload"
-          :disabled="uploadingImage"
-          title="Upload image"
-        >
-          {{ uploadingImage ? '...' : 'Img' }}
-        </button>
-        <button
-          type="button"
-          class="image-btn"
-          @click="triggerVideoUpload"
-          :disabled="uploadingVideo"
-          title="Upload video"
-        >
-          {{ uploadingVideo ? '...' : 'Vid' }}
-        </button>
-        <input
-          v-model="newMessage"
-          type="text"
-          placeholder="Type a message..."
-          maxlength="2000"
-          @input="onInput"
-        />
-        <button type="submit" :disabled="!newMessage.trim()">
-          Send
-        </button>
-      </form>
+      <div class="input-wrapper">
+        <!-- Attachment menu popup -->
+        <div v-if="showAttachMenu" class="attach-menu">
+          <button
+            type="button"
+            class="attach-option"
+            @click="triggerImageUpload(); closeAttachMenu()"
+            :disabled="uploadingImage"
+          >
+            <span class="attach-icon">🖼️</span>
+            <span>Image</span>
+          </button>
+          <button
+            type="button"
+            class="attach-option"
+            @click="triggerVideoUpload(); closeAttachMenu()"
+            :disabled="uploadingVideo"
+          >
+            <span class="attach-icon">🎬</span>
+            <span>Video</span>
+          </button>
+        </div>
+
+        <form class="input-area" @submit.prevent="sendMessage">
+          <input
+            ref="imageInput"
+            type="file"
+            accept="image/*"
+            class="hidden-input"
+            @change="onImageSelected"
+          />
+          <input
+            ref="videoInput"
+            type="file"
+            accept="video/*"
+            class="hidden-input"
+            @change="onVideoSelected"
+          />
+          <button
+            type="button"
+            class="attach-btn"
+            @click="toggleAttachMenu"
+            :class="{ active: showAttachMenu }"
+            title="Add attachment"
+          >
+            <span v-if="uploadingImage || uploadingVideo" class="uploading">...</span>
+            <span v-else class="plus-icon">+</span>
+          </button>
+          <input
+            v-model="newMessage"
+            type="text"
+            placeholder="Type a message..."
+            maxlength="2000"
+            @input="onInput"
+            @focus="closeAttachMenu"
+          />
+          <button type="submit" class="send-btn" :disabled="!newMessage.trim()">
+            Send
+          </button>
+        </form>
+      </div>
     </template>
   </div>
 </template>
@@ -522,16 +548,22 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   background: var(--color-background-hover);
 }
 
-.input-area {
-  display: flex;
-  gap: 6px;
-  padding: 8px;
+.input-wrapper {
+  position: relative;
   background: var(--color-background-card);
   border-top: 1px solid var(--color-border);
 }
 
-.input-area input {
+.input-area {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  align-items: center;
+}
+
+.input-area input[type="text"] {
   flex: 1;
+  min-width: 0;
   padding: 8px 10px;
   border: 1px solid var(--color-border);
   border-radius: 4px;
@@ -540,13 +572,54 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   color: var(--color-text);
 }
 
-.input-area input:focus {
+.input-area input[type="text"]:focus {
   outline: none;
   border-color: var(--color-accent);
 }
 
-.input-area button {
-  padding: 8px 14px;
+.attach-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: var(--color-button-secondary);
+  color: var(--color-text);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1.2em;
+  font-weight: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: transform 0.2s ease, background-color 0.2s ease;
+}
+
+.attach-btn:hover:not(:disabled) {
+  background: var(--color-button-secondary-hover);
+}
+
+.attach-btn.active {
+  background: var(--color-accent);
+  color: white;
+  transform: rotate(45deg);
+}
+
+.attach-btn:disabled {
+  background: var(--color-button-disabled);
+  cursor: not-allowed;
+}
+
+.attach-btn .plus-icon {
+  line-height: 1;
+}
+
+.attach-btn .uploading {
+  font-size: 0.7em;
+}
+
+.send-btn {
+  padding: 8px 12px;
   background: var(--color-accent);
   color: white;
   border: none;
@@ -554,34 +627,58 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   cursor: pointer;
   font-size: 0.85rem;
   font-weight: 500;
+  flex-shrink: 0;
 }
 
-.input-area button:hover:not(:disabled) {
+.send-btn:hover:not(:disabled) {
   background: var(--color-accent-hover);
 }
 
-.input-area button:disabled {
+.send-btn:disabled {
   background: var(--color-button-disabled);
   cursor: not-allowed;
 }
 
-.image-btn {
-  padding: 8px 10px;
-  background: var(--color-button-secondary);
-  color: var(--color-text);
+.attach-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 8px;
+  background: var(--color-background-card);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  z-index: 10;
+}
+
+.attach-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 14px;
+  background: var(--color-background-soft);
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 0.8rem;
-  font-weight: 500;
+  color: var(--color-text);
+  font-size: 0.75rem;
+  transition: background-color 0.15s ease;
 }
 
-.image-btn:hover:not(:disabled) {
-  background: var(--color-button-secondary-hover);
+.attach-option:hover:not(:disabled) {
+  background: var(--color-background-hover);
 }
 
-.image-btn:disabled {
-  background: var(--color-button-disabled);
+.attach-option:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
+}
+
+.attach-icon {
+  font-size: 1.2em;
 }
 </style>
