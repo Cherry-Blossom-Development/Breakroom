@@ -397,7 +397,7 @@ router.get('/posts', authenticate, async (req, res) => {
 
   try {
     const result = await client.query(
-      `SELECT id, title, is_published, created_at, updated_at
+      `SELECT id, title, content, is_published, created_at, updated_at
        FROM blog_posts
        WHERE user_id = $1
        ORDER BY updated_at DESC`,

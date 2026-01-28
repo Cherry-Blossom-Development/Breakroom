@@ -391,4 +391,32 @@ function close() {
 .btn-secondary:hover {
   background: var(--color-button-secondary-hover);
 }
+
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+  .modal-body {
+    padding: 15px;
+  }
+
+  .url-input-wrapper {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .url-prefix {
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+    font-size: 0.8rem;
+    padding: 8px 12px;
+  }
+
+  .modal-actions {
+    flex-direction: column;
+  }
+
+  .modal-actions .btn-primary,
+  .modal-actions .btn-secondary {
+    width: 100%;
+  }
+}
 </style>

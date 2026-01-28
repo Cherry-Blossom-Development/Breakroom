@@ -488,4 +488,51 @@ const saveAndPublish = () => savePost(true)
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+  .editor-overlay {
+    padding: 10px;
+  }
+
+  .editor-container {
+    height: calc(100vh - 20px);
+    max-height: none;
+  }
+
+  .editor-header {
+    padding: 10px 15px;
+  }
+
+  .title-input {
+    font-size: 1.1rem;
+  }
+
+  .editor-footer {
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px 15px;
+  }
+
+  .publish-status {
+    width: 100%;
+  }
+
+  .footer-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .footer-actions .btn-secondary {
+    flex: 1;
+    min-width: auto;
+  }
+
+  .footer-actions .btn-draft,
+  .footer-actions .btn-primary {
+    flex: 1;
+    min-width: 0;
+    padding: 10px 12px;
+  }
+}
 </style>

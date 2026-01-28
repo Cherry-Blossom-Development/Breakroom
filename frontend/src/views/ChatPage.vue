@@ -12,6 +12,22 @@ const uploadingImage = ref(false)
 const videoInput = ref(null)
 const uploadingVideo = ref(false)
 
+// Mobile view state
+const isMobile = ref(false)
+const showMobileChat = ref(false)
+
+const checkMobile = () => {
+  isMobile.value = window.innerWidth <= 768
+}
+
+const openMobileChat = () => {
+  showMobileChat.value = true
+}
+
+const closeMobileChat = () => {
+  showMobileChat.value = false
+}
+
 // Get current room info
 const currentRoom = computed(() => {
   return chat.rooms.find(r => r.id === chat.currentRoom)
@@ -194,6 +210,10 @@ const onVideoSelected = async (event) => {
 }
 
 onMounted(async () => {
+  // Check mobile on mount and listen for resize
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
+
   // Connect to socket
   chat.connect()
 
@@ -212,17 +232,28 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener('resize', checkMobile)
   chat.leaveRoom()
   chat.disconnect()
 })
 </script>
 
 <template>
-  <main class="chat-page page-container">
+  <main class="chat-page page-container" :class="{ 'mobile-view': isMobile }">
     <div class="chat-layout">
-      <ChatSidebar />
-      <div class="chat-container">
+      <ChatSidebar
+        :class="{ 'mobile-hidden': isMobile && showMobileChat }"
+        @room-selected="openMobileChat"
+      />
+      <div class="chat-container" :class="{ 'mobile-hidden': isMobile && !showMobileChat }">
         <div class="chat-header">
+          <button
+            v-if="isMobile"
+            class="back-btn"
+            @click="closeMobileChat"
+          >
+            &larr; Rooms
+          </button>
           <div class="room-info">
             <h2># {{ currentRoomName }}</h2>
             <p v-if="currentRoomDescription" class="room-description">{{ currentRoomDescription }}</p>
@@ -545,5 +576,74 @@ onUnmounted(() => {
   color: var(--color-error);
   cursor: pointer;
   text-decoration: underline;
+}
+
+/* Mobile styles */
+.back-btn {
+  background: var(--color-button-secondary);
+  color: var(--color-text);
+  border: none;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9em;
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+
+.back-btn:hover {
+  background: var(--color-button-secondary-hover);
+}
+
+@media (max-width: 768px) {
+  .chat-page {
+    padding: 0 10px;
+    margin: 10px auto;
+  }
+
+  .chat-layout {
+    height: calc(100vh - 80px);
+  }
+
+  .mobile-hidden {
+    display: none !important;
+  }
+
+  .chat-page.mobile-view .chat-sidebar {
+    width: 100%;
+  }
+
+  .chat-page.mobile-view .chat-container {
+    width: 100%;
+  }
+
+  .chat-header {
+    padding: 10px 15px;
+  }
+
+  .chat-header h2 {
+    font-size: 1.1rem;
+  }
+
+  .message-input-container {
+    padding: 10px;
+    gap: 6px;
+  }
+
+  .message-input-container input {
+    padding: 10px 12px;
+  }
+
+  .message-input-container button {
+    padding: 10px 15px;
+  }
+
+  .image-btn {
+    padding: 10px 12px;
+  }
+
+  .message {
+    max-width: 85%;
+  }
 }
 </style>

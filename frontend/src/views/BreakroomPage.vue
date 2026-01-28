@@ -11,6 +11,15 @@ import AddBlockModal from '@/components/AddBlockModal.vue'
 const showAddModal = ref(false)
 const shortcuts = ref([])
 const layoutKey = ref(0)
+const mobileMenuOpen = ref(false)
+
+const toggleMobileMenu = () => {
+  mobileMenuOpen.value = !mobileMenuOpen.value
+}
+
+const closeMobileMenu = () => {
+  mobileMenuOpen.value = false
+}
 
 // Mobile detection
 const isMobile = ref(false)
@@ -129,7 +138,9 @@ onUnmounted(() => {
   <section class="breakroom-page">
     <header class="breakroom-header page-container">
       <h1>Breakroom</h1>
-      <div class="header-right">
+
+      <!-- Desktop: shortcuts and add button -->
+      <div class="header-right desktop-only">
         <div class="shortcuts-list">
           <RouterLink to="/tool-shed" class="shortcut-link">
             Tool Shed
@@ -146,6 +157,31 @@ onUnmounted(() => {
         <button class="add-block-btn" @click="showAddModal = true">
           + Add Block
         </button>
+      </div>
+
+      <!-- Mobile: dropdown menu -->
+      <div class="mobile-menu-container mobile-only">
+        <button class="mobile-menu-toggle" @click="toggleMobileMenu" :class="{ open: mobileMenuOpen }">
+          <span class="hamburger-line"></span>
+          <span class="hamburger-line"></span>
+          <span class="hamburger-line"></span>
+        </button>
+        <div v-if="mobileMenuOpen" class="mobile-dropdown" @click="closeMobileMenu">
+          <button class="mobile-menu-item add-block-item" @click.stop="showAddModal = true; closeMobileMenu()">
+            + Add Block
+          </button>
+          <RouterLink to="/tool-shed" class="mobile-menu-item">
+            Tool Shed
+          </RouterLink>
+          <RouterLink
+            v-for="shortcut in shortcuts"
+            :key="shortcut.id"
+            :to="shortcut.url"
+            class="mobile-menu-item"
+          >
+            {{ shortcut.name }}
+          </RouterLink>
+        </div>
       </div>
     </header>
 
@@ -255,7 +291,7 @@ onUnmounted(() => {
 
 .breakroom-header h1 {
   margin: 0;
-  font-size: 2.8rem;
+  font-size: 1.7rem;
   font-weight: 700;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, var(--color-accent) 100%);
   -webkit-background-clip: text;
@@ -374,6 +410,7 @@ onUnmounted(() => {
 /* Bottom Menu */
 .bottom-menu {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 2rem;
   padding: 1rem 2rem;
@@ -437,5 +474,112 @@ onUnmounted(() => {
   display: flex !important;
   flex: 1 !important;
   overflow-y: auto !important;
+}
+
+/* Mobile menu styles */
+.mobile-only {
+  display: none;
+}
+
+.mobile-menu-container {
+  position: relative;
+}
+
+.mobile-menu-toggle {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 4px;
+  width: 36px;
+  height: 36px;
+  background: var(--color-accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 8px;
+}
+
+.hamburger-line {
+  display: block;
+  width: 18px;
+  height: 2px;
+  background: white;
+  border-radius: 1px;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.mobile-menu-toggle.open .hamburger-line:nth-child(1) {
+  transform: rotate(45deg) translate(4px, 4px);
+}
+
+.mobile-menu-toggle.open .hamburger-line:nth-child(2) {
+  opacity: 0;
+}
+
+.mobile-menu-toggle.open .hamburger-line:nth-child(3) {
+  transform: rotate(-45deg) translate(4px, -4px);
+}
+
+.mobile-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  min-width: 180px;
+  background: var(--color-background-card);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg, 0 10px 25px rgba(0, 0, 0, 0.15));
+  overflow: hidden;
+  z-index: 100;
+}
+
+.mobile-menu-item {
+  display: block;
+  width: 100%;
+  padding: 12px 16px;
+  text-align: left;
+  text-decoration: none;
+  color: var(--color-text);
+  background: none;
+  border: none;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.mobile-menu-item:hover {
+  background: var(--color-background-soft);
+}
+
+.mobile-menu-item.add-block-item {
+  color: var(--color-accent);
+  font-weight: 600;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+/* Responsive breakpoints */
+@media (max-width: 768px) {
+  .desktop-only {
+    display: none;
+  }
+
+  .mobile-only {
+    display: block;
+  }
+
+  .breakroom-header {
+    padding: 0.5rem 1rem !important;
+  }
+
+  .bottom-menu {
+    gap: 0.5rem;
+    padding: 0.75rem 0.5rem;
+  }
+
+  .bottom-menu a {
+    font-size: 0.75rem;
+    padding: 0.4rem 0.5rem;
+  }
 }
 </style>

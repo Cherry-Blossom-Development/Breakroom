@@ -173,7 +173,7 @@ export default {
     letter-spacing: 1px;
     font-weight: bold;
   }
-  input, button {
+  input {
     display: block;
     padding: 10px 6px;
     width: 100%;
@@ -182,6 +182,27 @@ export default {
     border-bottom: 1px solid var(--color-border-medium);
     color: var(--color-text);
     background: var(--color-background-input);
+  }
+  button {
+    display: block;
+    padding: 12px 20px;
+    width: 100%;
+    box-sizing: border-box;
+    border: none;
+    border-radius: 6px;
+    color: white;
+    background: var(--color-accent);
+    font-size: 1em;
+    font-weight: bold;
+    cursor: pointer;
+    margin-top: 25px;
+    transition: background-color 0.2s ease;
+  }
+  button:hover {
+    background: var(--color-accent-hover, #0056b3);
+  }
+  button:active {
+    transform: translateY(1px);
   }
   .error {
     color: var(--color-error);

@@ -5,6 +5,8 @@ import { friends } from '@/stores/friends.js'
 import { user } from '@/stores/user.js'
 import InviteModal from './InviteModal.vue'
 
+const emit = defineEmits(['room-selected'])
+
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
 const showInviteModal = ref(false)
@@ -45,6 +47,7 @@ const selectRoom = async (room) => {
     chat.leaveRoom()
     await chat.joinRoom(room.id)
   }
+  emit('room-selected', room)
 }
 
 // Create room modal handlers
@@ -144,6 +147,7 @@ const acceptInvite = async (invite) => {
   try {
     const room = await chat.acceptInvite(invite.room_id)
     await chat.joinRoom(room.id)
+    emit('room-selected', room)
   } catch (err) {
     alert(err.message)
   }
@@ -648,5 +652,24 @@ const openInviteModal = (room) => {
 
 .selected-user-tag button:hover {
   opacity: 1;
+}
+
+/* Mobile styles */
+@media (max-width: 768px) {
+  .chat-sidebar {
+    width: 100%;
+  }
+
+  .sidebar-header {
+    padding: 12px 15px;
+  }
+
+  .room-list li {
+    padding: 15px;
+  }
+
+  .room-actions {
+    display: flex;
+  }
 }
 </style>

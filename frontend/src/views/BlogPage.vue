@@ -78,6 +78,15 @@ const formatDate = (dateStr) => {
     minute: '2-digit'
   })
 }
+
+const getPreview = (content) => {
+  if (!content) return 'No content yet...'
+  // Strip HTML tags and get plain text
+  const text = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+  // Limit to ~150 characters
+  if (text.length <= 150) return text
+  return text.substring(0, 150).trim() + '...'
+}
 </script>
 
 <template>
@@ -142,22 +151,23 @@ const formatDate = (dateStr) => {
           class="post-card"
           @click="editPost(post)"
         >
-          <div class="post-info">
+          <div class="post-header">
             <h3 class="post-title">{{ post.title }}</h3>
-            <div class="post-meta">
-              <span class="post-status" :class="{ published: post.is_published }">
-                {{ post.is_published ? 'Published' : 'Draft' }}
-              </span>
-              <span class="post-date">Updated {{ formatDate(post.updated_at) }}</span>
-            </div>
+            <span class="post-date">{{ formatDate(post.updated_at) }}</span>
           </div>
-          <div class="post-actions" @click.stop>
-            <button class="btn-icon" @click="editPost(post)" title="Edit">
-              Edit
-            </button>
-            <button class="btn-icon btn-danger" @click="deletePost(post)" title="Delete">
-              Delete
-            </button>
+          <p class="post-preview">{{ getPreview(post.content) }}</p>
+          <div class="post-footer" @click.stop>
+            <span class="post-status" :class="{ published: post.is_published }">
+              {{ post.is_published ? 'Published' : 'Draft' }}
+            </span>
+            <div class="post-actions">
+              <button class="btn-icon" @click="editPost(post)" title="Edit">
+                Edit
+              </button>
+              <button class="btn-icon btn-danger" @click="deletePost(post)" title="Delete">
+                Delete
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -276,8 +286,7 @@ const formatDate = (dateStr) => {
 
 .post-card {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
   padding: 15px 20px;
   margin-bottom: 10px;
   background: var(--color-background-soft);
@@ -295,33 +304,55 @@ const formatDate = (dateStr) => {
   margin-bottom: 0;
 }
 
-.post-info {
+.post-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 15px;
+  margin-bottom: 8px;
+}
+
+.post-title {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--color-text);
   flex: 1;
   min-width: 0;
 }
 
-.post-title {
-  margin: 0 0 6px;
-  font-size: 1.1rem;
-  color: var(--color-text);
+.post-date {
+  color: var(--color-text-light);
+  font-size: 0.85rem;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex-shrink: 0;
 }
 
-.post-meta {
+.post-preview {
+  margin: 0 0 12px;
+  font-size: 0.9rem;
+  color: var(--color-text-light);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.post-footer {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  font-size: 0.85rem;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border-light);
 }
 
 .post-status {
-  padding: 2px 8px;
+  padding: 4px 10px;
   border-radius: 4px;
   background: var(--color-warning-bg);
   color: var(--color-warning);
   font-weight: 500;
+  font-size: 0.8rem;
 }
 
 .post-status.published {
@@ -329,15 +360,9 @@ const formatDate = (dateStr) => {
   color: var(--color-success);
 }
 
-.post-date {
-  color: var(--color-text-light);
-}
-
 .post-actions {
   display: flex;
   gap: 8px;
-  flex-shrink: 0;
-  margin-left: 15px;
 }
 
 .btn-icon {
@@ -360,5 +385,35 @@ const formatDate = (dateStr) => {
 
 .btn-danger:hover {
   background: var(--color-error-bg);
+}
+
+/* Mobile responsive styles */
+@media (max-width: 768px) {
+  .blog-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 15px;
+  }
+
+  .blog-header-left {
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .blog-header h1 {
+    white-space: nowrap;
+  }
+
+  .blog-header-actions {
+    width: 100%;
+  }
+
+  .blog-header-actions .btn-secondary,
+  .blog-header-actions .btn-primary {
+    flex: 1;
+  }
 }
 </style>
