@@ -1031,15 +1031,50 @@ onMounted(async () => {
   cursor: pointer;
 }
 
-/* Responsive: Allow horizontal scroll on very small screens */
-@media (max-width: 900px) {
+/* Responsive: Mobile styles */
+@media (max-width: 768px) {
+  .project-header {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .project-header h1 {
+    font-size: 1.4rem;
+  }
+
+  .company-name {
+    font-size: 0.85rem;
+  }
+
+  .header-actions {
+    width: 100%;
+  }
+
+  .header-actions button {
+    flex: 1;
+  }
+
+  .kanban-board {
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .kanban-column {
+    flex: 0 0 85vw;
+    min-width: 85vw;
+    scroll-snap-align: start;
+  }
+}
+
+@media (max-width: 900px) and (min-width: 769px) {
   .kanban-board {
     overflow-x: auto;
   }
 
   .kanban-column {
-    flex: 0 0 180px;
-    min-width: 180px;
+    flex: 0 0 220px;
+    min-width: 220px;
   }
 }
 </style>
