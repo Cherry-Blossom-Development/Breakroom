@@ -178,6 +178,24 @@ const router = createRouter({
       name: 'kanban',
       component: () => import('../views/KanbanPage.vue'),
       meta: { requiresAuth: true },
+    },
+    {
+      path: '/art-gallery',
+      name: 'artGallery',
+      component: () => import('../views/ArtGalleryPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/g/:galleryUrl',
+      name: 'publicGallery',
+      component: () => import('../views/PublicGalleryPage.vue'),
+      // No requiresAuth - truly public
+    },
+    {
+      path: '/g/:galleryUrl/:artworkId',
+      name: 'publicGalleryArtwork',
+      component: () => import('../views/PublicGalleryPage.vue'),
+      // No requiresAuth - truly public
     }
   ],
 })

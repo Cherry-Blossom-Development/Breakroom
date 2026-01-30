@@ -29,7 +29,15 @@ const categories = ref([
     name: 'Artist Tools',
     description: 'Creative tools for visual artists and designers',
     icon: 'palette',
-    tools: [] // Coming soon
+    tools: [
+      {
+        id: 'art-gallery',
+        name: 'Art Gallery',
+        description: 'Upload and display your artwork in a personal gallery with a shareable public URL.',
+        route: '/art-gallery',
+        shortcutName: 'Art Gallery'
+      }
+    ]
   },
   {
     id: 'writer',
