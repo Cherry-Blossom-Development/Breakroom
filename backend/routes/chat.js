@@ -194,9 +194,18 @@ router.post('/rooms/:roomId/messages', authenticateToken, async (req, res) => {
       [result.insertId]
     );
 
-    res.status(201).json({
-      message: newMessage.rows[0]
-    });
+    const messageData = newMessage.rows[0];
+
+    // Broadcast message to everyone in the room via socket
+    const io = getIO();
+    if (io) {
+      io.to(`room_${roomId}`).emit('new_message', {
+        roomId: parseInt(roomId),
+        message: messageData
+      });
+    }
+
+    res.status(201).json({ message: messageData });
   } catch (err) {
     console.error('Error sending message:', err);
     res.status(500).json({ message: 'Failed to send message' });
