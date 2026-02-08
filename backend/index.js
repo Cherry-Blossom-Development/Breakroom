@@ -187,6 +187,14 @@ function buildOgTags({ title, description, url, image, siteName, authorName }) {
   return tags;
 }
 
+function injectOgIntoHtml(html, ogTags, title) {
+  let result = html.replace('</head>', ogTags + '\n  </head>');
+  if (title) {
+    result = result.replace(/<title>[^<]*<\/title>/, `<title>${escapeHtml(title)}</title>`);
+  }
+  return result;
+}
+
 async function handleBlogOg(req, res) {
   const { blogUrl, postId } = req.params;
   const baseUrl = process.env.CORS_ORIGIN || 'https://www.prosaurus.com';
@@ -244,7 +252,7 @@ async function handleBlogOg(req, res) {
         authorName
       });
 
-      const html = indexHtml.replace('</head>', ogTags + '\n  </head>');
+      const html = injectOgIntoHtml(indexHtml, ogTags, `${post.title} - Prosaurus Breakroom`);
       return res.send(html);
     } else {
       // Blog landing page
@@ -257,7 +265,7 @@ async function handleBlogOg(req, res) {
         authorName
       });
 
-      const html = indexHtml.replace('</head>', ogTags + '\n  </head>');
+      const html = injectOgIntoHtml(indexHtml, ogTags, `${blog.blog_name} - Prosaurus Breakroom`);
       return res.send(html);
     }
   } catch (err) {
@@ -271,6 +279,58 @@ async function handleBlogOg(req, res) {
 
 app.get('/b/:blogUrl/:postId', handleBlogOg);
 app.get('/b/:blogUrl', handleBlogOg);
+
+// OG tags for /blog/view/:id (authenticated blog view URL users are likely to share)
+app.get('/blog/view/:id', async (req, res) => {
+  const { id } = req.params;
+  const baseUrl = process.env.CORS_ORIGIN || 'https://www.prosaurus.com';
+  const indexHtml = getIndexHtml();
+
+  let client;
+  try {
+    client = await getClient();
+    const result = await client.query(
+      `SELECT bp.id, bp.title, bp.content,
+              u.handle, u.first_name, u.last_name, u.photo_path,
+              ub.blog_url, ub.blog_name
+       FROM blog_posts bp
+       JOIN users u ON bp.user_id = u.id
+       LEFT JOIN user_blog ub ON ub.user_id = u.id
+       WHERE bp.id = $1 AND bp.is_published = TRUE`,
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.send(indexHtml);
+    }
+
+    const post = result.rows[0];
+    const authorName = [post.first_name, post.last_name].filter(Boolean).join(' ') || post.handle;
+    const plainText = stripHtml(post.content || '');
+    const description = plainText.length > 200 ? plainText.substring(0, 197) + '...' : plainText;
+    let image = extractFirstImage(post.content || '');
+    if (image && image.startsWith('/')) {
+      image = baseUrl + image;
+    }
+
+    const ogTags = buildOgTags({
+      title: post.title,
+      description: description || `A post on Prosaurus Breakroom`,
+      url: `${baseUrl}/blog/view/${post.id}`,
+      image,
+      siteName: 'Prosaurus Breakroom',
+      authorName
+    });
+
+    const html = injectOgIntoHtml(indexHtml, ogTags, `${post.title} - Prosaurus Breakroom`);
+    return res.send(html);
+  } catch (err) {
+    console.error('Error generating OG tags for blog view:', err);
+    return res.send(indexHtml);
+  } finally {
+    if (client) client.release();
+  }
+});
 
 // Serve index.html for all non-API, non-static requests
 app.use((req, res, next) => {
