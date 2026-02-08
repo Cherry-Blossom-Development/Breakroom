@@ -3,6 +3,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const http = require('http');
 const { Server } = require('socket.io');
 const cookieParser = require('cookie-parser');
@@ -126,6 +127,150 @@ app.use('/api/uploads', handleS3Redirect);
 // Serve frontend static files
 app.use(express.static(path.join(__dirname, 'dist')));
 
+
+// Open Graph meta tag injection for public blog URLs
+const indexHtmlPath = path.join(__dirname, 'dist', 'index.html');
+const { getClient } = require('./utilities/db');
+
+function getIndexHtml() {
+  // Production: read from dist
+  try {
+    return fs.readFileSync(indexHtmlPath, 'utf8');
+  } catch (err) {
+    // Local dev: dist doesn't exist, return a minimal shell
+    return `<!DOCTYPE html>
+<html lang="">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prosaurus Breakroom</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>window.location.href = window.location.href;</script>
+  </body>
+</html>`;
+  }
+}
+
+function stripHtml(html) {
+  return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function extractFirstImage(html) {
+  const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+  return match ? match[1] : null;
+}
+
+function buildOgTags({ title, description, url, image, siteName, authorName }) {
+  let tags = `
+    <meta property="og:title" content="${escapeHtml(title)}" />
+    <meta property="og:description" content="${escapeHtml(description)}" />
+    <meta property="og:url" content="${escapeHtml(url)}" />
+    <meta property="og:type" content="article" />
+    <meta property="og:site_name" content="${escapeHtml(siteName)}" />
+    <meta name="twitter:card" content="${image ? 'summary_large_image' : 'summary'}" />
+    <meta name="twitter:title" content="${escapeHtml(title)}" />
+    <meta name="twitter:description" content="${escapeHtml(description)}" />
+    <meta name="description" content="${escapeHtml(description)}" />`;
+  if (authorName) {
+    tags += `\n    <meta name="author" content="${escapeHtml(authorName)}" />`;
+  }
+  if (image) {
+    tags += `\n    <meta property="og:image" content="${escapeHtml(image)}" />`;
+    tags += `\n    <meta name="twitter:image" content="${escapeHtml(image)}" />`;
+  }
+  return tags;
+}
+
+async function handleBlogOg(req, res) {
+  const { blogUrl, postId } = req.params;
+  const baseUrl = process.env.CORS_ORIGIN || 'https://www.prosaurus.com';
+
+  const indexHtml = getIndexHtml();
+
+  let client;
+  try {
+    client = await getClient();
+
+    // Fetch blog info
+    const blogResult = await client.query(
+      `SELECT ub.blog_url, ub.blog_name, ub.user_id,
+              u.handle, u.first_name, u.last_name, u.photo_path
+       FROM user_blog ub
+       JOIN users u ON ub.user_id = u.id
+       WHERE ub.blog_url = $1`,
+      [blogUrl]
+    );
+
+    if (blogResult.rowCount === 0) {
+      // Blog not found — serve plain index.html, let SPA handle the 404
+      return res.send(indexHtml);
+    }
+
+    const blog = blogResult.rows[0];
+    const authorName = [blog.first_name, blog.last_name].filter(Boolean).join(' ') || blog.handle;
+
+    if (postId) {
+      // Specific post
+      const postResult = await client.query(
+        `SELECT id, title, content FROM blog_posts
+         WHERE id = $1 AND user_id = $2 AND is_published = TRUE`,
+        [postId, blog.user_id]
+      );
+
+      if (postResult.rowCount === 0) {
+        return res.send(indexHtml);
+      }
+
+      const post = postResult.rows[0];
+      const plainText = stripHtml(post.content || '');
+      const description = plainText.length > 200 ? plainText.substring(0, 197) + '...' : plainText;
+      let image = extractFirstImage(post.content || '');
+      if (image && image.startsWith('/')) {
+        image = baseUrl + image;
+      }
+
+      const ogTags = buildOgTags({
+        title: post.title,
+        description: description || `A post on ${blog.blog_name}`,
+        url: `${baseUrl}/b/${blogUrl}/${post.id}`,
+        image,
+        siteName: 'Prosaurus Breakroom',
+        authorName
+      });
+
+      const html = indexHtml.replace('</head>', ogTags + '\n  </head>');
+      return res.send(html);
+    } else {
+      // Blog landing page
+      const ogTags = buildOgTags({
+        title: blog.blog_name,
+        description: `${blog.blog_name} by ${authorName} on Prosaurus Breakroom`,
+        url: `${baseUrl}/b/${blogUrl}`,
+        image: blog.photo_path ? `${baseUrl}/api/uploads/${blog.photo_path}` : null,
+        siteName: 'Prosaurus Breakroom',
+        authorName
+      });
+
+      const html = indexHtml.replace('</head>', ogTags + '\n  </head>');
+      return res.send(html);
+    }
+  } catch (err) {
+    console.error('Error generating OG tags for blog:', err);
+    // On any error, serve the plain index.html so the page still works
+    return res.send(indexHtml);
+  } finally {
+    if (client) client.release();
+  }
+}
+
+app.get('/b/:blogUrl/:postId', handleBlogOg);
+app.get('/b/:blogUrl', handleBlogOg);
 
 // Serve index.html for all non-API, non-static requests
 app.use((req, res, next) => {
