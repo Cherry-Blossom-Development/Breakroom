@@ -28,5 +28,8 @@ services:
       # S3 configuration
       S3_BUCKET_NAME: ${S3_BUCKET_NAME}
       S3_BUCKET_REGION: ${S3_BUCKET_REGION}
+    volumes:
+      # Mount frontend dist so backend can read index.html for OG tag injection
+      - /var/www/prosaurus.com:/app/dist:ro
     restart: unless-stopped
     command: sh -c "npm run start"
