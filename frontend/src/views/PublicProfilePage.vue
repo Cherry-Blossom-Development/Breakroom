@@ -124,14 +124,15 @@ onMounted(() => {
           <p v-else class="bio-empty">This user hasn't added a bio yet.</p>
         </div>
 
-        <div class="work-bio-section" v-if="profile.workBio">
+        <div class="work-bio-section">
           <h2>Work Biography</h2>
-          <p class="bio-text">{{ profile.workBio }}</p>
+          <p v-if="profile.workBio" class="bio-text">{{ profile.workBio }}</p>
+          <p v-else class="empty-state-text">No work biography added yet.</p>
         </div>
 
-        <div class="skills-section" v-if="profile.skills && profile.skills.length > 0">
+        <div class="skills-section">
           <h2>Skills</h2>
-          <div class="skills-list">
+          <div v-if="profile.skills && profile.skills.length > 0" class="skills-list">
             <span
               v-for="skill in profile.skills"
               :key="skill.id"
@@ -140,11 +141,12 @@ onMounted(() => {
               {{ skill.name }}
             </span>
           </div>
+          <p v-else class="empty-state-text">No skills listed yet.</p>
         </div>
 
-        <div class="jobs-section" v-if="profile.jobs && profile.jobs.length > 0">
+        <div class="jobs-section">
           <h2>Work Experience</h2>
-          <div class="jobs-list">
+          <div v-if="profile.jobs && profile.jobs.length > 0" class="jobs-list">
             <div v-for="job in profile.jobs" :key="job.id" class="job-card">
               <div class="job-header">
                 <h3>{{ job.title }}</h3>
@@ -159,6 +161,7 @@ onMounted(() => {
               <p v-if="job.description" class="job-description">{{ job.description }}</p>
             </div>
           </div>
+          <p v-else class="empty-state-text">No work experience listed yet.</p>
         </div>
       </div>
     </template>
@@ -291,7 +294,8 @@ onMounted(() => {
   margin: 0;
 }
 
-.bio-empty {
+.bio-empty,
+.empty-state-text {
   color: var(--color-text-light);
   font-style: italic;
   margin: 0;

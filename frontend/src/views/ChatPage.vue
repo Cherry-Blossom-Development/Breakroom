@@ -264,6 +264,10 @@ onUnmounted(() => {
         @room-selected="openMobileChat"
       />
       <div class="chat-container" :class="{ 'mobile-hidden': isMobile && !showMobileChat }">
+        <div v-if="!chat.currentRoom" class="no-room-selected">
+          <p>Select a room to start chatting</p>
+        </div>
+        <template v-else>
         <div class="chat-header">
           <button
             v-if="isMobile"
@@ -383,6 +387,7 @@ onUnmounted(() => {
         {{ chat.error }}
         <button @click="chat.clearError" class="dismiss-btn">Dismiss</button>
       </div>
+      </template>
       </div>
     </div>
   </main>
@@ -438,6 +443,16 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.no-room-selected {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-light);
+  font-style: italic;
+  font-size: 1.1em;
 }
 
 .no-messages {

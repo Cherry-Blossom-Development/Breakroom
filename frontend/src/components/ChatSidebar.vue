@@ -200,6 +200,9 @@ const openInviteModal = (room) => {
     </div>
 
     <ul class="room-list">
+      <li v-if="chat.rooms.length === 0" class="empty-rooms">
+        No rooms yet. Create one to get started!
+      </li>
       <li
         v-for="room in chat.rooms"
         :key="room.id"
@@ -357,6 +360,15 @@ const openInviteModal = (room) => {
   margin: 0;
   flex: 1;
   overflow-y: auto;
+}
+
+.room-list .empty-rooms {
+  padding: 20px 15px;
+  color: rgba(255, 255, 255, 0.5);
+  font-style: italic;
+  font-size: 0.9em;
+  text-align: center;
+  cursor: default;
 }
 
 .room-list li {
