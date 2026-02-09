@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { authFetch } from '../utilities/authFetch'
+import StatusBadge from '../components/StatusBadge.vue'
 
 // Default to Cherry Blossom Development (company_id = 1)
 const companyId = ref(1)
@@ -30,19 +31,19 @@ const editForm = ref({
 })
 const savingTicket = ref(false)
 
-const priorityColors = {
-  low: '#6c757d',
-  medium: '#0d6efd',
-  high: '#fd7e14',
-  urgent: '#dc3545'
+const priorityColor = {
+  low: 'gray',
+  medium: 'blue',
+  high: 'orange',
+  urgent: 'red'
 }
 
-const statusColors = {
-  open: '#28a745',
-  backlog: '#6f42c1',
-  in_progress: '#ffc107',
-  resolved: '#17a2b8',
-  closed: '#6c757d'
+const statusColor = {
+  open: 'green',
+  backlog: 'purple',
+  in_progress: 'yellow',
+  resolved: 'teal',
+  closed: 'gray'
 }
 
 const formatDate = (dateStr) => {
@@ -289,12 +290,12 @@ onMounted(() => {
         <!-- View Mode -->
         <template v-if="!editingTicket">
           <div class="detail-meta">
-            <span class="status-badge" :style="{ background: statusColors[selectedTicket.status] }">
+            <StatusBadge :color="statusColor[selectedTicket.status]">
               {{ selectedTicket.status.replace('_', ' ') }}
-            </span>
-            <span class="priority-badge" :style="{ background: priorityColors[selectedTicket.priority] }">
+            </StatusBadge>
+            <StatusBadge :color="priorityColor[selectedTicket.priority]">
               {{ selectedTicket.priority }}
-            </span>
+            </StatusBadge>
           </div>
 
           <div class="detail-info">
@@ -407,15 +408,15 @@ onMounted(() => {
           >
             <div class="ticket-header">
               <span class="ticket-id">#{{ ticket.id }}</span>
-              <span class="priority-badge" :style="{ background: priorityColors[ticket.priority] }">
+              <StatusBadge :color="priorityColor[ticket.priority]">
                 {{ ticket.priority }}
-              </span>
+              </StatusBadge>
             </div>
             <h3 class="ticket-title">{{ ticket.title }}</h3>
             <div class="ticket-meta">
-              <span class="status-badge" :style="{ background: statusColors[ticket.status] }">
+              <StatusBadge :color="statusColor[ticket.status]">
                 {{ ticket.status.replace('_', ' ') }}
-              </span>
+              </StatusBadge>
               <span class="ticket-date">{{ formatDate(ticket.created_at) }}</span>
             </div>
             <p class="ticket-creator">by {{ getCreatorName(ticket) }}</p>
@@ -438,15 +439,15 @@ onMounted(() => {
           >
             <div class="ticket-header">
               <span class="ticket-id">#{{ ticket.id }}</span>
-              <span class="priority-badge" :style="{ background: priorityColors[ticket.priority] }">
+              <StatusBadge :color="priorityColor[ticket.priority]">
                 {{ ticket.priority }}
-              </span>
+              </StatusBadge>
             </div>
             <h3 class="ticket-title">{{ ticket.title }}</h3>
             <div class="ticket-meta">
-              <span class="status-badge" :style="{ background: statusColors[ticket.status] }">
+              <StatusBadge :color="statusColor[ticket.status]">
                 {{ ticket.status }}
-              </span>
+              </StatusBadge>
               <span class="ticket-date">{{ formatDate(ticket.resolved_at || ticket.updated_at) }}</span>
             </div>
           </div>
@@ -711,16 +712,16 @@ onMounted(() => {
 }
 
 .btn-status.in-progress {
-  background: #ffc107;
+  background: var(--badge-yellow);
   color: #333;
 }
 
 .btn-status.resolved {
-  background: #17a2b8;
+  background: var(--badge-teal);
 }
 
 .btn-status.closed {
-  background: #6c757d;
+  background: var(--badge-gray);
 }
 
 /* Tickets Container */
@@ -793,17 +794,6 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
-}
-
-.status-badge,
-.priority-badge {
-  display: inline-block;
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: white;
-  text-transform: capitalize;
 }
 
 .ticket-date {

@@ -305,8 +305,8 @@ onMounted(() => {
 
 .skill-tag {
   display: inline-block;
-  background: var(--color-success-bg);
-  color: var(--color-success);
+  background: var(--badge-green-soft);
+  color: var(--badge-green-text);
   padding: 6px 12px;
   border-radius: 20px;
   font-size: 0.9rem;

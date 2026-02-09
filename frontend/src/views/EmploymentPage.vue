@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
+import StatusBadge from '../components/StatusBadge.vue'
 
 const router = useRouter()
 
@@ -213,8 +214,8 @@ onMounted(() => {
             {{ pos.company_name }}
           </div>
           <div class="position-meta">
-            <span class="meta-tag type">{{ formatEmploymentType(pos.employment_type) }}</span>
-            <span class="meta-tag location">{{ formatLocationType(pos.location_type) }}</span>
+            <StatusBadge color="green" soft>{{ formatEmploymentType(pos.employment_type) }}</StatusBadge>
+            <StatusBadge color="blue" soft>{{ formatLocationType(pos.location_type) }}</StatusBadge>
             <span class="meta-location">{{ getLocationString(pos) }}</span>
           </div>
           <p v-if="pos.description" class="position-excerpt">
@@ -446,22 +447,7 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 
-.meta-tag {
-  padding: 4px 10px;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  font-weight: 500;
-}
-
-.meta-tag.type {
-  background: var(--color-success-bg);
-  color: var(--color-success);
-}
-
-.meta-tag.location {
-  background: #e3f2fd;
-  color: #1565c0;
-}
+/* Employment and location tags handled by StatusBadge component */
 
 .meta-location {
   color: var(--color-text-muted);

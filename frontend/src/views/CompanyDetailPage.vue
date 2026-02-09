@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
+import StatusBadge from '../components/StatusBadge.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -940,8 +941,8 @@ onMounted(() => {
                     <span v-if="emp.department" class="employee-department">{{ emp.department }}</span>
                   </div>
                   <div class="employee-badges">
-                    <span v-if="emp.is_owner" class="badge owner">Owner</span>
-                    <span v-else-if="emp.is_admin" class="badge admin">Admin</span>
+                    <StatusBadge v-if="emp.is_owner" color="orange" size="xs">Owner</StatusBadge>
+                    <StatusBadge v-else-if="emp.is_admin" color="blue" size="xs">Admin</StatusBadge>
                   </div>
                 </div>
                 <div v-if="canManageEmployees" class="employee-actions">
@@ -1010,13 +1011,13 @@ onMounted(() => {
                   <div class="project-header">
                     <h3>{{ proj.title }}</h3>
                     <div class="project-badges">
-                      <span v-if="proj.is_default" class="badge default">Default</span>
-                      <span class="visibility-badge" :class="proj.is_public ? 'public' : 'private'">
+                      <StatusBadge v-if="proj.is_default" color="purple" size="xs">Default</StatusBadge>
+                      <StatusBadge :color="proj.is_public ? 'green' : 'orange'" soft size="xs">
                         {{ proj.is_public ? 'Public' : 'Private' }}
-                      </span>
-                      <span class="status-badge" :class="proj.is_active ? 'active' : 'inactive'">
+                      </StatusBadge>
+                      <StatusBadge :color="proj.is_active ? 'green' : 'red'" soft size="xs">
                         {{ proj.is_active ? 'Active' : 'Inactive' }}
-                      </span>
+                      </StatusBadge>
                     </div>
                   </div>
                   <p v-if="proj.description" class="project-description">{{ proj.description }}</p>
@@ -1520,23 +1521,7 @@ onMounted(() => {
   gap: 6px;
 }
 
-.badge {
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.badge.owner {
-  background: var(--color-accent);
-  color: white;
-}
-
-.badge.admin {
-  background: #667eea;
-  color: white;
-}
+/* Role and status badges handled by StatusBadge component */
 
 /* Positions List */
 .positions-list {
@@ -1878,46 +1863,7 @@ onMounted(() => {
   gap: 6px;
 }
 
-.badge.default {
-  background: #764ba2;
-  color: white;
-}
-
-.status-badge {
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.status-badge.active {
-  background: var(--color-success-bg);
-  color: var(--color-success);
-}
-
-.status-badge.inactive {
-  background: var(--color-error-bg);
-  color: var(--color-error);
-}
-
-.visibility-badge {
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.visibility-badge.public {
-  background: #e8f5e9;
-  color: #2e7d32;
-}
-
-.visibility-badge.private {
-  background: #fff3e0;
-  color: #e65100;
-}
+/* Project badges handled by StatusBadge component */
 
 .field-hint {
   margin: 4px 0 0;

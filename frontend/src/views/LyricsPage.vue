@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { lyrics } from '@/stores/lyrics.js'
 import LyricEditor from '@/components/LyricEditor.vue'
 import SongModal from '@/components/SongModal.vue'
+import StatusBadge from '@/components/StatusBadge.vue'
 
 const showLyricEditor = ref(false)
 const showSongModal = ref(false)
@@ -97,19 +98,18 @@ const formatDate = (dateStr) => {
   })
 }
 
-const getStatusColor = (status) => {
-  const colors = {
-    idea: 'status-idea',
-    writing: 'status-writing',
-    complete: 'status-complete',
-    recorded: 'status-recorded',
-    released: 'status-released',
-    draft: 'status-draft',
-    'in-progress': 'status-writing',
-    archived: 'status-archived'
-  }
-  return colors[status] || 'status-idea'
+const statusColor = {
+  idea: 'blue',
+  writing: 'yellow',
+  complete: 'green',
+  recorded: 'purple',
+  released: 'green',
+  draft: 'yellow',
+  'in-progress': 'yellow',
+  archived: 'gray'
 }
+
+const getStatusBadgeColor = (status) => statusColor[status] || 'blue'
 
 const getSectionLabel = (type) => {
   const labels = {
@@ -153,13 +153,13 @@ const getSectionLabel = (type) => {
         <button class="btn-back" @click="closeSongDetail">&larr; Back to Songs</button>
         <div class="song-detail-title">
           <h1>{{ lyrics.currentSong.title }}</h1>
-          <span :class="['status-badge', getStatusColor(lyrics.currentSong.status)]">
+          <StatusBadge :color="getStatusBadgeColor(lyrics.currentSong.status)" soft>
             {{ lyrics.currentSong.status }}
-          </span>
+          </StatusBadge>
         </div>
         <div class="song-detail-meta">
-          <span v-if="lyrics.currentSong.genre" class="genre-tag">{{ lyrics.currentSong.genre }}</span>
-          <span class="role-tag">{{ lyrics.currentSong.role }}</span>
+          <StatusBadge v-if="lyrics.currentSong.genre" color="gray" soft>{{ lyrics.currentSong.genre }}</StatusBadge>
+          <StatusBadge color="gray" soft>{{ lyrics.currentSong.role }}</StatusBadge>
         </div>
         <p v-if="lyrics.currentSong.description" class="song-description">
           {{ lyrics.currentSong.description }}
@@ -174,9 +174,9 @@ const getSectionLabel = (type) => {
       <div v-if="lyrics.collaborators.length > 0" class="collaborators-section">
         <h3>Collaborators</h3>
         <div class="collaborator-list">
-          <span v-for="collab in lyrics.collaborators" :key="collab.user_id" class="collaborator-tag">
+          <StatusBadge v-for="collab in lyrics.collaborators" :key="collab.user_id" color="gray" soft>
             {{ collab.first_name || collab.handle }} ({{ collab.role }})
-          </span>
+          </StatusBadge>
         </div>
       </div>
 
@@ -263,9 +263,9 @@ const getSectionLabel = (type) => {
               >
                 <div class="song-card-header">
                   <h4>{{ song.title }}</h4>
-                  <span :class="['status-badge', getStatusColor(song.status)]">
+                  <StatusBadge :color="getStatusBadgeColor(song.status)" soft>
                     {{ song.status }}
-                  </span>
+                  </StatusBadge>
                 </div>
                 <div v-if="song.genre" class="song-genre">{{ song.genre }}</div>
                 <div class="song-meta">
@@ -292,15 +292,15 @@ const getSectionLabel = (type) => {
               >
                 <div class="song-card-header">
                   <h4>{{ song.title }}</h4>
-                  <span :class="['status-badge', getStatusColor(song.status)]">
+                  <StatusBadge :color="getStatusBadgeColor(song.status)" soft>
                     {{ song.status }}
-                  </span>
+                  </StatusBadge>
                 </div>
                 <div class="song-owner">by {{ song.owner_first_name || song.owner_handle }}</div>
                 <div v-if="song.genre" class="song-genre">{{ song.genre }}</div>
                 <div class="song-meta">
                   <span>{{ song.lyric_count || 0 }} lyrics</span>
-                  <span class="role-tag">{{ song.role }}</span>
+                  <StatusBadge color="gray" soft>{{ song.role }}</StatusBadge>
                 </div>
               </div>
             </div>
@@ -324,8 +324,8 @@ const getSectionLabel = (type) => {
           >
             <div class="idea-content">{{ lyric.content }}</div>
             <div class="idea-meta">
-              <span v-if="lyric.mood" class="mood-tag">{{ lyric.mood }}</span>
-              <span :class="['status-badge', getStatusColor(lyric.status)]">{{ lyric.status }}</span>
+              <StatusBadge v-if="lyric.mood" color="gray" soft>{{ lyric.mood }}</StatusBadge>
+              <StatusBadge :color="getStatusBadgeColor(lyric.status)" soft>{{ lyric.status }}</StatusBadge>
               <span class="idea-date">{{ formatDate(lyric.updated_at) }}</span>
             </div>
             <div class="idea-actions" @click.stop>
@@ -570,30 +570,7 @@ const getSectionLabel = (type) => {
   gap: 8px;
 }
 
-/* Status Badges */
-.status-badge {
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  text-transform: capitalize;
-}
-
-.status-idea { background: #e3f2fd; color: #1565c0; }
-.status-writing { background: var(--color-warning-bg); color: var(--color-warning); }
-.status-complete { background: var(--color-success-bg); color: var(--color-success); }
-.status-recorded { background: #f3e5f5; color: #7b1fa2; }
-.status-released { background: #e8f5e9; color: #2e7d32; }
-.status-draft { background: var(--color-warning-bg); color: var(--color-warning); }
-.status-archived { background: var(--color-background-soft); color: var(--color-text-muted); }
-
-.role-tag, .genre-tag, .mood-tag {
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  background: var(--color-background-soft);
-  color: var(--color-text-secondary);
-}
+/* Tags and badges handled by StatusBadge component */
 
 /* Ideas List */
 .ideas-list {
@@ -698,14 +675,6 @@ const getSectionLabel = (type) => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.collaborator-tag {
-  padding: 4px 10px;
-  background: var(--color-background-card);
-  border-radius: 4px;
-  font-size: 0.85rem;
-  color: var(--color-text-secondary);
 }
 
 /* Lyrics List (in song detail) */

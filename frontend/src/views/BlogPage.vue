@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { blog } from '@/stores/blog.js'
 import BlogEditor from '@/components/BlogEditor.vue'
 import BlogSettings from '@/components/BlogSettings.vue'
+import StatusBadge from '@/components/StatusBadge.vue'
 
 const showEditor = ref(false)
 const showSettings = ref(false)
@@ -157,9 +158,9 @@ const getPreview = (content) => {
           </div>
           <p class="post-preview">{{ getPreview(post.content) }}</p>
           <div class="post-footer" @click.stop>
-            <span class="post-status" :class="{ published: post.is_published }">
+            <StatusBadge :color="post.is_published ? 'green' : 'yellow'" soft>
               {{ post.is_published ? 'Published' : 'Draft' }}
-            </span>
+            </StatusBadge>
             <div class="post-actions">
               <button class="btn-icon" @click="editPost(post)" title="Edit">
                 Edit
@@ -344,20 +345,6 @@ const getPreview = (content) => {
   align-items: center;
   padding-top: 10px;
   border-top: 1px solid var(--color-border-light);
-}
-
-.post-status {
-  padding: 4px 10px;
-  border-radius: 4px;
-  background: var(--color-warning-bg);
-  color: var(--color-warning);
-  font-weight: 500;
-  font-size: 0.8rem;
-}
-
-.post-status.published {
-  background: var(--color-success-bg);
-  color: var(--color-success);
 }
 
 .post-actions {

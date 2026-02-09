@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { chat } from '@/stores/chat.js'
 import { user } from '@/stores/user.js'
 import ChatSidebar from '@/components/ChatSidebar.vue'
+import StatusBadge from '@/components/StatusBadge.vue'
 
 const messageInput = ref('')
 const messagesContainer = ref(null)
@@ -275,9 +276,9 @@ onUnmounted(() => {
             <h2># {{ currentRoomName }}</h2>
             <p v-if="currentRoomDescription" class="room-description">{{ currentRoomDescription }}</p>
           </div>
-          <span class="connection-status" :class="{ connected: chat.connected }">
+          <StatusBadge :color="chat.connected ? 'green' : 'red'" dot>
             {{ chat.connected ? 'Connected' : 'Disconnected' }}
-          </span>
+          </StatusBadge>
         </div>
 
       <div class="messages-container" ref="messagesContainer">
@@ -428,18 +429,6 @@ onUnmounted(() => {
   margin: 4px 0 0 0;
   font-size: 0.85em;
   color: var(--color-text-muted);
-}
-
-.connection-status {
-  font-size: 0.8em;
-  padding: 4px 10px;
-  border-radius: 12px;
-  background: var(--color-error);
-  color: white;
-}
-
-.connection-status.connected {
-  background: var(--color-success);
 }
 
 .messages-container {

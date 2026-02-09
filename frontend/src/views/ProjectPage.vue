@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
 import draggable from 'vuedraggable'
+import StatusBadge from '../components/StatusBadge.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -34,19 +35,28 @@ const editForm = ref({
 })
 const savingTicket = ref(false)
 
-const priorityColors = {
-  low: '#6c757d',
-  medium: '#0d6efd',
-  high: '#fd7e14',
-  urgent: '#dc3545'
+const priorityColor = {
+  low: 'gray',
+  medium: 'blue',
+  high: 'orange',
+  urgent: 'red'
 }
 
-const statusColors = {
-  backlog: '#6c757d',
-  'on-deck': '#17a2b8',
-  in_progress: '#ffc107',
-  resolved: '#28a745',
-  closed: '#343a40'
+const statusColor = {
+  backlog: 'gray',
+  'on-deck': 'teal',
+  in_progress: 'yellow',
+  resolved: 'green',
+  closed: 'gray'
+}
+
+// Hex colors needed for kanban column borders and transition buttons
+const statusHex = {
+  backlog: 'var(--badge-gray)',
+  'on-deck': 'var(--badge-teal)',
+  in_progress: 'var(--badge-yellow)',
+  resolved: 'var(--badge-green)',
+  closed: 'var(--badge-gray)'
 }
 
 const statusLabels = {
@@ -404,12 +414,12 @@ onMounted(async () => {
         <!-- View Mode -->
         <template v-if="!editingTicket">
           <div class="detail-meta">
-            <span class="status-badge" :style="{ background: statusColors[selectedTicket.status] }">
+            <StatusBadge :color="statusColor[selectedTicket.status]">
               {{ statusLabels[selectedTicket.status] || selectedTicket.status }}
-            </span>
-            <span class="priority-badge" :style="{ background: priorityColors[selectedTicket.priority] }">
+            </StatusBadge>
+            <StatusBadge :color="priorityColor[selectedTicket.priority]">
               {{ selectedTicket.priority }}
-            </span>
+            </StatusBadge>
           </div>
 
           <div class="detail-info">
@@ -446,7 +456,7 @@ onMounted(async () => {
                 :key="nextStatus"
                 @click="updateTicketStatus(selectedTicket.id, nextStatus)"
                 class="btn-status"
-                :style="{ background: statusColors[nextStatus] }"
+                :style="{ background: statusHex[nextStatus] }"
               >
                 {{ statusLabels[nextStatus] }}
               </button>
@@ -515,7 +525,7 @@ onMounted(async () => {
         :key="status"
         class="kanban-column"
       >
-        <div class="column-header" :style="{ borderTopColor: statusColors[status] }">
+        <div class="column-header" :style="{ borderTopColor: statusHex[status] }">
           <h3>{{ statusLabels[status] }}</h3>
           <span class="ticket-count">{{ ticketsByStatus[status].length }}</span>
         </div>
@@ -536,12 +546,9 @@ onMounted(async () => {
             >
               <div class="ticket-header">
                 <span class="ticket-id">#{{ ticket.id }}</span>
-                <span
-                  class="priority-badge"
-                  :style="{ background: priorityColors[ticket.priority] }"
-                >
+                <StatusBadge :color="priorityColor[ticket.priority]" size="xs">
                   {{ ticket.priority }}
-                </span>
+                </StatusBadge>
               </div>
               <h4 class="ticket-title">{{ ticket.title }}</h4>
               <div class="ticket-footer">
@@ -970,17 +977,6 @@ onMounted(async () => {
   background: var(--color-accent);
   padding: 2px 6px;
   border-radius: 4px;
-}
-
-.status-badge,
-.priority-badge {
-  display: inline-block;
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-size: 0.7rem;
-  font-weight: 500;
-  color: white;
-  text-transform: capitalize;
 }
 
 /* Drag states */

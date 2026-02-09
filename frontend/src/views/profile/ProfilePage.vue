@@ -1037,8 +1037,8 @@ onMounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  background: #e8f5e9;
-  color: #2e7d32;
+  background: var(--badge-green-soft);
+  color: var(--badge-green-text);
   padding: 6px 12px;
   border-radius: 20px;
   font-size: 0.9rem;
@@ -1048,7 +1048,7 @@ onMounted(() => {
 .remove-skill {
   background: none;
   border: none;
-  color: #2e7d32;
+  color: var(--badge-green-text);
   font-size: 1.1rem;
   cursor: pointer;
   padding: 0;

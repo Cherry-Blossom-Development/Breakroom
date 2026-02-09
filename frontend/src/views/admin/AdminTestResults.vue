@@ -43,20 +43,20 @@
         <tr v-for="run in runs" :key="run.id" :class="getRowClass(run)">
           <td>{{ run.id }}</td>
           <td>
-            <span class="platform-badge" :class="run.platform">
+            <StatusBadge :color="platformColor[run.platform] || 'gray'">
               {{ run.platform }}
-            </span>
+            </StatusBadge>
           </td>
           <td>
-            <span v-for="cat in run.categories" :key="cat" class="category-badge table-badge">
+            <StatusBadge v-for="cat in run.categories" :key="cat" color="teal" style="margin-right: 4px; margin-bottom: 2px;">
               {{ cat }}
-            </span>
+            </StatusBadge>
             <span v-if="!run.categories || run.categories.length === 0" class="no-categories">-</span>
           </td>
           <td>
-            <span class="status-badge" :class="run.status">
+            <StatusBadge :color="testStatusColor[run.status] || 'gray'">
               {{ run.status }}
-            </span>
+            </StatusBadge>
           </td>
           <td>{{ run.total_tests }}</td>
           <td class="passed">{{ run.passed_tests }}</td>
@@ -101,9 +101,9 @@
         <div class="run-summary">
           <div class="summary-item">
             <span class="label">Platform:</span>
-            <span class="platform-badge" :class="selectedRun.platform">
+            <StatusBadge :color="platformColor[selectedRun.platform] || 'gray'">
               {{ selectedRun.platform }}
-            </span>
+            </StatusBadge>
           </div>
           <div class="summary-item">
             <span class="label">Environment:</span>
@@ -111,9 +111,9 @@
           </div>
           <div class="summary-item">
             <span class="label">Status:</span>
-            <span class="status-badge" :class="selectedRun.status">
+            <StatusBadge :color="testStatusColor[selectedRun.status] || 'gray'">
               {{ selectedRun.status }}
-            </span>
+            </StatusBadge>
           </div>
           <div class="summary-item" v-if="selectedRun.branch">
             <span class="label">Branch:</span>
@@ -153,8 +153,8 @@
           <h3>Test Suites</h3>
           <div v-for="suite in suites" :key="suite.id" class="suite">
             <div class="suite-header" @click="toggleSuite(suite.id)">
-              <span class="status-indicator" :class="suite.status"></span>
-              <span class="category-badge" v-if="suite.category">{{ suite.category }}</span>
+              <StatusBadge :color="testStatusColor[suite.status] || 'gray'" dot />
+              <StatusBadge v-if="suite.category" color="teal">{{ suite.category }}</StatusBadge>
               <span class="suite-name">{{ suite.name }}</span>
               <span class="suite-stats">
                 {{ suite.passed_tests }}/{{ suite.total_tests }} passed
@@ -201,6 +201,15 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import StatusBadge from '../../components/StatusBadge.vue'
+
+const platformColor = { web: 'purple', android: 'green' }
+const testStatusColor = {
+  completed: 'green', passed: 'green',
+  failed: 'red',
+  running: 'yellow', pending: 'yellow',
+  cancelled: 'gray', skipped: 'gray'
+}
 
 const runs = ref([])
 const loading = ref(false)
@@ -401,49 +410,7 @@ thead {
   background-color: rgba(255, 193, 7, 0.1);
 }
 
-.platform-badge {
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 0.85em;
-  font-weight: 500;
-}
-
-.platform-badge.web {
-  background: #6f42c1;
-  color: white;
-}
-
-.platform-badge.android {
-  background: #3ddc84;
-  color: black;
-}
-
-.status-badge {
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 0.85em;
-  font-weight: 500;
-}
-
-.status-badge.completed {
-  background: #28a745;
-  color: white;
-}
-
-.status-badge.failed {
-  background: #dc3545;
-  color: white;
-}
-
-.status-badge.running {
-  background: #ffc107;
-  color: black;
-}
-
-.status-badge.cancelled {
-  background: #6c757d;
-  color: white;
-}
+/* Platform, status, and category badges handled by StatusBadge component */
 
 td.passed {
   color: #28a745;
@@ -644,43 +611,7 @@ td.failed {
   background: var(--color-background);
 }
 
-.status-indicator {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-}
-
-.status-indicator.passed {
-  background: #28a745;
-}
-
-.status-indicator.failed {
-  background: #dc3545;
-}
-
-.status-indicator.running {
-  background: #ffc107;
-}
-
-.status-indicator.skipped {
-  background: #6c757d;
-}
-
-.category-badge {
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 0.8em;
-  font-weight: 600;
-  text-transform: uppercase;
-  background: #17a2b8;
-  color: white;
-}
-
-.category-badge.table-badge {
-  margin-right: 4px;
-  margin-bottom: 2px;
-  display: inline-block;
-}
+/* Status indicators and category badges handled by StatusBadge component */
 
 .no-categories {
   color: var(--color-text-muted, #6c757d);
@@ -735,22 +666,22 @@ td.failed {
 }
 
 .icon.passed {
-  background: #28a745;
+  background: var(--badge-green);
   color: white;
 }
 
 .icon.failed {
-  background: #dc3545;
+  background: var(--badge-red);
   color: white;
 }
 
 .icon.skipped {
-  background: #6c757d;
+  background: var(--badge-gray);
   color: white;
 }
 
 .icon.pending {
-  background: #ffc107;
+  background: var(--badge-yellow);
   color: black;
 }
 
