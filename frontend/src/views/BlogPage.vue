@@ -185,8 +185,8 @@ const getPreview = (content) => {
 
 .blog-container {
   background: var(--color-background-card);
-  border-radius: 10px;
-  box-shadow: var(--shadow-md);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
   min-height: calc(100vh - 140px);
 }
 
@@ -288,10 +288,10 @@ const getPreview = (content) => {
 .post-card {
   display: flex;
   flex-direction: column;
-  padding: 15px 20px;
+  padding: var(--card-padding);
   margin-bottom: 10px;
   background: var(--color-background-soft);
-  border-radius: 8px;
+  border-radius: var(--card-radius-sm);
   cursor: pointer;
   transition: background 0.2s, box-shadow 0.2s;
 }

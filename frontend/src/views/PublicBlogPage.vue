@@ -217,7 +217,7 @@ function goToAuthorProfile() {
   gap: 20px;
   padding: 30px;
   background: var(--color-background-card);
-  border-radius: 10px;
+  border-radius: var(--card-radius);
   box-shadow: var(--shadow-md);
   margin-bottom: 20px;
   cursor: pointer;
@@ -284,7 +284,7 @@ function goToAuthorProfile() {
   width: 280px;
   flex-shrink: 0;
   background: var(--color-background-card);
-  border-radius: 10px;
+  border-radius: var(--card-radius);
   box-shadow: var(--shadow-md);
   padding: 20px;
   height: fit-content;
@@ -346,7 +346,7 @@ function goToAuthorProfile() {
 .post-content {
   flex: 1;
   background: var(--color-background-card);
-  border-radius: 10px;
+  border-radius: var(--card-radius);
   box-shadow: var(--shadow-md);
   padding: 30px;
   min-width: 0;
@@ -429,7 +429,7 @@ function goToAuthorProfile() {
   align-items: center;
   justify-content: center;
   background: var(--color-background-card);
-  border-radius: 10px;
+  border-radius: var(--card-radius);
   box-shadow: var(--shadow-md);
   padding: 60px;
   color: var(--color-text-light);

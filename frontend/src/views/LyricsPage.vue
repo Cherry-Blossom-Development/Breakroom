@@ -349,8 +349,8 @@ const getSectionLabel = (type) => {
 .lyrics-container,
 .song-detail {
   background: var(--color-background-card);
-  border-radius: 10px;
-  box-shadow: var(--shadow-md);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
   min-height: calc(100vh - 140px);
 }
 
@@ -517,7 +517,7 @@ const getSectionLabel = (type) => {
 
 .song-card {
   background: var(--color-background-soft);
-  border-radius: 8px;
+  border-radius: var(--card-radius-sm);
   padding: 18px;
   cursor: pointer;
   transition: background 0.2s, box-shadow 0.2s;
@@ -581,7 +581,7 @@ const getSectionLabel = (type) => {
 
 .idea-card {
   background: var(--color-background-soft);
-  border-radius: 8px;
+  border-radius: var(--card-radius-sm);
   padding: 15px 18px;
   cursor: pointer;
   transition: background 0.2s;
@@ -662,7 +662,7 @@ const getSectionLabel = (type) => {
   margin-bottom: 20px;
   padding: 15px;
   background: var(--color-background-soft);
-  border-radius: 8px;
+  border-radius: var(--card-radius-sm);
 }
 
 .collaborators-section h3 {
@@ -686,7 +686,7 @@ const getSectionLabel = (type) => {
 
 .lyric-card {
   background: var(--color-background-soft);
-  border-radius: 8px;
+  border-radius: var(--card-radius-sm);
   padding: 18px;
   cursor: pointer;
   transition: background 0.2s;

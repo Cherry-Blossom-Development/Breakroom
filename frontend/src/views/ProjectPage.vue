@@ -874,7 +874,7 @@ onMounted(async () => {
   flex: 1;
   min-width: 0;
   background: var(--color-background-soft);
-  border-radius: 8px;
+  border-radius: var(--card-radius-sm);
   border: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
@@ -922,7 +922,7 @@ onMounted(async () => {
 
 .ticket-card {
   background: var(--color-background-card);
-  border-radius: 6px;
+  border-radius: var(--card-radius-sm);
   padding: 12px;
   box-shadow: var(--shadow-sm);
   cursor: grab;

@@ -106,6 +106,13 @@
   --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.1);
   --shadow-lg: 0 4px 15px rgba(0, 0, 0, 0.15);
 
+  --card-radius: 12px;
+  --card-radius-sm: 8px;
+  --card-shadow: var(--shadow-sm);
+  --card-padding: 16px;
+  --card-padding-compact: 12px;
+  --card-gap: 10px;
+
   --section-gap: 160px;
 }
 

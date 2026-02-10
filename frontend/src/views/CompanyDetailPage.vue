@@ -1348,7 +1348,7 @@ onMounted(() => {
 
 .sidebar {
   background: var(--color-background-card);
-  border-radius: 12px;
+  border-radius: var(--card-radius);
   padding: 16px;
   box-shadow: var(--shadow-sm);
   height: fit-content;
@@ -1418,7 +1418,7 @@ onMounted(() => {
 
 .section-card {
   background: var(--color-background-card);
-  border-radius: 12px;
+  border-radius: var(--card-radius);
   padding: 24px;
   box-shadow: var(--shadow-sm);
 }
@@ -1532,7 +1532,7 @@ onMounted(() => {
 
 .position-card {
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--card-radius-sm);
   padding: 16px;
   background: var(--color-background-soft);
 }
@@ -1836,7 +1836,7 @@ onMounted(() => {
 
 .project-card {
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--card-radius-sm);
   padding: 16px;
   background: var(--color-background-soft);
 }
@@ -1901,7 +1901,7 @@ onMounted(() => {
 /* Employee Card Styles */
 .employee-item-card {
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--card-radius-sm);
   padding: 16px;
   background: var(--color-background-soft);
 }

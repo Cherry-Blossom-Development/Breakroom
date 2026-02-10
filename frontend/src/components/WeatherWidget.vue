@@ -408,7 +408,7 @@ onMounted(async () => {
   justify-content: center;
   gap: 24px;
   background: rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
+  border-radius: var(--card-radius-sm);
   padding: 10px;
   margin-top: auto;
 }

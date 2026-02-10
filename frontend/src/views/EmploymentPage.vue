@@ -317,7 +317,7 @@ onMounted(() => {
 /* Filters */
 .filters-bar {
   background: var(--color-background-card);
-  border-radius: 12px;
+  border-radius: var(--card-radius);
   padding: 16px;
   margin-bottom: 20px;
   box-shadow: var(--shadow-sm);
@@ -396,7 +396,7 @@ onMounted(() => {
 
 .position-card {
   background: var(--color-background-card);
-  border-radius: 12px;
+  border-radius: var(--card-radius);
   padding: 20px;
   box-shadow: var(--shadow-sm);
   cursor: pointer;
@@ -644,7 +644,7 @@ onMounted(() => {
   background: var(--color-error-bg);
   color: var(--color-error);
   padding: 30px;
-  border-radius: 12px;
+  border-radius: var(--card-radius);
   text-align: center;
 }
 
@@ -657,7 +657,7 @@ onMounted(() => {
   padding: 60px 20px;
   color: var(--color-text-light);
   background: var(--color-background-card);
-  border-radius: 12px;
+  border-radius: var(--card-radius);
   box-shadow: var(--shadow-sm);
 }
 

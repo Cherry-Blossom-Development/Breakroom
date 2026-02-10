@@ -482,8 +482,8 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
 
 .message {
   background: var(--color-background-card);
-  padding: 8px 10px;
-  border-radius: 6px;
+  padding: var(--card-padding-compact);
+  border-radius: var(--card-radius-sm);
   box-shadow: var(--shadow-sm);
 }
 

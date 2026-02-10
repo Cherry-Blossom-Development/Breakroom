@@ -613,7 +613,7 @@ function copyGalleryUrl() {
 /* Settings Section */
 .settings-section {
   background: var(--color-background-card);
-  border-radius: 12px;
+  border-radius: var(--card-radius);
   padding: 24px;
   margin-bottom: 24px;
   box-shadow: var(--shadow-sm);
@@ -747,7 +747,7 @@ function copyGalleryUrl() {
 /* Artworks Section */
 .artworks-section {
   background: var(--color-background-card);
-  border-radius: 12px;
+  border-radius: var(--card-radius);
   padding: 24px;
   box-shadow: var(--shadow-sm);
 }
@@ -798,7 +798,7 @@ function copyGalleryUrl() {
 
 .artwork-card {
   background: var(--color-background-soft);
-  border-radius: 10px;
+  border-radius: var(--card-radius);
   overflow: hidden;
   transition: transform 0.2s, box-shadow 0.2s;
 }

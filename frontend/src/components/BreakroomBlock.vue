@@ -98,8 +98,8 @@ const blockTitle = computed(() => {
   display: flex;
   flex-direction: column;
   background: var(--color-background-card);
-  border-radius: 8px;
-  box-shadow: var(--shadow-md);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
   overflow: hidden;
 }
 

@@ -258,7 +258,7 @@ onMounted(() => {
 
 .profile-card {
   background: var(--color-background-soft);
-  border-radius: 8px;
+  border-radius: var(--card-radius);
   padding: 20px;
 }
 
@@ -327,7 +327,7 @@ onMounted(() => {
 .job-card {
   background: var(--color-background-card);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--card-radius);
   padding: 15px;
 }
 

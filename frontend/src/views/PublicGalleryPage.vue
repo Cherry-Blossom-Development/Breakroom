@@ -244,7 +244,7 @@ function navigateArtwork(direction) {
   gap: 20px;
   padding: 30px;
   background: var(--color-background-card);
-  border-radius: 10px;
+  border-radius: var(--card-radius);
   box-shadow: var(--shadow-md);
   margin-bottom: 20px;
   cursor: pointer;
@@ -306,7 +306,7 @@ function navigateArtwork(direction) {
 .artwork-count-bar {
   padding: 12px 20px;
   background: var(--color-background-soft);
-  border-radius: 8px;
+  border-radius: var(--card-radius-sm);
   margin-bottom: 20px;
   color: var(--color-text-secondary);
   font-size: 0.9rem;
@@ -317,7 +317,7 @@ function navigateArtwork(direction) {
   text-align: center;
   padding: 60px 20px;
   background: var(--color-background-card);
-  border-radius: 10px;
+  border-radius: var(--card-radius);
   color: var(--color-text-muted);
 }
 
@@ -330,7 +330,7 @@ function navigateArtwork(direction) {
 
 .artwork-card {
   background: var(--color-background-card);
-  border-radius: 10px;
+  border-radius: var(--card-radius);
   overflow: hidden;
   box-shadow: var(--shadow-sm);
   cursor: pointer;

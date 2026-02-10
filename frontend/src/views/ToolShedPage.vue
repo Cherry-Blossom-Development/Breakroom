@@ -245,7 +245,7 @@ checkShortcuts()
 
 .intro-card {
   background: var(--color-background-card);
-  border-radius: 12px;
+  border-radius: var(--card-radius);
   padding: 24px;
   box-shadow: var(--shadow-sm);
 }
@@ -291,7 +291,7 @@ checkShortcuts()
 
 .category-block {
   background: var(--color-background-card);
-  border-radius: 12px;
+  border-radius: var(--card-radius);
   padding: 24px;
   box-shadow: var(--shadow-sm);
 }
@@ -337,9 +337,9 @@ checkShortcuts()
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 20px;
+  padding: var(--card-padding);
   background: var(--color-background-soft);
-  border-radius: 8px;
+  border-radius: var(--card-radius-sm);
   transition: background 0.2s;
 }
 
@@ -437,7 +437,7 @@ checkShortcuts()
 
 .feedback-card {
   background: var(--color-background-soft);
-  border-radius: 12px;
+  border-radius: var(--card-radius);
   padding: 20px 24px;
   border-left: 4px solid var(--color-accent);
 }

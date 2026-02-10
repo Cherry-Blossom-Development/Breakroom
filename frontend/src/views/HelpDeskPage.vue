@@ -661,7 +661,7 @@ onMounted(() => {
 .detail-info {
   background: var(--color-background-soft);
   padding: 15px;
-  border-radius: 8px;
+  border-radius: var(--card-radius-sm);
   margin-bottom: 20px;
 }
 
@@ -751,7 +751,7 @@ onMounted(() => {
 
 .ticket-card {
   background: var(--color-background-card);
-  border-radius: 8px;
+  border-radius: var(--card-radius-sm);
   padding: 15px;
   box-shadow: var(--shadow-sm);
   cursor: pointer;
@@ -836,6 +836,6 @@ onMounted(() => {
   padding: 30px;
   color: var(--color-text-light);
   background: var(--color-background-soft);
-  border-radius: 8px;
+  border-radius: var(--card-radius-sm);
 }
 </style>

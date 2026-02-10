@@ -149,7 +149,7 @@ onMounted(() => {
   gap: 12px;
   padding: 15px;
   background: var(--color-background-soft);
-  border-radius: 8px;
+  border-radius: var(--card-radius);
   margin-bottom: 25px;
   cursor: pointer;
   transition: background 0.2s;
@@ -212,7 +212,7 @@ onMounted(() => {
 
 .blog-post {
   background: var(--color-background-card);
-  border-radius: 8px;
+  border-radius: var(--card-radius);
   padding: 25px;
   box-shadow: var(--shadow-sm);
   margin-bottom: 20px;

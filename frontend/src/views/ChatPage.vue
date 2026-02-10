@@ -404,9 +404,9 @@ onUnmounted(() => {
   display: flex;
   height: calc(100vh - 120px);
   min-height: 500px;
-  border-radius: 10px;
+  border-radius: var(--card-radius);
   overflow: hidden;
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--card-shadow);
 }
 
 .chat-container {

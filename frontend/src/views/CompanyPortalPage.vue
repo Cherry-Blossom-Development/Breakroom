@@ -411,7 +411,7 @@ onMounted(() => {
 /* Tab Content */
 .tab-content {
   background: var(--color-background-card);
-  border-radius: 12px;
+  border-radius: var(--card-radius);
   padding: 24px;
   box-shadow: var(--shadow-sm);
 }
@@ -464,7 +464,7 @@ onMounted(() => {
 .company-card {
   padding: 16px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--card-radius-sm);
   cursor: pointer;
   transition: border-color 0.2s, box-shadow 0.2s;
   background: var(--color-background-soft);

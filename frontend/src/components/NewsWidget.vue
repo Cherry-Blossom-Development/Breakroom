@@ -168,8 +168,8 @@ onMounted(() => {
 
 .news-item {
   background: var(--color-background-card);
-  border-radius: 6px;
-  padding: 10px 12px;
+  border-radius: var(--card-radius-sm);
+  padding: var(--card-padding-compact);
   margin-bottom: 8px;
   box-shadow: var(--shadow-sm);
   cursor: pointer;

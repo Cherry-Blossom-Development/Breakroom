@@ -324,7 +324,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   background: rgba(255, 255, 255, 0.15);
-  border-radius: 6px;
+  border-radius: var(--card-radius-sm);
   padding: 4px 6px;
   min-width: 0;
   min-height: 0;

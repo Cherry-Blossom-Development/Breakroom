@@ -405,9 +405,10 @@ h1 {
   display: flex;
   align-items: center;
   gap: 15px;
-  padding: 15px;
+  padding: var(--card-padding);
   background: var(--color-background-soft);
-  border-radius: 8px;
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
 }
 
 .user-avatar {

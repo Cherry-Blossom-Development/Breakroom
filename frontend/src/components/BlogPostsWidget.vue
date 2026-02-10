@@ -212,8 +212,8 @@ onMounted(() => {
 
 .post-item {
   background: var(--color-background-card);
-  border-radius: 6px;
-  padding: 10px 12px;
+  border-radius: var(--card-radius-sm);
+  padding: var(--card-padding-compact);
   box-shadow: var(--shadow-sm);
   cursor: pointer;
   transition: box-shadow 0.2s, transform 0.1s;

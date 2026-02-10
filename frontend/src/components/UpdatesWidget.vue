@@ -177,8 +177,8 @@ onMounted(() => {
 
 .update-item {
   background: var(--color-background-card);
-  border-radius: 6px;
-  padding: 12px;
+  border-radius: var(--card-radius-sm);
+  padding: var(--card-padding-compact);
   margin-bottom: 8px;
   box-shadow: var(--shadow-sm);
   border-left: 3px solid var(--color-accent);
