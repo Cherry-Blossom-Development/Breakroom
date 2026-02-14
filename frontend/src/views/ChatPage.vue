@@ -3,7 +3,6 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { chat } from '@/stores/chat.js'
 import { user } from '@/stores/user.js'
 import ChatSidebar from '@/components/ChatSidebar.vue'
-import StatusBadge from '@/components/StatusBadge.vue'
 
 const messageInput = ref('')
 const messagesContainer = ref(null)
@@ -277,12 +276,12 @@ onUnmounted(() => {
             &larr; Rooms
           </button>
           <div class="room-info">
-            <h2># {{ currentRoomName }}</h2>
+            <div class="room-title">
+              <span class="connection-dot" :class="chat.connected ? 'dot-connected' : 'dot-disconnected'"></span>
+              <h2># {{ currentRoomName }}</h2>
+            </div>
             <p v-if="currentRoomDescription" class="room-description">{{ currentRoomDescription }}</p>
           </div>
-          <StatusBadge :color="chat.connected ? 'green' : 'red'" dot>
-            {{ chat.connected ? 'Connected' : 'Disconnected' }}
-          </StatusBadge>
         </div>
 
       <div class="messages-container" ref="messagesContainer">
@@ -428,6 +427,27 @@ onUnmounted(() => {
 .chat-header h2 {
   margin: 0;
   color: var(--color-text);
+}
+
+.room-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.connection-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-connected {
+  background-color: #34c759;
+}
+
+.dot-disconnected {
+  background-color: #ff3b30;
 }
 
 .room-description {
