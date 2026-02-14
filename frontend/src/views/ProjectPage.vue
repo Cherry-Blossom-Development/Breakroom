@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
 import draggable from 'vuedraggable'
 import StatusBadge from '../components/StatusBadge.vue'
+import LoadingSpinner from '../components/LoadingSpinner.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -510,7 +511,7 @@ onMounted(async () => {
     </div>
 
     <!-- Loading State -->
-    <div v-if="loading" class="loading">Loading project...</div>
+    <div v-if="loading" class="loading"><LoadingSpinner size="small" /> Loading project...</div>
 
     <!-- Error State -->
     <div v-else-if="error" class="error-box">
@@ -1004,7 +1005,10 @@ onMounted(async () => {
 }
 
 .loading {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   padding: 40px;
   color: var(--color-text-muted);
 }

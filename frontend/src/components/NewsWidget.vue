@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import LoadingSpinner from './LoadingSpinner.vue'
 
 const news = ref([])
 const loading = ref(true)
@@ -59,7 +60,7 @@ onMounted(() => {
   <div class="news-widget">
     <!-- Loading state -->
     <div v-if="loading" class="loading-state">
-      <div class="spinner"></div>
+      <LoadingSpinner size="small" />
       <span>Loading news...</span>
     </div>
 
@@ -109,19 +110,6 @@ onMounted(() => {
   height: 100%;
   color: var(--color-text-light);
   gap: 12px;
-}
-
-.spinner {
-  width: 24px;
-  height: 24px;
-  border: 3px solid var(--color-border);
-  border-top-color: #d32f2f;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 
 .error-state {

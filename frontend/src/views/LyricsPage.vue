@@ -4,6 +4,7 @@ import { lyrics } from '@/stores/lyrics.js'
 import LyricEditor from '@/components/LyricEditor.vue'
 import SongModal from '@/components/SongModal.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
+import LoadingSpinner from '@/components/LoadingSpinner.vue'
 
 const showLyricEditor = ref(false)
 const showSongModal = ref(false)
@@ -181,7 +182,7 @@ const getSectionLabel = (type) => {
       </div>
 
       <!-- Lyrics List -->
-      <div v-if="lyrics.loading" class="loading">Loading lyrics...</div>
+      <div v-if="lyrics.loading" class="loading"><LoadingSpinner size="small" /> Loading lyrics...</div>
       <div v-else-if="lyrics.currentLyrics.length === 0" class="empty-state">
         <p>No lyrics yet for this song.</p>
         <p>Click "+ Add Lyric" to start writing!</p>
@@ -236,7 +237,7 @@ const getSectionLabel = (type) => {
         </button>
       </div>
 
-      <div v-if="lyrics.loading" class="loading">Loading...</div>
+      <div v-if="lyrics.loading" class="loading"><LoadingSpinner size="small" /> Loading...</div>
 
       <div v-else-if="lyrics.error" class="error">
         {{ lyrics.error }}
@@ -482,6 +483,13 @@ const getSectionLabel = (type) => {
   padding: 60px 20px;
   text-align: center;
   color: var(--color-text-light);
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
 }
 
 .error {

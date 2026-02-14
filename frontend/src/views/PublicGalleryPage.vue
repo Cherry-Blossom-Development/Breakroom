@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import LoadingSpinner from '../components/LoadingSpinner.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -128,7 +129,7 @@ function navigateArtwork(direction) {
 <template>
   <main class="public-gallery-page">
     <div v-if="loading" class="loading">
-      Loading gallery...
+      <LoadingSpinner size="small" /> Loading gallery...
     </div>
 
     <div v-else-if="error" class="error-container">
@@ -215,6 +216,11 @@ function navigateArtwork(direction) {
   justify-content: center;
   min-height: 50vh;
   color: var(--color-text-muted);
+}
+
+.loading {
+  flex-direction: row;
+  gap: 10px;
 }
 
 .error {

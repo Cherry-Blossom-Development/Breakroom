@@ -10,7 +10,7 @@
       <input type="password" required v-model="password">
       <div v-if="passwordError" class="error">{{ passwordError }}</div>
     </div>
-    <button type="submit">Login</button>
+    <button type="submit" :disabled="submitting">{{ submitting ? 'Logging in...' : 'Login' }}</button>
     <p class="signup-prompt">
       Don't have an account? <RouterLink to="/signup">Sign up</RouterLink>
     </p>
@@ -27,7 +27,8 @@ export default {
     return {
       handle: '',
       password: '',
-      passwordError: ''
+      passwordError: '',
+      submitting: false
     }
   },
   setup() {
@@ -36,6 +37,8 @@ export default {
   },
   methods: {
     async handleSubmit() {
+      this.submitting = true
+      this.passwordError = ''
       try {
         await axios.post(`${import.meta.env.VITE_API_BASE_URL || ''}/api/auth/login`, {
           handle: this.handle,
@@ -52,6 +55,8 @@ export default {
         // Handle login failure
         this.passwordError = 'Invalid handle or password'
         console.error(err)
+      } finally {
+        this.submitting = false
       }
     }
   }
@@ -107,6 +112,10 @@ export default {
   }
   button:active {
     transform: translateY(1px);
+  }
+  button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
   .error {
     color: var(--color-error);

@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
 import StatusBadge from '../components/StatusBadge.vue'
+import LoadingSpinner from '../components/LoadingSpinner.vue'
 
 const router = useRouter()
 
@@ -181,7 +182,7 @@ onMounted(() => {
     </div>
 
     <!-- Loading/Error States -->
-    <div v-if="loading" class="loading">Loading positions...</div>
+    <div v-if="loading" class="loading"><LoadingSpinner size="small" /> Loading positions...</div>
 
     <div v-else-if="error" class="error-box">
       <p>{{ error }}</p>
@@ -635,7 +636,10 @@ onMounted(() => {
 
 /* States */
 .loading {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   padding: 60px;
   color: var(--color-text-muted);
 }

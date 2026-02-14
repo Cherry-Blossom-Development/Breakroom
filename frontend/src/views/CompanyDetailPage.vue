@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
 import StatusBadge from '../components/StatusBadge.vue'
+import LoadingSpinner from '../components/LoadingSpinner.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -758,7 +759,7 @@ onMounted(() => {
 
 <template>
   <div class="page-container company-detail-page">
-    <div v-if="loading" class="loading">Loading company...</div>
+    <div v-if="loading" class="loading"><LoadingSpinner size="small" /> Loading company...</div>
 
     <div v-else-if="error" class="error-box">
       <p>{{ error }}</p>
@@ -1804,7 +1805,10 @@ onMounted(() => {
 }
 
 .loading {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   padding: 60px;
   color: var(--color-text-muted);
 }

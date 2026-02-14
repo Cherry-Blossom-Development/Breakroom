@@ -19,7 +19,7 @@
     </div>
 
     <!-- Loading State -->
-    <p v-if="loading" class="loading">Loading test runs...</p>
+    <p v-if="loading" class="loading"><LoadingSpinner size="small" /> Loading test runs...</p>
 
     <!-- Error State -->
     <p v-if="error" class="error">{{ error }}</p>
@@ -202,6 +202,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import StatusBadge from '../../components/StatusBadge.vue'
+import LoadingSpinner from '../../components/LoadingSpinner.vue'
 
 const platformColor = { web: 'purple', android: 'green' }
 const testStatusColor = {
@@ -376,8 +377,11 @@ h1 {
 }
 
 .loading, .error, .empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   padding: 20px;
-  text-align: center;
   color: var(--color-text);
 }
 

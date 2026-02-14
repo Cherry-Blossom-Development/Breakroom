@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import LoadingSpinner from './LoadingSpinner.vue'
 
 const emit = defineEmits(['close', 'saved'])
 
@@ -131,7 +132,7 @@ function close() {
       </header>
 
       <div v-if="loading" class="loading">
-        Loading settings...
+        <LoadingSpinner size="small" /> Loading settings...
       </div>
 
       <div v-else class="modal-body">
@@ -246,8 +247,11 @@ function close() {
 }
 
 .loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   padding: 40px;
-  text-align: center;
   color: var(--color-text-light);
 }
 

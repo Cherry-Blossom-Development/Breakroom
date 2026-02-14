@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
+import LoadingSpinner from '../components/LoadingSpinner.vue'
 
 const router = useRouter()
 const loading = ref(true)
@@ -109,7 +110,7 @@ onMounted(() => {
 <template>
   <div class="page-container kanban-loading-page">
     <div v-if="loading" class="loading-container">
-      <div class="spinner"></div>
+      <LoadingSpinner size="large" />
       <p class="status-message">{{ statusMessage }}</p>
     </div>
 
@@ -134,20 +135,8 @@ onMounted(() => {
   text-align: center;
 }
 
-.spinner {
-  width: 50px;
-  height: 50px;
-  border: 4px solid var(--color-border);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
+.loading-container :deep(.spinner) {
   margin: 0 auto 20px;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 .status-message {

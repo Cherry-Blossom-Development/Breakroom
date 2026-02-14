@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { io } from 'socket.io-client'
 import { user } from '@/stores/user.js'
 import { comments } from '@/stores/comments.js'
+import LoadingSpinner from './LoadingSpinner.vue'
 
 const props = defineProps({
   postId: {
@@ -240,7 +241,7 @@ watch(() => props.postId, async (newId, oldId) => {
     </div>
 
     <!-- Loading state -->
-    <div v-if="loading" class="loading">Loading comments...</div>
+    <div v-if="loading" class="loading"><LoadingSpinner size="small" /> Loading comments...</div>
 
     <!-- Comments list -->
     <div v-else-if="postComments.length > 0" class="comments-list">
@@ -458,6 +459,10 @@ watch(() => props.postId, async (newId, oldId) => {
 }
 
 .loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   color: var(--color-text-light);
   padding: 20px 0;
 }

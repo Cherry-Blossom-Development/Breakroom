@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { friends } from '@/stores/friends.js'
+import LoadingSpinner from '@/components/LoadingSpinner.vue'
 import { user } from '@/stores/user.js'
 
 const router = useRouter()
@@ -168,7 +169,7 @@ function goToProfile(handle) {
       </button>
     </div>
 
-    <div v-if="friends.loading" class="loading">Loading...</div>
+    <div v-if="friends.loading" class="loading"><LoadingSpinner size="small" /> Loading...</div>
 
     <div v-else class="tab-content">
       <!-- Friends List -->
@@ -253,7 +254,7 @@ function goToProfile(handle) {
           />
         </div>
 
-        <div v-if="searching" class="loading">Searching...</div>
+        <div v-if="searching" class="loading"><LoadingSpinner size="small" /> Searching...</div>
         <div v-else-if="searchError" class="error">{{ searchError }}</div>
         <div v-else-if="searchQuery && searchResults.length === 0" class="empty-state">
           No users found matching "{{ searchQuery }}"
@@ -355,7 +356,10 @@ h1 {
 }
 
 .loading {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   padding: 40px;
   color: var(--color-text-muted);
 }

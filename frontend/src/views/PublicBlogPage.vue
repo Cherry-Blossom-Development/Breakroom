@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import BlogComments from '../components/BlogComments.vue'
+import LoadingSpinner from '../components/LoadingSpinner.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -113,7 +114,7 @@ function goToAuthorProfile() {
 <template>
   <main class="public-blog-page">
     <div v-if="loading" class="loading">
-      Loading blog...
+      <LoadingSpinner size="small" /> Loading blog...
     </div>
 
     <div v-else-if="error" class="error-container">
@@ -189,6 +190,11 @@ function goToAuthorProfile() {
   justify-content: center;
   min-height: 50vh;
   color: var(--color-text-muted);
+}
+
+.loading {
+  flex-direction: row;
+  gap: 10px;
 }
 
 .error {

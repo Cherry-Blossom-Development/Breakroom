@@ -7,6 +7,7 @@ import { user } from '@/stores/user.js'
 import { authFetch } from '@/utilities/authFetch'
 import BreakroomBlock from '@/components/BreakroomBlock.vue'
 import AddBlockModal from '@/components/AddBlockModal.vue'
+import LoadingSpinner from '@/components/LoadingSpinner.vue'
 
 const showAddModal = ref(false)
 const shortcuts = ref([])
@@ -186,6 +187,7 @@ onUnmounted(() => {
     </header>
 
     <div v-if="breakroom.loading" class="loading">
+      <LoadingSpinner size="small" />
       Loading your layout...
     </div>
 
@@ -348,7 +350,10 @@ onUnmounted(() => {
 }
 
 .loading {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   padding: 60px 20px;
   color: var(--color-text-muted);
   font-size: 1.1rem;

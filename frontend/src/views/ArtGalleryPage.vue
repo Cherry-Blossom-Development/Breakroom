@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { authFetch } from '@/utilities/authFetch'
+import LoadingSpinner from '@/components/LoadingSpinner.vue'
 
 const settings = ref(null)
 const artworks = ref([])
@@ -356,7 +357,7 @@ function copyGalleryUrl() {
       <p class="subtitle">Upload and display your artwork</p>
     </header>
 
-    <div v-if="loading" class="loading">Loading gallery...</div>
+    <div v-if="loading" class="loading"><LoadingSpinner size="small" /> Loading gallery...</div>
 
     <div v-else class="gallery-content">
       <!-- Success/Error Messages -->
@@ -587,7 +588,10 @@ function copyGalleryUrl() {
 }
 
 .loading {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   padding: 60px;
   color: var(--color-text-muted);
 }

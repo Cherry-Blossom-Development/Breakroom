@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
+import LoadingSpinner from '../components/LoadingSpinner.vue'
 
 const router = useRouter()
 
@@ -218,7 +219,7 @@ onMounted(() => {
 
     <!-- My Companies Tab -->
     <div v-if="activeTab === 'my-companies'" class="tab-content">
-      <div v-if="loadingMyCompanies" class="loading">Loading your companies...</div>
+      <div v-if="loadingMyCompanies" class="loading"><LoadingSpinner size="small" /> Loading your companies...</div>
 
       <div v-else-if="myCompanies.length === 0" class="empty-state">
         <p>You are not associated with any companies yet.</p>
@@ -639,7 +640,10 @@ onMounted(() => {
 
 /* Loading/Empty States */
 .loading {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   padding: 40px;
   color: var(--color-text-muted);
 }

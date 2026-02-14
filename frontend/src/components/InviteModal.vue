@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { chat } from '@/stores/chat.js'
+import LoadingSpinner from './LoadingSpinner.vue'
 
 const props = defineProps({
   roomId: {
@@ -86,7 +87,7 @@ const inviteUser = async (user) => {
         class="search-input"
       />
 
-      <div v-if="loading" class="loading">Loading users...</div>
+      <div v-if="loading" class="loading"><LoadingSpinner size="small" /> Loading users...</div>
 
       <div v-else-if="filteredUsers.length === 0" class="no-users">
         No users available to invite
@@ -161,7 +162,10 @@ const inviteUser = async (user) => {
 }
 
 .loading, .no-users {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   color: #666;
   padding: 20px;
 }

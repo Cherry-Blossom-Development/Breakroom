@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { io } from 'socket.io-client'
+import LoadingSpinner from './LoadingSpinner.vue'
 
 const props = defineProps({
   roomId: {
@@ -333,7 +334,7 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
 <template>
   <div class="chat-widget">
     <div v-if="loading" class="loading">
-      Loading messages...
+      <LoadingSpinner size="small" /> Loading messages...
     </div>
 
     <div v-else-if="error" class="error">
@@ -452,6 +453,7 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 10px;
   color: var(--color-text-light);
   font-size: 0.9rem;
   padding: 20px;

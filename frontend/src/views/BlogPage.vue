@@ -4,6 +4,7 @@ import { blog } from '@/stores/blog.js'
 import BlogEditor from '@/components/BlogEditor.vue'
 import BlogSettings from '@/components/BlogSettings.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
+import LoadingSpinner from '@/components/LoadingSpinner.vue'
 
 const showEditor = ref(false)
 const showSettings = ref(false)
@@ -132,6 +133,7 @@ const getPreview = (content) => {
       </div>
 
       <div v-if="blog.loading" class="loading">
+        <LoadingSpinner size="small" />
         Loading posts...
       </div>
 
@@ -261,6 +263,13 @@ const getPreview = (content) => {
   padding: 60px 20px;
   text-align: center;
   color: var(--color-text-light);
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
 }
 
 .error {

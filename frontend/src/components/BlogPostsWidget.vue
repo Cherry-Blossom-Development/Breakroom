@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
+import LoadingSpinner from './LoadingSpinner.vue'
 
 const router = useRouter()
 const posts = ref([])
@@ -88,7 +89,7 @@ onMounted(() => {
   <div class="blog-posts-widget">
     <!-- Loading state -->
     <div v-if="loading" class="loading-state">
-      <div class="spinner"></div>
+      <LoadingSpinner size="small" />
       <span>Loading posts...</span>
     </div>
 
@@ -148,19 +149,6 @@ onMounted(() => {
   height: 100%;
   color: var(--color-text-light);
   gap: 12px;
-}
-
-.spinner {
-  width: 24px;
-  height: 24px;
-  border: 3px solid var(--color-border);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
 }
 
 .error-state {

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import LoadingSpinner from './LoadingSpinner.vue'
 
 // Default to Los Angeles
 const DEFAULT_LAT = 34.0522
@@ -164,7 +165,7 @@ onMounted(async () => {
   <div class="weather-widget">
     <!-- Loading state -->
     <div v-if="loading" class="loading-state">
-      <div class="spinner"></div>
+      <LoadingSpinner size="small" class="weather-spinner" />
       <span>Loading weather...</span>
     </div>
 
@@ -251,17 +252,9 @@ onMounted(async () => {
   gap: 12px;
 }
 
-.spinner {
-  width: 24px;
-  height: 24px;
-  border: 3px solid rgba(255, 255, 255, 0.3);
-  border-top-color: white;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
+.weather-spinner {
+  border-color: rgba(255, 255, 255, 0.3) !important;
+  border-top-color: white !important;
 }
 
 .error-state {

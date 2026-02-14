@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { authFetch } from '../utilities/authFetch'
 import StatusBadge from '../components/StatusBadge.vue'
+import LoadingSpinner from '../components/LoadingSpinner.vue'
 
 // Default to Cherry Blossom Development (company_id = 1)
 const companyId = ref(1)
@@ -383,7 +384,7 @@ onMounted(() => {
     </div>
 
     <!-- Loading State -->
-    <div v-if="loading" class="loading">Loading tickets...</div>
+    <div v-if="loading" class="loading"><LoadingSpinner size="small" /> Loading tickets...</div>
 
     <!-- Error State -->
     <div v-else-if="error" class="error-box">
@@ -808,7 +809,10 @@ onMounted(() => {
 }
 
 .loading {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   padding: 40px;
   color: var(--color-text-muted);
 }

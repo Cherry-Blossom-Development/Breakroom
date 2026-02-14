@@ -30,7 +30,7 @@
     </div>
     <!-- Display error message if any -->
     <div v-if="errorMessage" class="error">{{ errorMessage }}</div>
-    <button type="submit">Create User</button>
+    <button type="submit" :disabled="submitting">{{ submitting ? 'Creating Account...' : 'Create User' }}</button>
   </form>
 </template>
 
@@ -83,7 +83,8 @@ export default {
       passwordError: '',
       passwordError2: '',
       emailError: '',
-      errorMessage: ''
+      errorMessage: '',
+      submitting: false
     }
   },
   setup() {
@@ -116,8 +117,9 @@ export default {
       }
     
       if (!errorsExists) {
+        this.submitting = true;
         const salt = generateSalt();
-        
+
         try {
           // Await the hash generation
           const hash = await hashPasswordWithSalt(this.password, salt);
@@ -148,8 +150,10 @@ export default {
             // Handle other errors (e.g., server errors, network issues)
             this.errorMessage = 'An unexpected error occurred. Please try again later.';
           }
+        } finally {
+          this.submitting = false;
         }
-      
+
       }
     }
   }
@@ -205,6 +209,10 @@ export default {
   }
   button:active {
     transform: translateY(1px);
+  }
+  button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
   .error {
     color: var(--color-error);

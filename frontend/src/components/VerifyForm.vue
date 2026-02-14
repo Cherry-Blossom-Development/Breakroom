@@ -3,7 +3,7 @@
     <div class="verify-card">
       <!-- Loading State -->
       <div v-if="isLoading" class="verify-content">
-        <div class="spinner"></div>
+        <LoadingSpinner size="large" class="verify-spinner" />
         <h2>Verifying Your Email</h2>
         <p class="subtitle">Please wait a moment...</p>
       </div>
@@ -54,8 +54,10 @@
 
 <script>
 import axios from 'axios';
+import LoadingSpinner from './LoadingSpinner.vue';
 
 export default {
+  components: { LoadingSpinner },
   data() {
     return {
       isLoading: true,
@@ -233,19 +235,7 @@ h2 {
   cursor: not-allowed;
 }
 
-/* Loading Spinner */
-.spinner {
-  width: 50px;
-  height: 50px;
-  border: 4px solid var(--color-border);
-  border-top: 4px solid #667eea;
-  border-radius: 50%;
+.verify-spinner {
   margin: 0 auto 24px;
-  animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
 }
 </style>

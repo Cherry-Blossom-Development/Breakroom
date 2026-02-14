@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
+import LoadingSpinner from '../../components/LoadingSpinner.vue'
 
 const isEditing = ref(false)
 const isLoading = ref(true)
@@ -421,7 +422,7 @@ onMounted(() => {
 
 <template>
   <div class="profile-content">
-    <div v-if="isLoading" class="loading">Loading profile...</div>
+    <div v-if="isLoading" class="loading"><LoadingSpinner size="small" /> Loading profile...</div>
 
     <div v-else-if="error && !profile.handle" class="error-box">
       {{ error }}
@@ -742,7 +743,10 @@ onMounted(() => {
 }
 
 .loading {
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   padding: 40px;
   color: #666;
 }
