@@ -267,13 +267,6 @@ onUnmounted(() => {
       @added="onBlockAdded"
     />
 
-    <!-- Bottom Menu -->
-    <nav class="bottom-menu">
-      <RouterLink to="/about-company">About</RouterLink>
-      <RouterLink to="/employment">Employment</RouterLink>
-      <RouterLink to="/help-desk">Help Desk</RouterLink>
-      <RouterLink to="/company-portal">Company Portal</RouterLink>
-    </nav>
   </section>
 </template>
 
@@ -412,40 +405,6 @@ onUnmounted(() => {
   border-radius: 8px;
 }
 
-/* Bottom Menu */
-.bottom-menu {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 2rem;
-  padding: 1rem 2rem;
-  margin-top: 1.5rem;
-  background: var(--color-header-bg);
-  border-radius: 8px;
-}
-
-.bottom-menu a {
-  color: var(--color-header-text);
-  opacity: 0.85;
-  text-decoration: none;
-  font-size: 0.95rem;
-  font-weight: 500;
-  padding: 0.5rem 1rem;
-  border-radius: 4px;
-  transition: background-color 0.2s, color 0.2s, opacity 0.2s;
-}
-
-.bottom-menu a:hover {
-  background: rgba(255, 255, 255, 0.1);
-  opacity: 1;
-}
-
-.bottom-menu a.router-link-exact-active {
-  background: var(--color-accent-light);
-  color: var(--color-accent);
-  opacity: 1;
-}
-
 /* Mobile accordion layout */
 .mobile-blocks {
   display: flex;
@@ -575,16 +534,6 @@ onUnmounted(() => {
 
   .breakroom-header {
     padding: 0.5rem 1rem !important;
-  }
-
-  .bottom-menu {
-    gap: 0.5rem;
-    padding: 0.75rem 0.5rem;
-  }
-
-  .bottom-menu a {
-    font-size: 0.75rem;
-    padding: 0.4rem 0.5rem;
   }
 }
 </style>

@@ -6,27 +6,13 @@ import { notificationStore } from './stores/notification.js'
 import { initEventService, destroyEventService } from './utilities/eventService.js'
 import HeaderNotification from './components/HeaderNotification.vue'
 import PopupNotification from './components/PopupNotification.vue'
+import AppSidebar from './components/AppSidebar.vue'
+import BottomTabBar from './components/BottomTabBar.vue'
 import { io } from 'socket.io-client'
 
 const router = useRouter()
 const route = useRoute()
-const showMenu = ref(false)
-const userMenuRef = ref(null)
-
-// Close menu when clicking outside
-function handleClickOutside(event) {
-  if (userMenuRef.value && !userMenuRef.value.contains(event.target)) {
-    showMenu.value = false
-  }
-}
-
-onMounted(() => {
-  document.addEventListener('click', handleClickOutside)
-})
-
-onUnmounted(() => {
-  document.removeEventListener('click', handleClickOutside)
-})
+const sidebarOpen = ref(false)
 const isAdmin = ref(false)
 
 async function checkAdminPermission() {
@@ -106,15 +92,19 @@ onUnmounted(() => {
   teardownNotificationSocket()
 })
 
-function toggleMenu() {
-  showMenu.value = !showMenu.value
-}
-
 function logout() {
   user.logout()
   isAdmin.value = false
+  sidebarOpen.value = false
   router.push('/login')
-  showMenu.value = false
+}
+
+function toggleSidebar() {
+  sidebarOpen.value = !sidebarOpen.value
+}
+
+function closeSidebar() {
+  sidebarOpen.value = false
 }
 
 setInterval(() => {
@@ -134,46 +124,52 @@ setInterval(() => {
   <HeaderNotification />
   <PopupNotification />
 
-  <header>
+  <!-- Logged-in: sidebar + bottom bar navigation -->
+  <template v-if="user.username">
+    <AppSidebar
+      :is-admin="isAdmin"
+      :visible="sidebarOpen"
+      @close="closeSidebar"
+      @logout="logout"
+    />
 
-    <div class="wrapper page-container">
-      <nav>
+    <!-- Tablet hamburger top bar -->
+    <div class="tablet-top-bar">
+      <button class="hamburger-btn" @click="toggleSidebar" aria-label="Open menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
+          <line x1="3" y1="6" x2="21" y2="6"/>
+          <line x1="3" y1="12" x2="21" y2="12"/>
+          <line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>
+      </button>
+      <span class="tablet-logo">Breakroom</span>
+    </div>
 
-        <template v-if="user.username">
-          <RouterLink to="/breakroom">Home</RouterLink>
-          <RouterLink to="/blog">Blog</RouterLink>
-          <RouterLink to="/chat">Chat</RouterLink>
-          <RouterLink to="/friends">Friends</RouterLink>
-          <RouterLink v-if="isAdmin" to="/admin">Admin</RouterLink>
-          <div class="user-menu" ref="userMenuRef">
-            <div @click="toggleMenu">
-              <span class="username-text">{{ user.username }}</span>
-              <svg class="user-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 12c2.7 0 5-2.3 5-5s-2.3-5-5-5-5 2.3-5 5 2.3 5 5 5zm0 2c-3.3 0-10 1.7-10 5v2h20v-2c0-3.3-6.7-5-10-5z"/>
-              </svg>
-            </div>
-            <div
-              v-if="showMenu"
-              class="dropdown"
-              @click.stop
-            >
-              <RouterLink to="/profile" @click="showMenu = false">Profile</RouterLink>
-              <a href="#" @click.prevent="logout">Logout</a>
-            </div>
-          </div>
-        </template>
+    <div class="app-content">
+      <RouterView />
+    </div>
 
-        <template v-else>
+    <BottomTabBar
+      :is-admin="isAdmin"
+      @logout="logout"
+    />
+  </template>
+
+  <!-- Logged-out: simple top nav -->
+  <template v-else>
+    <header class="public-header">
+      <div class="wrapper page-container">
+        <nav class="public-nav">
           <RouterLink to="/">Home</RouterLink>
           <RouterLink to="/about">About</RouterLink>
           <RouterLink to="/login">Login</RouterLink>
           <RouterLink to="/signup">Sign Up</RouterLink>
-        </template>
-      </nav>
-    </div>
-  </header>
+        </nav>
+      </div>
+    </header>
 
-  <RouterView />
+    <RouterView />
+  </template>
 </template>
 
 <style>
@@ -184,39 +180,115 @@ body {
   min-height: 100vh;
 }
 
-header {
+/* ============================================
+   LOGGED-IN LAYOUT
+   ============================================ */
+
+/* Desktop: content shifts right for sidebar */
+@media (min-width: 769px) {
+  .app-content {
+    margin-left: 220px;
+  }
+
+  .tablet-top-bar {
+    display: none;
+  }
+}
+
+/* Tablet: hamburger top bar, no sidebar margin */
+@media (max-width: 768px) and (min-width: 481px) {
+  .app-content {
+    margin-left: 0;
+    padding-top: 48px;
+  }
+
+  .tablet-top-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 48px;
+    background: var(--color-header-bg);
+    color: var(--color-header-text);
+    padding: 0 12px;
+    z-index: 998;
+  }
+}
+
+/* Mobile: no sidebar margin, pad bottom for tab bar */
+@media (max-width: 480px) {
+  .app-content {
+    margin-left: 0;
+    padding-bottom: 64px;
+  }
+
+  .tablet-top-bar {
+    display: none;
+  }
+}
+
+.hamburger-btn {
+  background: none;
+  border: none;
+  color: var(--color-header-text);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+}
+
+.hamburger-btn:hover {
+  opacity: 0.8;
+}
+
+.tablet-logo {
+  font-size: 1.1rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, var(--color-accent) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ============================================
+   LOGGED-OUT PUBLIC HEADER
+   ============================================ */
+
+.public-header {
   line-height: 1.5;
   max-height: 100vh;
   padding: 0.25rem 0;
 }
 
-header .page-container {
+.public-header .page-container {
   padding-top: 0.5rem;
   padding-bottom: 0.5rem;
 }
 
-nav {
+.public-nav {
   width: 100%;
   font-size: 15px;
   text-align: right;
-  margin-top: 0rem;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 0;
 }
 
-nav a.router-link-exact-active {
+.public-nav a.router-link-exact-active {
   color: var(--color-accent);
   font-weight: 500;
 }
 
-nav a.router-link-exact-active:hover {
+.public-nav a.router-link-exact-active:hover {
   background-color: transparent;
   color: var(--color-accent);
 }
 
-nav a {
+.public-nav a {
   display: inline-block;
   padding: 0.5rem 1rem;
   border-left: 1px solid var(--color-border);
@@ -225,79 +297,11 @@ nav a {
   transition: color 0.2s;
 }
 
-nav a:hover {
+.public-nav a:hover {
   color: var(--color-accent);
 }
 
-nav a:first-of-type {
+.public-nav a:first-of-type {
   border: 0;
-}
-
-/* User menu styles */
-.user-menu {
-  position: relative;
-  display: inline-block;
-  cursor: pointer;
-  padding: 0.5rem 1rem;
-  border-left: 1px solid var(--color-border);
-  color: var(--color-accent);
-  font-weight: 500;
-  transition: background-color 0.2s;
-  border-radius: 4px;
-}
-
-.user-menu:hover {
-  background-color: var(--color-accent-light);
-}
-
-.dropdown {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  background: var(--color-background-card);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 8px 0;
-  min-width: 160px;
-  box-shadow: var(--shadow-lg);
-  display: flex;
-  flex-direction: column;
-  z-index: 1000;
-}
-
-.dropdown::before {
-  content: '';
-  position: absolute;
-  top: -6px;
-  right: 16px;
-  width: 12px;
-  height: 12px;
-  background: var(--color-background-card);
-  transform: rotate(45deg);
-  border-left: 1px solid var(--color-border);
-  border-top: 1px solid var(--color-border);
-}
-
-.dropdown a {
-  padding: 10px 16px;
-  text-decoration: none;
-  color: var(--color-text);
-  border: none;
-  transition: background-color 0.15s, color 0.15s;
-  font-size: 14px;
-}
-
-.dropdown a:hover {
-  background-color: var(--color-background-hover);
-  color: var(--color-accent);
-  text-decoration: none;
-}
-
-/* User icon - hidden on desktop, shown on mobile */
-.user-icon {
-  display: none;
-  width: 24px;
-  height: 24px;
-  vertical-align: middle;
 }
 </style>

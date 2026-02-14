@@ -2,7 +2,6 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { chat } from '@/stores/chat.js'
 import { user } from '@/stores/user.js'
-import ChatSidebar from '@/components/ChatSidebar.vue'
 
 const messageInput = ref('')
 const messagesContainer = ref(null)
@@ -19,22 +18,6 @@ const toggleAttachMenu = () => {
 
 const closeAttachMenu = () => {
   showAttachMenu.value = false
-}
-
-// Mobile view state
-const isMobile = ref(false)
-const showMobileChat = ref(false)
-
-const checkMobile = () => {
-  isMobile.value = window.innerWidth <= 768
-}
-
-const openMobileChat = () => {
-  showMobileChat.value = true
-}
-
-const closeMobileChat = () => {
-  showMobileChat.value = false
 }
 
 // Get current room info
@@ -73,13 +56,6 @@ watch(() => chat.messages.length, () => {
 watch(() => chat.messages, () => {
   scrollToBottom()
 }, { flush: 'post' })
-
-// Watch for mobile chat becoming visible - need to scroll after it's shown
-watch(showMobileChat, (isVisible) => {
-  if (isVisible) {
-    scrollToBottom()
-  }
-})
 
 // Handle sending a message
 const sendMessage = () => {
@@ -226,55 +202,26 @@ const onVideoSelected = async (event) => {
   }
 }
 
-onMounted(async () => {
-  // Check mobile on mount and listen for resize
-  checkMobile()
-  window.addEventListener('resize', checkMobile)
-
-  // Connect to socket
-  chat.connect()
-
-  // Fetch user info and permissions
-  await Promise.all([
-    chat.fetchCurrentUser(),
-    chat.checkCreatePermission()
-  ])
-
-  // Fetch rooms and join the General room (id=1)
-  await chat.fetchRooms()
-  if (chat.rooms.length > 0) {
-    await chat.joinRoom(chat.rooms[0].id)
-    scrollToBottom()
-  }
+onMounted(() => {
+  // Chat initialization (connect, fetch rooms, join) is handled by AppSidebar
+  // Just scroll to bottom when messages are ready
+  scrollToBottom()
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', checkMobile)
   chat.leaveRoom()
   chat.disconnect()
 })
 </script>
 
 <template>
-  <main class="chat-page page-container" :class="{ 'mobile-view': isMobile }">
-    <div class="chat-layout">
-      <ChatSidebar
-        :class="{ 'mobile-hidden': isMobile && showMobileChat }"
-        @room-selected="openMobileChat"
-      />
-      <div class="chat-container" :class="{ 'mobile-hidden': isMobile && !showMobileChat }">
-        <div v-if="!chat.currentRoom" class="no-room-selected">
-          <p>Select a room to start chatting</p>
-        </div>
-        <template v-else>
+  <main class="chat-page">
+    <div class="chat-container">
+      <div v-if="!chat.currentRoom" class="no-room-selected">
+        <p>Select a room from the sidebar to start chatting</p>
+      </div>
+      <template v-else>
         <div class="chat-header">
-          <button
-            v-if="isMobile"
-            class="back-btn"
-            @click="closeMobileChat"
-          >
-            &larr; Rooms
-          </button>
           <div class="room-info">
             <div class="room-title">
               <span class="connection-dot" :class="chat.connected ? 'dot-connected' : 'dot-disconnected'"></span>
@@ -284,136 +231,127 @@ onUnmounted(() => {
           </div>
         </div>
 
-      <div class="messages-container" ref="messagesContainer">
-        <div v-if="chat.messages.length === 0" class="no-messages">
-          No messages yet. Start the conversation!
-        </div>
-
-        <div
-          v-for="msg in chat.messages"
-          :key="msg.id"
-          class="message"
-          :class="{ own: isOwnMessage(msg.handle) }"
-        >
-          <div class="message-header">
-            <span class="message-author">{{ msg.handle }}</span>
-            <span class="message-time">{{ formatTime(msg.created_at) }}</span>
+        <div class="messages-container" ref="messagesContainer">
+          <div v-if="chat.messages.length === 0" class="no-messages">
+            No messages yet. Start the conversation!
           </div>
-          <div v-if="msg.image_path" class="message-image">
-            <a :href="getImageUrl(msg.image_path)" target="_blank">
-              <img :src="getImageUrl(msg.image_path)" alt="Shared image" />
-            </a>
+
+          <div
+            v-for="msg in chat.messages"
+            :key="msg.id"
+            class="message"
+            :class="{ own: isOwnMessage(msg.handle) }"
+          >
+            <div class="message-header">
+              <span class="message-author">{{ msg.handle }}</span>
+              <span class="message-time">{{ formatTime(msg.created_at) }}</span>
+            </div>
+            <div v-if="msg.image_path" class="message-image">
+              <a :href="getImageUrl(msg.image_path)" target="_blank">
+                <img :src="getImageUrl(msg.image_path)" alt="Shared image" />
+              </a>
+            </div>
+            <div v-if="msg.video_path" class="message-video">
+              <video controls :src="getVideoUrl(msg.video_path)">
+                Your browser does not support video playback.
+              </video>
+            </div>
+            <div v-if="msg.message" class="message-content">{{ msg.message }}</div>
           </div>
-          <div v-if="msg.video_path" class="message-video">
-            <video controls :src="getVideoUrl(msg.video_path)">
-              Your browser does not support video playback.
-            </video>
+        </div>
+
+        <div v-if="chat.typingUsers.length > 0" class="typing-indicator">
+          {{ chat.typingUsers.join(', ') }} {{ chat.typingUsers.length === 1 ? 'is' : 'are' }} typing...
+        </div>
+
+        <div class="message-input-wrapper">
+          <!-- Attachment menu popup -->
+          <div v-if="showAttachMenu" class="attach-menu">
+            <button
+              type="button"
+              class="attach-option"
+              @click="triggerImageUpload(); closeAttachMenu()"
+              :disabled="!chat.connected || uploadingImage"
+            >
+              <span class="attach-icon">🖼️</span>
+              <span>Image</span>
+            </button>
+            <button
+              type="button"
+              class="attach-option"
+              @click="triggerVideoUpload(); closeAttachMenu()"
+              :disabled="!chat.connected || uploadingVideo"
+            >
+              <span class="attach-icon">🎬</span>
+              <span>Video</span>
+            </button>
           </div>
-          <div v-if="msg.message" class="message-content">{{ msg.message }}</div>
+
+          <div class="message-input-container">
+            <input
+              ref="imageInput"
+              type="file"
+              accept="image/*"
+              class="hidden-input"
+              @change="onImageSelected"
+            />
+            <input
+              ref="videoInput"
+              type="file"
+              accept="video/*"
+              class="hidden-input"
+              @change="onVideoSelected"
+            />
+            <button
+              type="button"
+              class="attach-btn"
+              @click="toggleAttachMenu"
+              :disabled="!chat.connected"
+              :class="{ active: showAttachMenu }"
+              title="Add attachment"
+            >
+              <span v-if="uploadingImage || uploadingVideo" class="uploading">...</span>
+              <span v-else class="plus-icon">+</span>
+            </button>
+            <input
+              v-model="messageInput"
+              @keyup.enter="sendMessage"
+              @input="handleTyping"
+              @focus="closeAttachMenu"
+              type="text"
+              placeholder="Type a message..."
+              maxlength="1000"
+              :disabled="!chat.connected"
+            />
+            <button class="send-btn" @click="sendMessage" :disabled="!chat.connected || !messageInput.trim()">
+              Send
+            </button>
+          </div>
         </div>
-      </div>
 
-      <div v-if="chat.typingUsers.length > 0" class="typing-indicator">
-        {{ chat.typingUsers.join(', ') }} {{ chat.typingUsers.length === 1 ? 'is' : 'are' }} typing...
-      </div>
-
-      <div class="message-input-wrapper">
-        <!-- Attachment menu popup -->
-        <div v-if="showAttachMenu" class="attach-menu">
-          <button
-            type="button"
-            class="attach-option"
-            @click="triggerImageUpload(); closeAttachMenu()"
-            :disabled="!chat.connected || uploadingImage"
-          >
-            <span class="attach-icon">🖼️</span>
-            <span>Image</span>
-          </button>
-          <button
-            type="button"
-            class="attach-option"
-            @click="triggerVideoUpload(); closeAttachMenu()"
-            :disabled="!chat.connected || uploadingVideo"
-          >
-            <span class="attach-icon">🎬</span>
-            <span>Video</span>
-          </button>
+        <div v-if="chat.error" class="error-message">
+          {{ chat.error }}
+          <button @click="chat.clearError" class="dismiss-btn">Dismiss</button>
         </div>
-
-        <div class="message-input-container">
-          <input
-            ref="imageInput"
-            type="file"
-            accept="image/*"
-            class="hidden-input"
-            @change="onImageSelected"
-          />
-          <input
-            ref="videoInput"
-            type="file"
-            accept="video/*"
-            class="hidden-input"
-            @change="onVideoSelected"
-          />
-          <button
-            type="button"
-            class="attach-btn"
-            @click="toggleAttachMenu"
-            :disabled="!chat.connected"
-            :class="{ active: showAttachMenu }"
-            title="Add attachment"
-          >
-            <span v-if="uploadingImage || uploadingVideo" class="uploading">...</span>
-            <span v-else class="plus-icon">+</span>
-          </button>
-          <input
-            v-model="messageInput"
-            @keyup.enter="sendMessage"
-            @input="handleTyping"
-            @focus="closeAttachMenu"
-            type="text"
-            placeholder="Type a message..."
-            maxlength="1000"
-            :disabled="!chat.connected"
-          />
-          <button class="send-btn" @click="sendMessage" :disabled="!chat.connected || !messageInput.trim()">
-            Send
-          </button>
-        </div>
-      </div>
-
-      <div v-if="chat.error" class="error-message">
-        {{ chat.error }}
-        <button @click="chat.clearError" class="dismiss-btn">Dismiss</button>
-      </div>
       </template>
-      </div>
     </div>
   </main>
 </template>
 
 <style scoped>
 .chat-page {
-  max-width: 1200px;
-  margin: 20px auto;
-  padding: 0 20px;
-}
-
-.chat-layout {
-  display: flex;
-  height: calc(100vh - 120px);
-  min-height: 500px;
-  border-radius: var(--card-radius);
-  overflow: hidden;
-  box-shadow: var(--card-shadow);
+  height: calc(100vh - 20px);
+  padding: 10px;
 }
 
 .chat-container {
-  flex: 1;
+  height: 100%;
   background: var(--color-background-card);
   display: flex;
   flex-direction: column;
-  min-width: 0;
+  border-radius: var(--card-radius);
+  overflow: hidden;
+  box-shadow: var(--card-shadow);
 }
 
 .chat-header {
@@ -709,43 +647,11 @@ onUnmounted(() => {
   text-decoration: underline;
 }
 
-/* Mobile styles */
-.back-btn {
-  background: var(--color-button-secondary);
-  color: var(--color-text);
-  border: none;
-  padding: 8px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9em;
-  margin-right: 10px;
-  flex-shrink: 0;
-}
-
-.back-btn:hover {
-  background: var(--color-button-secondary-hover);
-}
-
+/* Tablet */
 @media (max-width: 768px) {
   .chat-page {
-    padding: 0 10px;
-    margin: 10px auto;
-  }
-
-  .chat-layout {
-    height: calc(100vh - 80px);
-  }
-
-  .mobile-hidden {
-    display: none !important;
-  }
-
-  .chat-page.mobile-view .chat-sidebar {
-    width: 100%;
-  }
-
-  .chat-page.mobile-view .chat-container {
-    width: 100%;
+    height: calc(100vh - 58px);
+    padding: 5px;
   }
 
   .chat-header {
@@ -787,6 +693,18 @@ onUnmounted(() => {
 
   .message {
     max-width: 85%;
+  }
+}
+
+/* Mobile - account for bottom tab bar */
+@media (max-width: 480px) {
+  .chat-page {
+    height: calc(100vh - 64px);
+    padding: 0;
+  }
+
+  .chat-container {
+    border-radius: 0;
   }
 }
 </style>

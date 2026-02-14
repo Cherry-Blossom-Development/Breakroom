@@ -20,45 +20,6 @@
   }
 
   /* ===========================================
-     NAVIGATION
-     =========================================== */
-
-  /* Centered, equally spaced nav */
-  nav {
-    justify-content: center;
-    font-size: 14px;
-  }
-
-  nav a {
-    flex: 1;
-    text-align: center;
-    padding: 0.5rem 0.25rem;
-    border-left: none;
-  }
-
-  /* Hide username text, show icon */
-  .user-menu .username-text {
-    display: none;
-  }
-
-  .user-menu .user-icon {
-    display: inline-block;
-  }
-
-  .user-menu {
-    flex: 1;
-    text-align: center;
-    padding: 0.5rem 0.25rem;
-    border-left: none;
-  }
-
-  /* Adjust dropdown position for mobile */
-  .dropdown {
-    right: -8px;
-    min-width: 140px;
-  }
-
-  /* ===========================================
      COMPONENTS
      =========================================== */
 
@@ -74,26 +35,5 @@
   /* Hide size options in Add Block modal on mobile */
   .size-options {
     display: none !important;
-  }
-
-  /* ===========================================
-     PAGES
-     =========================================== */
-
-  /* Bottom menu - centered and fits screen */
-  .bottom-menu {
-    flex-wrap: wrap;
-    gap: 0;
-    padding: 0.75rem 0.5rem;
-    margin-top: 1rem;
-    margin-left: 0.5rem;
-    margin-right: 0.5rem;
-  }
-
-  .bottom-menu a {
-    flex: 1 1 auto;
-    text-align: center;
-    padding: 0.5rem 0.4rem;
-    font-size: 0.8rem;
   }
 }
