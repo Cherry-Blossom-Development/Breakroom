@@ -16,3 +16,4 @@ frontend-dist*
 tmpclaude*
 test-emails/
 backend/test-emails/
+.claude*
