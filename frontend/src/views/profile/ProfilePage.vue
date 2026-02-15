@@ -50,6 +50,11 @@ const jobForm = ref({
   description: ''
 })
 
+// Location management
+const locationInput = ref('')
+const isSavingLocation = ref(false)
+const locationEditing = ref(false)
+
 const photoInput = ref(null)
 
 const photoUrl = computed(() => {
@@ -192,6 +197,81 @@ async function deletePhoto() {
     setTimeout(() => { successMessage.value = null }, 3000)
   } catch (err) {
     error.value = err.message
+  }
+}
+
+// Location functions
+function startLocationEdit() {
+  locationInput.value = profile.value.city || ''
+  locationEditing.value = true
+}
+
+function cancelLocationEdit() {
+  locationEditing.value = false
+  locationInput.value = ''
+}
+
+async function saveLocation() {
+  if (!locationInput.value.trim()) return
+
+  isSavingLocation.value = true
+  error.value = null
+
+  try {
+    const res = await fetch('/api/profile/location', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ city: locationInput.value.trim() })
+    })
+
+    if (!res.ok) {
+      const data = await res.json()
+      throw new Error(data.message || 'Failed to update location')
+    }
+
+    const data = await res.json()
+    profile.value.city = data.city
+    profile.value.latitude = data.latitude
+    profile.value.longitude = data.longitude
+    locationEditing.value = false
+    successMessage.value = 'Location updated successfully!'
+    setTimeout(() => { successMessage.value = null }, 3000)
+  } catch (err) {
+    error.value = err.message
+    setTimeout(() => { error.value = null }, 3000)
+  } finally {
+    isSavingLocation.value = false
+  }
+}
+
+async function clearLocation() {
+  isSavingLocation.value = true
+  error.value = null
+
+  try {
+    const res = await fetch('/api/profile/location', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ city: '' })
+    })
+
+    if (!res.ok) {
+      throw new Error('Failed to clear location')
+    }
+
+    profile.value.city = null
+    profile.value.latitude = null
+    profile.value.longitude = null
+    locationEditing.value = false
+    successMessage.value = 'Location cleared!'
+    setTimeout(() => { successMessage.value = null }, 3000)
+  } catch (err) {
+    error.value = err.message
+    setTimeout(() => { error.value = null }, 3000)
+  } finally {
+    isSavingLocation.value = false
   }
 }
 
@@ -558,6 +638,43 @@ onMounted(() => {
             <p v-else class="bio-empty">No work experience added yet. Click "Add Job" to get started!</p>
           </div>
 
+          <div class="location-section">
+            <h2>Location</h2>
+            <template v-if="!locationEditing">
+              <div v-if="profile.city" class="location-display">
+                <span class="location-city">{{ profile.city }}</span>
+                <div class="location-actions">
+                  <button @click="startLocationEdit" class="location-edit-btn">Change</button>
+                  <button @click="clearLocation" :disabled="isSavingLocation" class="location-clear-btn">Clear</button>
+                </div>
+              </div>
+              <div v-else class="location-empty">
+                <p class="bio-empty">No location set. Your location is used by the weather widget.</p>
+                <button @click="startLocationEdit" class="location-set-btn">Set Location</button>
+              </div>
+            </template>
+            <div v-else class="location-edit-form">
+              <div class="location-input-row">
+                <input
+                  v-model="locationInput"
+                  type="text"
+                  placeholder="Enter a city (e.g., Denver, CO)"
+                  @keyup.enter="saveLocation"
+                  maxlength="128"
+                />
+                <button
+                  @click="saveLocation"
+                  :disabled="!locationInput.trim() || isSavingLocation"
+                  class="save-btn"
+                >
+                  {{ isSavingLocation ? 'Saving...' : 'Save' }}
+                </button>
+                <button @click="cancelLocationEdit" class="cancel-btn">Cancel</button>
+              </div>
+              <p class="location-hint">Enter a city name. It will be geocoded automatically for the weather widget.</p>
+            </div>
+          </div>
+
           <div class="details-section">
             <h2>Details</h2>
             <div class="detail-row">
@@ -883,6 +1000,7 @@ onMounted(() => {
 .bio-section,
 .work-bio-section,
 .skills-section,
+.location-section,
 .details-section {
   margin-bottom: 20px;
 }
@@ -890,6 +1008,7 @@ onMounted(() => {
 .bio-section h2,
 .work-bio-section h2,
 .skills-section h2,
+.location-section h2,
 .details-section h2 {
   font-size: 1.1rem;
   color: #333;
@@ -1027,6 +1146,107 @@ onMounted(() => {
 
 .cancel-btn:hover {
   background: #ddd;
+}
+
+/* Location styles */
+.location-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.location-city {
+  color: #555;
+  font-size: 0.95rem;
+}
+
+.location-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.location-edit-btn,
+.location-set-btn {
+  background: none;
+  border: 1px solid #42b983;
+  color: #42b983;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.location-edit-btn:hover,
+.location-set-btn:hover {
+  background: #42b983;
+  color: white;
+}
+
+.location-clear-btn {
+  background: none;
+  border: 1px solid #ccc;
+  color: #888;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.location-clear-btn:hover {
+  border-color: #c00;
+  color: #c00;
+}
+
+.location-clear-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.location-empty {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.location-empty .bio-empty {
+  flex: 1;
+}
+
+.location-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.location-input-row {
+  display: flex;
+  gap: 10px;
+}
+
+.location-input-row input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+
+.location-input-row input:focus {
+  outline: none;
+  border-color: #42b983;
+}
+
+.location-input-row .save-btn,
+.location-input-row .cancel-btn {
+  padding: 8px 16px;
+  font-size: 0.85rem;
+}
+
+.location-hint {
+  font-size: 0.8rem;
+  color: #888;
+  margin: 0;
 }
 
 /* Skills styles */
