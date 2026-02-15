@@ -1,7 +1,7 @@
 <template>
   <section class="home-page">
     <div class="hero">
-      <img src="/logo-512x512.png" alt="Prosaurus" class="hero-logo" />
+      <img src="/logo-512x512-no-text.png" alt="Prosaurus" class="hero-logo" />
       <h1>Welcome to Prosaurus</h1>
       <p class="tagline">A creative platform for connecting, writing, making music, and building software — without the noise.</p>
       <RouterLink to="/signup" class="cta-button">Join Prosaurus</RouterLink>
