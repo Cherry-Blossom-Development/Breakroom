@@ -157,12 +157,12 @@ export default {
 }
 
 .icon-circle.success {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--color-accent);
   color: white;
 }
 
 .icon-circle.error {
-  background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
+  background: var(--color-error);
   color: white;
 }
 
@@ -196,7 +196,7 @@ h2 {
 
 .btn-primary {
   display: inline-block;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--color-accent);
   color: white;
   text-decoration: none;
   padding: 14px 32px;

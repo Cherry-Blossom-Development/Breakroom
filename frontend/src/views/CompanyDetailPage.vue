@@ -1316,10 +1316,7 @@ onMounted(() => {
 .company-header h1 {
   font-size: 2.2rem;
   font-weight: 700;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #42b983 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--color-accent);
   margin: 0 0 8px;
 }
 
@@ -1491,7 +1488,7 @@ onMounted(() => {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #667eea, #42b983);
+  background: var(--color-accent);
   color: white;
   display: flex;
   align-items: center;
@@ -1986,7 +1983,7 @@ onMounted(() => {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #667eea, #42b983);
+  background: var(--color-accent);
   color: white;
   display: flex;
   align-items: center;

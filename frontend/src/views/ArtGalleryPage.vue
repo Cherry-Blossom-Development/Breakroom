@@ -574,10 +574,7 @@ function copyGalleryUrl() {
 .page-header h1 {
   font-size: 2.2rem;
   font-weight: 700;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--color-accent);
   margin: 0 0 8px;
 }
 
@@ -936,18 +933,17 @@ function copyGalleryUrl() {
 /* Buttons */
 .btn-primary {
   padding: 10px 20px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--color-accent);
   border: none;
   border-radius: 8px;
   color: white;
   font-weight: 500;
   cursor: pointer;
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition: background 0.2s;
 }
 
 .btn-primary:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  background: var(--color-accent-hover);
 }
 
 .btn-primary:disabled {

@@ -302,10 +302,7 @@ onMounted(() => {
 .page-header h1 {
   font-size: 2.2rem;
   font-weight: 700;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #42b983 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--color-accent);
   margin: 0 0 8px;
 }
 

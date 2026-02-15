@@ -276,7 +276,7 @@ function navigateArtwork(direction) {
   width: 80px;
   height: 80px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--color-accent);
   color: white;
   display: flex;
   align-items: center;

@@ -288,10 +288,7 @@ onUnmounted(() => {
   margin: 0;
   font-size: 1.7rem;
   font-weight: 700;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, var(--color-accent) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--color-accent);
   letter-spacing: -0.5px;
 }
 
@@ -312,18 +309,17 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   padding: 8px 14px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--color-accent);
   color: white;
   text-decoration: none;
   border-radius: 6px;
   font-size: 0.9rem;
   font-weight: 500;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: background 0.2s ease;
 }
 
 .shortcut-link:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  background: var(--color-accent-hover);
 }
 
 .add-block-btn {

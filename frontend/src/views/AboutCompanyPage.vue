@@ -74,50 +74,47 @@
 .about-page h1 {
   font-size: 2.5rem;
   font-weight: 700;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #42b983 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: var(--color-accent);
   margin-bottom: 2rem;
 }
 
 .about-page h2 {
-  color: #2c3e50;
+  color: var(--color-text);
   font-size: 1.5rem;
   margin-top: 2.5rem;
   margin-bottom: 1rem;
   padding-bottom: 0.5rem;
-  border-bottom: 2px solid #42b983;
+  border-bottom: 2px solid var(--color-accent);
 }
 
 .story {
-  background: white;
+  background: var(--color-background-card);
   border-radius: 12px;
   padding: 2rem;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-sm);
 }
 
 .story p {
-  color: #444;
+  color: var(--color-text-secondary);
   font-size: 1.1rem;
   line-height: 1.8;
   margin-bottom: 1.25rem;
 }
 
 .story em {
-  color: #764ba2;
+  color: var(--color-accent);
   font-style: italic;
 }
 
 .story strong {
-  color: #42b983;
+  color: var(--color-accent);
 }
 
 .solution {
   font-size: 1.3rem !important;
   text-align: center;
   padding: 1.5rem;
-  background: linear-gradient(135deg, rgba(66, 185, 131, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  background: var(--color-background-soft);
   border-radius: 8px;
   margin-top: 1.5rem;
 }

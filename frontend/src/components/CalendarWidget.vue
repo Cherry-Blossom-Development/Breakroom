@@ -254,7 +254,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   padding: 8px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--color-accent);
   color: white;
   overflow: hidden;
   gap: 6px;
