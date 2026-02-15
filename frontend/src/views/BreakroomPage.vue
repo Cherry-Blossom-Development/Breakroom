@@ -45,6 +45,10 @@ let saveTimeout = null
 // Layout items for grid (mutable ref for two-way binding)
 const layoutItems = ref([])
 
+// Responsive layout tracking
+const currentColCount = ref(5)
+const responsiveLayouts = ref({})
+
 // Initialize layout from store (only once after fetch)
 const initializeLayout = () => {
   layoutItems.value = breakroom.blocks.map(block => ({
@@ -55,10 +59,25 @@ const initializeLayout = () => {
     h: block.h,
     block: block
   }))
+  responsiveLayouts.value = breakroom.buildResponsiveLayouts()
   // Set first block as expanded by default on mobile
   if (layoutItems.value.length > 0 && expandedBlockId.value === null) {
     expandedBlockId.value = layoutItems.value[0].block.id
   }
+}
+
+// Handle breakpoint change from grid library
+let ignoreNextMoves = false
+const onBreakpointChanged = (newBreakpoint) => {
+  currentColCount.value = cols[newBreakpoint]
+  // Ignore move/resize events triggered by the breakpoint reflow
+  ignoreNextMoves = true
+  setTimeout(() => { ignoreNextMoves = false }, 100)
+}
+
+// Look up block data from store by layout item id
+const getBlock = (itemId) => {
+  return breakroom.blocks.find(b => b.i === String(itemId)) || {}
 }
 
 // Toggle block expansion (only one at a time)
@@ -72,20 +91,21 @@ const toggleBlock = (blockId) => {
 
 // Handle user-initiated move/resize (not triggered by responsive changes)
 const onItemMoved = () => {
-  saveLayoutDebounced()
+  if (!ignoreNextMoves) saveLayoutDebounced()
 }
 
 const onItemResized = () => {
-  saveLayoutDebounced()
+  if (!ignoreNextMoves) saveLayoutDebounced()
 }
 
-// Debounced save - only saves after user drags/resizes
+// Debounced save - saves per active column count
 const saveLayoutDebounced = () => {
   if (saveTimeout) {
     clearTimeout(saveTimeout)
   }
+  const colCount = currentColCount.value
   saveTimeout = setTimeout(() => {
-    breakroom.saveLayout(layoutItems.value)
+    breakroom.saveLayoutForColCount(colCount, layoutItems.value)
   }, 500)
 }
 
@@ -94,7 +114,8 @@ const onRemoveBlock = async (blockId) => {
   if (confirm('Remove this block from your layout?')) {
     await breakroom.removeBlock(blockId)
     // Immediately remove from layoutItems for instant UI update
-    layoutItems.value = layoutItems.value.filter(item => item.block.id !== blockId)
+    layoutItems.value = layoutItems.value.filter(item => parseInt(item.i) !== blockId)
+    responsiveLayouts.value = breakroom.buildResponsiveLayouts()
   }
 }
 
@@ -223,11 +244,13 @@ onUnmounted(() => {
         :is-draggable="true"
         :is-resizable="true"
         :responsive="true"
+        :responsive-layouts="responsiveLayouts"
         :breakpoints="breakpoints"
         :cols="cols"
         :vertical-compact="true"
         :use-css-transforms="true"
         :margin="[10, 10]"
+        @breakpoint-changed="onBreakpointChanged"
       >
         <GridItem
           v-for="item in layoutItems"
@@ -247,10 +270,10 @@ onUnmounted(() => {
           @resized="onItemResized"
         >
           <BreakroomBlock
-            :block="item.block"
-            :expanded="expandedBlockId === item.block.id"
-            @remove="onRemoveBlock(item.block.id)"
-            @toggle="toggleBlock(item.block.id)"
+            :block="getBlock(item.i)"
+            :expanded="expandedBlockId === parseInt(item.i)"
+            @remove="onRemoveBlock(parseInt(item.i))"
+            @toggle="toggleBlock(parseInt(item.i))"
           />
         </GridItem>
       </GridLayout>

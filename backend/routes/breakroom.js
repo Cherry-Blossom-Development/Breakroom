@@ -57,7 +57,22 @@ router.get('/layout', authenticateToken, async (req, res) => {
       [req.user.id]
     );
 
-    res.status(200).json({ blocks: blocks.rows });
+    // Fetch per-breakpoint positions
+    const blockIds = blocks.rows.map(b => b.id);
+    let positions = {};
+    if (blockIds.length > 0) {
+      const placeholders = blockIds.map((_, i) => `$${i + 1}`).join(', ');
+      const posRows = await client.query(
+        `SELECT block_id, col_count, x, y, w, h FROM breakroom_block_positions WHERE block_id IN (${placeholders})`,
+        blockIds
+      );
+      for (const row of posRows.rows) {
+        if (!positions[row.block_id]) positions[row.block_id] = {};
+        positions[row.block_id][row.col_count] = { x: row.x, y: row.y, w: row.w, h: row.h };
+      }
+    }
+
+    res.status(200).json({ blocks: blocks.rows, positions });
   } catch (err) {
     console.error('Error fetching layout:', err);
     res.status(500).json({ message: 'Failed to fetch layout' });
@@ -197,6 +212,51 @@ router.put('/layout', authenticateToken, async (req, res) => {
   } catch (err) {
     await client.rollback();
     console.error('Error saving layout:', err);
+    res.status(500).json({ message: 'Failed to save layout' });
+  } finally {
+    client.release();
+  }
+});
+
+// Save layout positions for a specific column count
+router.put('/layout/:colCount', authenticateToken, async (req, res) => {
+  const colCount = parseInt(req.params.colCount);
+  if (![1, 2, 3, 4, 5].includes(colCount)) {
+    return res.status(400).json({ message: 'Invalid column count (must be 1-5)' });
+  }
+
+  const { items } = req.body;
+  if (!Array.isArray(items)) {
+    return res.status(400).json({ message: 'Items array is required' });
+  }
+
+  const client = await getClient();
+  try {
+    await client.beginTransaction();
+
+    // Get user's block IDs for ownership check
+    const userBlocks = await client.query(
+      'SELECT id FROM breakroom_blocks WHERE user_id = $1',
+      [req.user.id]
+    );
+    const ownedIds = new Set(userBlocks.rows.map(b => b.id));
+
+    for (const item of items) {
+      if (!item.id || !ownedIds.has(item.id)) continue;
+
+      await client.query(
+        `INSERT INTO breakroom_block_positions (block_id, col_count, x, y, w, h)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON DUPLICATE KEY UPDATE x = $7, y = $8, w = $9, h = $10`,
+        [item.id, colCount, item.x, item.y, item.w, item.h, item.x, item.y, item.w, item.h]
+      );
+    }
+
+    await client.commit();
+    res.status(200).json({ message: 'Layout saved' });
+  } catch (err) {
+    await client.rollback();
+    console.error('Error saving responsive layout:', err);
     res.status(500).json({ message: 'Failed to save layout' });
   } finally {
     client.release();

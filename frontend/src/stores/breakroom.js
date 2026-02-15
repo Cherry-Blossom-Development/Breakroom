@@ -1,8 +1,12 @@
 import { reactive } from 'vue'
 import { authFetch } from '../utilities/authFetch'
 
+// Breakpoint name → column count mapping
+const BREAKPOINT_COLS = { lg: 5, md: 4, sm: 3, xs: 2, xxs: 1 }
+
 const state = reactive({
   blocks: [],
+  positions: {}, // { blockId: { colCount: { x, y, w, h } } }
   loading: false,
   error: null
 })
@@ -10,6 +14,9 @@ const state = reactive({
 export const breakroom = reactive({
   get blocks() {
     return state.blocks
+  },
+  get positions() {
+    return state.positions
   },
   get loading() {
     return state.loading
@@ -36,11 +43,68 @@ export const breakroom = reactive({
         // vue-grid-layout uses 'i' as the unique identifier
         i: String(block.id)
       }))
+      state.positions = data.positions || {}
     } catch (err) {
       console.error('Error fetching layout:', err)
       state.error = err.message
     } finally {
       state.loading = false
+    }
+  },
+
+  // Get layout array for a specific column count
+  getLayoutForColCount(colCount) {
+    return state.blocks.map(block => {
+      const saved = state.positions[block.id]?.[colCount]
+      if (saved) {
+        return { i: block.i, x: saved.x, y: saved.y, w: saved.w, h: saved.h }
+      }
+      // No saved position: use base block coordinates, clamping to fit
+      const w = Math.min(block.w, colCount)
+      const x = Math.min(block.x, colCount - w)
+      return { i: block.i, x, y: block.y, w, h: block.h }
+    })
+  },
+
+  // Build responsive layouts object for grid-layout-plus
+  buildResponsiveLayouts() {
+    const layouts = {}
+    for (const [bp, colCount] of Object.entries(BREAKPOINT_COLS)) {
+      layouts[bp] = this.getLayoutForColCount(colCount)
+    }
+    return layouts
+  },
+
+  // Save layout for a specific column count
+  async saveLayoutForColCount(colCount, layoutItems) {
+    try {
+      const items = layoutItems.map(item => ({
+        id: parseInt(item.i),
+        x: item.x,
+        y: item.y,
+        w: item.w,
+        h: item.h
+      }))
+
+      const res = await authFetch(`/api/breakroom/layout/${colCount}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items })
+      })
+
+      if (!res.ok) {
+        throw new Error('Failed to save layout')
+      }
+
+      // Update local cache
+      for (const item of items) {
+        if (!state.positions[item.id]) state.positions[item.id] = {}
+        state.positions[item.id][colCount] = { x: item.x, y: item.y, w: item.w, h: item.h }
+      }
+    } catch (err) {
+      console.error('Error saving layout:', err)
+      state.error = err.message
+      throw err
     }
   },
 
@@ -111,7 +175,7 @@ export const breakroom = reactive({
     }
   },
 
-  // Batch save layout positions (for drag-drop)
+  // Batch save layout positions (for drag-drop) - legacy, kept for backward compat
   async saveLayout(blocks) {
     try {
       const layoutData = blocks.map(b => ({
@@ -162,6 +226,8 @@ export const breakroom = reactive({
       }
 
       state.blocks = state.blocks.filter(b => b.id !== id)
+      // Clean up positions cache
+      delete state.positions[id]
     } catch (err) {
       console.error('Error deleting block:', err)
       state.error = err.message
