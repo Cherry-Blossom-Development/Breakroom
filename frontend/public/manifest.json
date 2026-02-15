@@ -1,14 +1,14 @@
 {
-  "name": "Prosaurus Breakroom",
-  "short_name": "Breakroom",
+  "name": "Prosaurus",
+  "short_name": "Prosaurus",
   "icons": [
     {
-      "src": "/logo-192x192.png",
+      "src": "/logo-192x192-no-text.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "/logo-512x512.png",
+      "src": "/logo-512x512-no-text.png",
       "sizes": "512x512",
       "type": "image/png"
     }
