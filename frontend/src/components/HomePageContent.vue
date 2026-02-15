@@ -1,6 +1,7 @@
 <template>
   <section class="home-page">
     <div class="hero">
+      <img src="/logo-512x512.png" alt="Prosaurus" class="hero-logo" />
       <h1>Welcome to Prosaurus</h1>
       <p class="tagline">A creative platform for connecting, writing, making music, and building software — without the noise.</p>
       <RouterLink to="/signup" class="cta-button">Join Prosaurus</RouterLink>
@@ -54,6 +55,14 @@
 
 .hero {
   margin-bottom: 40px;
+}
+
+.hero-logo {
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  margin-bottom: 20px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
 }
 
 .hero h1 {

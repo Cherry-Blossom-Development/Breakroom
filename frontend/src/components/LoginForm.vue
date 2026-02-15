@@ -1,5 +1,8 @@
 <template>
   <form @submit.prevent="handleSubmit">
+    <div class="login-logo-wrap">
+      <img src="/logo-192x192-no-text.png" alt="Prosaurus" class="login-logo" />
+    </div>
     <span>Log In</span>
     <div>
       <label>Login/Handle: </label>
@@ -72,6 +75,15 @@ export default {
     padding: 40px;
     border-radius: 10px;
     box-shadow: var(--shadow-md);
+  }
+  .login-logo-wrap {
+    text-align: center;
+    margin-bottom: 10px;
+  }
+  .login-logo {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
   }
   label {
     color: var(--color-text-light);
