@@ -211,7 +211,7 @@ function handleNavClick() {
 
   <aside class="app-sidebar" :class="{ open: visible }">
     <div class="sidebar-header">
-      <span class="sidebar-logo">Breakroom</span>
+      <img src="/logo-192x192-no-text.png" alt="Prosaurus" class="sidebar-logo" />
     </div>
 
     <nav class="sidebar-nav">
@@ -446,17 +446,16 @@ function handleNavClick() {
 }
 
 .sidebar-header {
-  padding: 20px 16px 12px;
+  padding: 12px 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  justify-content: center;
 }
 
 .sidebar-logo {
-  font-size: 1.3rem;
-  font-weight: 700;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, var(--color-accent) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
 }
 
 .sidebar-nav {

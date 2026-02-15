@@ -142,7 +142,7 @@ setInterval(() => {
           <line x1="3" y1="18" x2="21" y2="18"/>
         </svg>
       </button>
-      <span class="tablet-logo">Breakroom</span>
+      <img src="/logo-192x192-no-text.png" alt="Prosaurus" class="tablet-logo" />
     </div>
 
     <div class="app-content">
@@ -245,12 +245,9 @@ body {
 }
 
 .tablet-logo {
-  font-size: 1.1rem;
-  font-weight: 700;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, var(--color-accent) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
 }
 
 /* ============================================
