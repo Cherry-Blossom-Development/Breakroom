@@ -1,8 +1,8 @@
 <template>
   <section class="about-page page-container">
-    <h1>About Breakroom</h1>
+    <h1>About Prosaurus</h1>
     <p class="intro">
-      At Breakroom, we believe social media should be simple, honest, and respectful of your time and mind.
+      At Prosaurus, we believe social media should be simple, honest, and respectful of your time and mind.
     </p>
 
     <div class="content">
@@ -26,7 +26,7 @@
       </p>
     </div>
 
-    <RouterLink to="/signup" class="cta-button">Get Started with Breakroom</RouterLink>
+    <RouterLink to="/signup" class="cta-button">Get Started with Prosaurus</RouterLink>
   </section>
 </template>
 
