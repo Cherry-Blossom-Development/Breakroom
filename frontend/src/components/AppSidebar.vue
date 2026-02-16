@@ -888,14 +888,4 @@ function handleNavClick() {
   }
 }
 
-/* Mobile: sidebar completely hidden (bottom bar used instead) */
-@media (max-width: 480px) {
-  .app-sidebar {
-    display: none !important;
-  }
-
-  .sidebar-overlay {
-    display: none !important;
-  }
-}
 </style>

@@ -696,15 +696,4 @@ onUnmounted(() => {
   }
 }
 
-/* Mobile - account for bottom tab bar */
-@media (max-width: 480px) {
-  .chat-page {
-    height: calc(100vh - 64px);
-    padding: 0;
-  }
-
-  .chat-container {
-    border-radius: 0;
-  }
-}
 </style>

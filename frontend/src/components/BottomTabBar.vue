@@ -250,18 +250,4 @@ function handleLogout() {
   background: rgba(255, 100, 100, 0.08);
 }
 
-/* Only show on mobile */
-@media (max-width: 480px) {
-  .bottom-tab-bar {
-    display: flex;
-  }
-
-  .more-drawer {
-    display: block;
-  }
-
-  .drawer-overlay {
-    display: block;
-  }
-}
 </style>

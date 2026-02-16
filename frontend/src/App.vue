@@ -195,8 +195,8 @@ body {
   }
 }
 
-/* Tablet: hamburger top bar, no sidebar margin */
-@media (max-width: 768px) and (min-width: 481px) {
+/* Tablet & Mobile: hamburger top bar, no sidebar margin */
+@media (max-width: 768px) {
   .app-content {
     margin-left: 0;
     padding-top: 48px;
@@ -215,18 +215,6 @@ body {
     color: var(--color-header-text);
     padding: 0 12px;
     z-index: 998;
-  }
-}
-
-/* Mobile: no sidebar margin, pad bottom for tab bar */
-@media (max-width: 480px) {
-  .app-content {
-    margin-left: 0;
-    padding-bottom: 64px;
-  }
-
-  .tablet-top-bar {
-    display: none;
   }
 }
 
