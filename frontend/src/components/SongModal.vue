@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { lyrics } from '@/stores/lyrics.js'
+import { friends } from '@/stores/friends.js'
 
 const props = defineProps({
   song: Object
@@ -15,10 +16,25 @@ const status = ref('idea')
 const visibility = ref('private')
 const newCollaborator = ref('')
 const collaboratorRole = ref('editor')
+const collaboratorSearch = ref('')
+const showCollabDropdown = ref(false)
 const saving = ref(false)
 const error = ref(null)
 
 const isEditing = computed(() => props.song && props.song.id)
+
+// Filter friends for autocomplete - exclude existing collaborators and self
+const filteredFriends = computed(() => {
+  if (!collaboratorSearch.value.trim()) return []
+  const query = collaboratorSearch.value.toLowerCase()
+  const existingIds = new Set(lyrics.collaborators.map(c => c.user_id))
+  return friends.friends.filter(f => {
+    if (existingIds.has(f.id)) return false
+    return f.handle.toLowerCase().includes(query) ||
+      (f.first_name && f.first_name.toLowerCase().includes(query)) ||
+      (f.last_name && f.last_name.toLowerCase().includes(query))
+  })
+})
 
 const statusOptions = [
   { value: 'idea', label: 'Idea' },
@@ -39,13 +55,16 @@ const genreSuggestions = [
   'Electronic', 'Indie', 'Alternative', 'Metal', 'Punk', 'Soul', 'Gospel'
 ]
 
-onMounted(() => {
+onMounted(async () => {
   if (props.song) {
     title.value = props.song.title || ''
     description.value = props.song.description || ''
     genre.value = props.song.genre || ''
     status.value = props.song.status || 'idea'
     visibility.value = props.song.visibility || 'private'
+    if (props.song.role === 'owner') {
+      await friends.fetchFriends()
+    }
   }
 })
 
@@ -81,12 +100,19 @@ async function save() {
   }
 }
 
+function selectFriend(friend) {
+  collaboratorSearch.value = friend.handle
+  newCollaborator.value = friend.handle
+  showCollabDropdown.value = false
+}
+
 async function addCollaborator() {
   if (!newCollaborator.value.trim()) return
 
   try {
     await lyrics.addCollaborator(props.song.id, newCollaborator.value.trim(), collaboratorRole.value)
     newCollaborator.value = ''
+    collaboratorSearch.value = ''
   } catch (err) {
     error.value = err.message
   }
@@ -196,17 +222,33 @@ function selectGenre(g) {
           </div>
 
           <div class="add-collaborator">
-            <input
-              v-model="newCollaborator"
-              type="text"
-              placeholder="Username (handle)"
-              @keyup.enter="addCollaborator"
-            />
+            <div class="collab-search-container">
+              <input
+                v-model="collaboratorSearch"
+                type="text"
+                placeholder="Search friends..."
+                @input="newCollaborator = ''; showCollabDropdown = true"
+                @focus="showCollabDropdown = true"
+                @keyup.enter="addCollaborator"
+              />
+              <ul v-if="showCollabDropdown && filteredFriends.length > 0" class="collab-dropdown">
+                <li
+                  v-for="friend in filteredFriends"
+                  :key="friend.id"
+                  @click="selectFriend(friend)"
+                >
+                  <span class="collab-dropdown-handle">{{ friend.handle }}</span>
+                  <span v-if="friend.first_name || friend.last_name" class="collab-dropdown-name">
+                    {{ friend.first_name }} {{ friend.last_name }}
+                  </span>
+                </li>
+              </ul>
+            </div>
             <select v-model="collaboratorRole">
               <option value="editor">Editor</option>
               <option value="viewer">Viewer</option>
             </select>
-            <button class="btn-add" @click="addCollaborator">Add</button>
+            <button class="btn-add" @click="addCollaborator" :disabled="!newCollaborator.trim()">Add</button>
           </div>
         </div>
       </div>
@@ -412,13 +454,65 @@ function selectGenre(g) {
   gap: 10px;
 }
 
-.add-collaborator input {
+.collab-search-container {
   flex: 1;
+  position: relative;
+}
+
+.collab-search-container input {
+  width: 100%;
   padding: 8px 12px;
   border: 2px solid var(--color-border);
   border-radius: 6px;
   background: var(--color-background-input);
   color: var(--color-text);
+  box-sizing: border-box;
+}
+
+.collab-search-container input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.collab-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--color-background-card);
+  border: 1px solid var(--color-border);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  max-height: 150px;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  z-index: 10;
+  box-shadow: var(--shadow-md);
+}
+
+.collab-dropdown li {
+  padding: 8px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--color-text);
+}
+
+.collab-dropdown li:hover {
+  background: var(--color-background-hover);
+}
+
+.collab-dropdown-handle {
+  font-weight: 600;
+  font-size: 0.9em;
+}
+
+.collab-dropdown-name {
+  font-size: 0.8em;
+  color: var(--color-text-muted);
 }
 
 .add-collaborator select {
