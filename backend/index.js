@@ -332,6 +332,21 @@ app.get('/blog/view/:id', async (req, res) => {
   }
 });
 
+// OG tags for /privacy
+app.get('/privacy', (req, res) => {
+  const baseUrl = process.env.CORS_ORIGIN || 'https://www.prosaurus.com';
+  const indexHtml = getIndexHtml();
+  const ogTags = buildOgTags({
+    title: 'Privacy Policy',
+    description: 'Privacy Policy for the Prosaurus iOS app, provided by Cherry Blossom Development LLC.',
+    url: `${baseUrl}/privacy`,
+    image: null,
+    siteName: 'Prosaurus'
+  });
+  const html = injectOgIntoHtml(indexHtml, ogTags, 'Privacy Policy - Prosaurus');
+  return res.send(html);
+});
+
 // Serve index.html for all non-API, non-static requests
 app.use((req, res, next) => {
   if (req.path.startsWith('/api')) return next(); // let API routes handle their paths
