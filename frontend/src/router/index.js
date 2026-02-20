@@ -32,6 +32,12 @@ const router = createRouter({
       component: () => import('../views/AboutPage.vue'),
     },
     {
+      path: '/privacy',
+      name: 'privacy',
+      component: () => import('../views/PrivacyPolicyPage.vue'),
+      // No requiresAuth - public page required for App Store compliance
+    },
+    {
       path: '/breakroom',
       name: 'breakroom',
       component: () => import('../views/BreakroomPage.vue'),
