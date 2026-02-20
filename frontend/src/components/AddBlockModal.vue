@@ -1,9 +1,23 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { breakroom } from '@/stores/breakroom.js'
 import { chat } from '@/stores/chat.js'
 
 const emit = defineEmits(['close', 'added'])
+
+// Get chat room IDs already on the breakroom page
+const existingChatRoomIds = computed(() => {
+  return new Set(
+    breakroom.blocks
+      .filter(b => b.block_type === 'chat' && b.content_id)
+      .map(b => b.content_id)
+  )
+})
+
+// Filter out rooms already on the page
+const availableRooms = computed(() => {
+  return chat.rooms.filter(room => !existingChatRoomIds.value.has(room.id))
+})
 
 const blockType = ref('widget')
 const selectedRoom = ref(null)
@@ -60,8 +74,9 @@ onMounted(async () => {
   if (chat.rooms.length === 0) {
     await chat.fetchRooms()
   }
-  if (chat.rooms.length > 0) {
-    selectedRoom.value = chat.rooms[0].id
+  // Select first available room (not already on page)
+  if (availableRooms.value.length > 0) {
+    selectedRoom.value = availableRooms.value[0].id
   }
 })
 
@@ -167,11 +182,12 @@ const handleSubmit = async () => {
         <!-- Chat Room Selection -->
         <div v-if="blockType === 'chat'" class="form-group">
           <label for="room">Chat Room</label>
-          <select id="room" v-model="selectedRoom" required>
-            <option v-for="room in chat.rooms" :key="room.id" :value="room.id">
+          <select v-if="availableRooms.length > 0" id="room" v-model="selectedRoom" required>
+            <option v-for="room in availableRooms" :key="room.id" :value="room.id">
               # {{ room.name }}
             </option>
           </select>
+          <p v-else class="no-rooms-msg">All chat rooms are already on your page</p>
         </div>
 
         <!-- Widget Type Selection -->
@@ -391,6 +407,15 @@ input[type="text"]:focus {
 .widget-desc {
   margin: 8px 0 0;
   font-size: 0.85rem;
+}
+
+.no-rooms-msg {
+  margin: 0;
+  padding: 10px;
+  background: var(--color-background-hover);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
   color: var(--color-text-muted);
 }
 </style>
