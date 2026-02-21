@@ -542,4 +542,31 @@ router.put('/:id', authenticate, async (req, res) => {
   }
 });
 
+// Delete company (owner only)
+router.delete('/:id', authenticate, async (req, res) => {
+  const { id } = req.params;
+  const client = await getClient();
+
+  try {
+    // Only the owner can delete
+    const authResult = await client.query(
+      'SELECT is_owner FROM employees WHERE user_id = $1 AND company_id = $2',
+      [req.user.id, id]
+    );
+
+    if (authResult.rowCount === 0 || !authResult.rows[0].is_owner) {
+      return res.status(403).json({ message: 'Only the company owner can delete this company' });
+    }
+
+    await client.query('DELETE FROM companies WHERE id = $1', [id]);
+
+    res.json({ message: 'Company deleted successfully' });
+  } catch (err) {
+    console.error('Error deleting company:', err);
+    res.status(500).json({ message: 'Failed to delete company' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
