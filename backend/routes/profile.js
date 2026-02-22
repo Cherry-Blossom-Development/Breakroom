@@ -580,4 +580,31 @@ router.delete('/jobs/:jobId', authenticate, async (req, res) => {
   }
 });
 
+// Submit account deletion request
+router.post('/deletion-request', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    // Prevent duplicate pending requests
+    const existing = await client.query(
+      `SELECT id FROM account_deletion_requests WHERE user_id = $1 AND status = 'pending'`,
+      [req.user.id]
+    );
+    if (existing.rowCount > 0) {
+      return res.status(409).json({ message: 'A deletion request is already pending for this account.' });
+    }
+
+    await client.query(
+      `INSERT INTO account_deletion_requests (user_id, username) VALUES ($1, $2)`,
+      [req.user.id, req.user.handle]
+    );
+
+    res.status(200).json({ message: 'Deletion request submitted' });
+  } catch (err) {
+    console.error('Error submitting deletion request:', err);
+    res.status(500).json({ message: 'Failed to submit deletion request' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
