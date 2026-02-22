@@ -1,13 +1,13 @@
 <template>
   <section class="privacy-page page-container">
     <h1>Privacy Policy</h1>
-    <p class="app-subtitle">Prosaurus — iOS Application</p>
+    <p class="app-subtitle">Prosaurus — Mobile Application</p>
     <p class="effective-date">Effective Date: February 20, 2026</p>
 
     <p class="intro">
       This Privacy Policy describes how Cherry Blossom Development LLC ("we," "us," or "our"),
       based in Spokane, Washington, collects, uses, and protects your information when you use
-      the <strong>Prosaurus</strong> iOS application (the "App"). By using the App, you agree to
+      the <strong>Prosaurus</strong> mobile application (the "App"), available on iOS and Android. By using the App, you agree to
       the practices described in this policy.
     </p>
 
