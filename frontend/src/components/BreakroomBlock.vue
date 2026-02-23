@@ -42,7 +42,7 @@ const blockTitle = computed(() => {
 </script>
 
 <template>
-  <div class="breakroom-block" :class="{ expanded }">
+  <div class="breakroom-block" :class="{ expanded, 'chat-type': block.block_type === 'chat' }">
     <div class="block-header" @click="emit('toggle')">
       <button class="remove-btn" @click.stop="emit('remove')" title="Remove block">
         &times;
@@ -94,13 +94,17 @@ const blockTitle = computed(() => {
 
 <style scoped>
 .breakroom-block {
-  height: 100%;
+  height: auto;
   display: flex;
   flex-direction: column;
   background: var(--color-background-card);
   border-radius: var(--card-radius);
   box-shadow: var(--card-shadow);
   overflow: hidden;
+}
+
+.breakroom-block.chat-type {
+  height: 100%;
 }
 
 .block-header {

@@ -23,7 +23,19 @@ const videoInput = ref(null)
 const uploadingVideo = ref(false)
 const showAttachMenu = ref(false)
 
+const attachBtnRef = ref(null)
+const attachMenuStyle = ref({})
+
 const toggleAttachMenu = () => {
+  if (!showAttachMenu.value && attachBtnRef.value) {
+    const rect = attachBtnRef.value.getBoundingClientRect()
+    attachMenuStyle.value = {
+      position: 'fixed',
+      bottom: `${window.innerHeight - rect.top + 4}px`,
+      left: `${rect.left}px`,
+      zIndex: '9999'
+    }
+  }
   showAttachMenu.value = !showAttachMenu.value
 }
 
@@ -376,7 +388,7 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
 
       <div class="input-wrapper">
         <!-- Attachment menu popup -->
-        <div v-if="showAttachMenu" class="attach-menu">
+        <div v-if="showAttachMenu" class="attach-menu" :style="attachMenuStyle">
           <button
             type="button"
             class="attach-option"
@@ -413,6 +425,7 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
             @change="onVideoSelected"
           />
           <button
+            ref="attachBtnRef"
             type="button"
             class="attach-btn"
             @click="toggleAttachMenu"
@@ -642,9 +655,6 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
 }
 
 .attach-menu {
-  position: absolute;
-  bottom: 100%;
-  left: 8px;
   background: var(--color-background-card);
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -653,7 +663,6 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   display: flex;
   gap: 6px;
   margin-bottom: 6px;
-  z-index: 10;
 }
 
 .attach-option {

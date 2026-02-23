@@ -136,7 +136,6 @@ onMounted(() => {
 
 <style scoped>
 .blog-posts-widget {
-  height: 100%;
   overflow-y: auto;
   background: var(--color-background-soft);
 }
@@ -146,7 +145,8 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  min-height: 80px;
+  padding: 20px;
   color: var(--color-text-light);
   gap: 12px;
 }
@@ -156,7 +156,7 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  min-height: 80px;
   padding: 20px;
   text-align: center;
   color: var(--color-error);
@@ -282,7 +282,7 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 100%;
+  min-height: 80px;
   color: var(--color-text-light);
   text-align: center;
   padding: 20px;
