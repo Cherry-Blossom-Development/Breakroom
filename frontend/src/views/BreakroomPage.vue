@@ -41,8 +41,12 @@ const rowHeight = ref(150)
 
 // Derive the column count for the current viewport width so layoutItems can be
 // seeded with the right positions before the grid fires @breakpoint-changed.
+// The grid uses its container's offsetWidth for breakpoint detection, not
+// window.innerWidth.  On desktop (≥ 769px) .app-content has margin-left: 220px
+// for the sidebar, so we subtract that to match the grid's measurement.
 const getCurrentColCount = () => {
-  const w = window.innerWidth
+  const sidebarWidth = window.innerWidth >= 769 ? 220 : 0
+  const w = window.innerWidth - sidebarWidth
   if (w >= 1200) return 5
   if (w >= 996) return 4
   if (w >= 768) return 3
