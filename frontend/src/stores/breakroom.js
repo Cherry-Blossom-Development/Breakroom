@@ -54,16 +54,52 @@ export const breakroom = reactive({
 
   // Get layout array for a specific column count
   getLayoutForColCount(colCount) {
-    return state.blocks.map(block => {
+    const savedItems = []
+    const unsavedBlocks = []
+
+    for (const block of state.blocks) {
       const saved = state.positions[block.id]?.[colCount]
       if (saved) {
-        return { i: block.i, x: saved.x, y: saved.y, w: saved.w, h: saved.h }
+        savedItems.push({ i: block.i, x: saved.x, y: saved.y, w: saved.w, h: saved.h })
+      } else {
+        unsavedBlocks.push(block)
       }
-      // No saved position: use base block coordinates, clamping to fit
+    }
+
+    if (unsavedBlocks.length === 0) return savedItems
+
+    // Initialize column heights from saved items so unsaved blocks land below them
+    const colHeights = new Array(colCount).fill(0)
+    for (const item of savedItems) {
+      for (let col = item.x; col < item.x + item.w; col++) {
+        colHeights[col] = Math.max(colHeights[col], item.y + item.h)
+      }
+    }
+
+    // Pack unsaved blocks using a greedy column-filling algorithm (sorted by
+    // original y then x to preserve the intended visual order). This guarantees
+    // no two items share the same grid cell, avoiding the overlap/tall-widget
+    // flash that the old naive x-clamping produced.
+    unsavedBlocks.sort((a, b) => a.y - b.y || a.x - b.x)
+
+    const unsavedItems = unsavedBlocks.map(block => {
       const w = Math.min(block.w, colCount)
-      const x = Math.min(block.x, colCount - w)
-      return { i: block.i, x, y: block.y, w, h: block.h }
+      let bestX = 0
+      let bestY = Infinity
+      for (let x = 0; x <= colCount - w; x++) {
+        const y = Math.max(...colHeights.slice(x, x + w))
+        if (y < bestY) {
+          bestY = y
+          bestX = x
+        }
+      }
+      for (let col = bestX; col < bestX + w; col++) {
+        colHeights[col] = bestY + block.h
+      }
+      return { i: block.i, x: bestX, y: bestY, w, h: block.h }
     })
+
+    return [...savedItems, ...unsavedItems]
   },
 
   // Build responsive layouts object for grid-layout-plus

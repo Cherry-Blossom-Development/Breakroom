@@ -39,6 +39,17 @@ const breakpoints = { lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }
 const cols = { lg: 5, md: 4, sm: 3, xs: 2, xxs: 1 }
 const rowHeight = ref(150)
 
+// Derive the column count for the current viewport width so layoutItems can be
+// seeded with the right positions before the grid fires @breakpoint-changed.
+const getCurrentColCount = () => {
+  const w = window.innerWidth
+  if (w >= 1200) return 5
+  if (w >= 996) return 4
+  if (w >= 768) return 3
+  if (w >= 480) return 2
+  return 1
+}
+
 // Debounce timer for saving layout
 let saveTimeout = null
 
@@ -51,13 +62,14 @@ const responsiveLayouts = ref({})
 
 // Initialize layout from store (only once after fetch)
 const initializeLayout = () => {
-  layoutItems.value = breakroom.blocks.map(block => ({
-    i: block.i,
-    x: block.x,
-    y: block.y,
-    w: block.w,
-    h: block.h,
-    block: block
+  // Seed layoutItems with positions for the *current* viewport breakpoint so
+  // the grid renders correctly on first paint without a flash of 5-col layout.
+  const colCount = getCurrentColCount()
+  currentColCount.value = colCount
+  const currentLayout = breakroom.getLayoutForColCount(colCount)
+  layoutItems.value = currentLayout.map(item => ({
+    ...item,
+    block: breakroom.blocks.find(b => b.i === item.i)
   }))
   responsiveLayouts.value = breakroom.buildResponsiveLayouts()
   // Set first block as expanded by default on mobile
