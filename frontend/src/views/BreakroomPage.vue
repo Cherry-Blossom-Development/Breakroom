@@ -64,6 +64,11 @@ const layoutItems = ref([])
 const currentColCount = ref(5)
 const responsiveLayouts = ref({})
 
+// While true, grid item transitions are suppressed so the initial correction
+// from seed positions → responsive positions is invisible (no sliding animation).
+const initializing = ref(true)
+let initializingTimer = null
+
 // Initialize layout from store (only once after fetch)
 const initializeLayout = () => {
   // Seed layoutItems with positions for the *current* viewport breakpoint so
@@ -86,6 +91,11 @@ const initializeLayout = () => {
 let ignoreNextMoves = false
 const onBreakpointChanged = (newBreakpoint) => {
   currentColCount.value = cols[newBreakpoint]
+  // Grid has settled on the correct breakpoint — safe to show transitions now
+  if (initializing.value) {
+    initializing.value = false
+    if (initializingTimer) clearTimeout(initializingTimer)
+  }
   // Ignore move/resize events triggered by the breakpoint reflow
   ignoreNextMoves = true
   setTimeout(() => { ignoreNextMoves = false }, 100)
@@ -165,6 +175,9 @@ onMounted(async () => {
     fetchShortcuts()
   ])
   initializeLayout()
+  // Fallback: clear the initializing flag after 500ms in case @breakpoint-changed
+  // fires before the watcher is ready or doesn't fire at all (already correct bp).
+  initializingTimer = setTimeout(() => { initializing.value = false }, 500)
 })
 
 onUnmounted(() => {
@@ -251,7 +264,7 @@ onUnmounted(() => {
     </div>
 
     <!-- Desktop: Grid layout -->
-    <div v-else class="grid-container">
+    <div v-else class="grid-container" :class="{ initializing }">
       <GridLayout
         :key="layoutKey"
         v-model:layout="layoutItems"
@@ -432,6 +445,12 @@ onUnmounted(() => {
 :deep(.vue-grid-item) {
   transition: all 200ms ease;
   touch-action: none;
+}
+
+/* Suppress transitions while the grid is correcting seed positions to the
+   actual responsive layout, so users never see a sliding animation on load. */
+.grid-container.initializing :deep(.vue-grid-item) {
+  transition: none !important;
 }
 
 :deep(.vue-grid-item.vue-grid-placeholder) {
