@@ -94,17 +94,13 @@ const blockTitle = computed(() => {
 
 <style scoped>
 .breakroom-block {
-  height: auto;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--color-background-card);
   border-radius: var(--card-radius);
   box-shadow: var(--card-shadow);
   overflow: hidden;
-}
-
-.breakroom-block.chat-type {
-  height: 100%;
 }
 
 .block-header {
