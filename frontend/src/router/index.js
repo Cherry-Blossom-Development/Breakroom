@@ -38,6 +38,12 @@ const router = createRouter({
       // No requiresAuth - public page required for App Store compliance
     },
     {
+      path: '/child-safety',
+      name: 'childSafety',
+      component: () => import('../views/ChildSafetyPage.vue'),
+      // No requiresAuth - public page required for Play Store compliance
+    },
+    {
       path: '/breakroom',
       name: 'breakroom',
       component: () => import('../views/BreakroomPage.vue'),
