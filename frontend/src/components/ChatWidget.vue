@@ -22,6 +22,10 @@ const uploadingImage = ref(false)
 const videoInput = ref(null)
 const uploadingVideo = ref(false)
 const showAttachMenu = ref(false)
+const hasOlderMessages = ref(false)
+const isLoadingOlderMessages = ref(false)
+const oldestMessageDate = ref(null)
+const isPrepending = ref(false)
 
 const attachBtnRef = ref(null)
 const attachMenuStyle = ref({})
@@ -65,16 +69,22 @@ const scrollToBottom = (immediate = false) => {
   }
 }
 
-// Fetch messages via REST
+// Fetch messages via REST (last 7 days)
 const fetchMessages = async () => {
   try {
     loading.value = true
-    const res = await fetch(`/api/chat/rooms/${props.roomId}/messages?limit=50`, {
+    hasOlderMessages.value = false
+    oldestMessageDate.value = null
+    const since = new Date()
+    since.setDate(since.getDate() - 7)
+    const res = await fetch(`/api/chat/rooms/${props.roomId}/messages?since=${since.toISOString()}`, {
       credentials: 'include'
     })
     if (!res.ok) throw new Error('Failed to fetch messages')
     const data = await res.json()
     messages.value = data.messages
+    hasOlderMessages.value = data.hasMore
+    oldestMessageDate.value = data.messages.length > 0 ? data.messages[0].created_at : null
     scrollToBottom()
   } catch (err) {
     console.error('ChatWidget: Error fetching messages:', err)
@@ -82,6 +92,50 @@ const fetchMessages = async () => {
   } finally {
     loading.value = false
   }
+}
+
+// Load the previous 7-day window of messages and prepend them
+const fetchOlderMessages = async () => {
+  if (isLoadingOlderMessages.value || !hasOlderMessages.value || !oldestMessageDate.value) return
+  isLoadingOlderMessages.value = true
+  try {
+    const until = oldestMessageDate.value
+    const since = new Date(until)
+    since.setDate(since.getDate() - 7)
+    const res = await fetch(
+      `/api/chat/rooms/${props.roomId}/messages?since=${since.toISOString()}&until=${encodeURIComponent(until)}`,
+      { credentials: 'include' }
+    )
+    if (!res.ok) throw new Error('Failed to fetch older messages')
+    const data = await res.json()
+    hasOlderMessages.value = data.hasMore
+    if (data.messages.length > 0) {
+      oldestMessageDate.value = data.messages[0].created_at
+      messages.value = [...data.messages, ...messages.value]
+    }
+    return data.messages
+  } catch (err) {
+    console.error('ChatWidget: Error fetching older messages:', err)
+    error.value = err.message
+  } finally {
+    isLoadingOlderMessages.value = false
+  }
+}
+
+// Load older messages when user scrolls near the top
+const handleScroll = async () => {
+  if (!messagesContainer.value || !hasOlderMessages.value || isLoadingOlderMessages.value) return
+  if (messagesContainer.value.scrollTop > 100) return
+
+  const container = messagesContainer.value
+  const prevScrollHeight = container.scrollHeight
+
+  isPrepending.value = true
+  await fetchOlderMessages()
+  await nextTick()
+
+  container.scrollTop = container.scrollHeight - prevScrollHeight
+  isPrepending.value = false
 }
 
 // Send message
@@ -320,12 +374,15 @@ const cleanupSocket = () => {
   }
 }
 
-onMounted(() => {
-  fetchMessages()
+onMounted(async () => {
+  await fetchMessages()
   setupSocket()
+  await nextTick()
+  messagesContainer.value?.addEventListener('scroll', handleScroll)
 })
 
 onUnmounted(() => {
+  messagesContainer.value?.removeEventListener('scroll', handleScroll)
   cleanupSocket()
 })
 
@@ -336,6 +393,9 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   }
   messages.value = []
   typingUsers.value = []
+  hasOlderMessages.value = false
+  isLoadingOlderMessages.value = false
+  oldestMessageDate.value = null
   fetchMessages()
   if (socket && socket.connected) {
     socket.emit('join_room', newRoomId)
@@ -355,6 +415,11 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
 
     <template v-else>
       <div ref="messagesContainer" class="messages">
+        <div v-if="isLoadingOlderMessages" class="loading-older">
+          <span class="loading-spinner"></span>
+          Loading older messages...
+        </div>
+
         <div v-if="messages.length === 0" class="no-messages">
           No messages yet. Start the conversation!
         </div>
@@ -691,5 +756,29 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
 
 .attach-icon {
   font-size: 1.2em;
+}
+
+.loading-older {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.loading-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 </style>

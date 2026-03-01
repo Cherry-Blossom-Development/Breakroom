@@ -11,6 +11,7 @@ const uploadingImage = ref(false)
 const videoInput = ref(null)
 const uploadingVideo = ref(false)
 const showAttachMenu = ref(false)
+const isPrepending = ref(false)
 
 const toggleAttachMenu = () => {
   showAttachMenu.value = !showAttachMenu.value
@@ -47,15 +48,36 @@ const scrollToBottom = () => {
   })
 }
 
-// Watch for new messages (length change = new message added)
+// Watch for new messages — skip scroll when we're prepending older messages
 watch(() => chat.messages.length, () => {
-  scrollToBottom()
+  if (!isPrepending.value) {
+    scrollToBottom()
+  }
 }, { flush: 'post' })
 
 // Watch for messages array replacement (happens when joining/switching rooms)
 watch(() => chat.messages, () => {
-  scrollToBottom()
+  if (!isPrepending.value) {
+    scrollToBottom()
+  }
 }, { flush: 'post' })
+
+// Load older messages when user scrolls near the top
+const handleScroll = async () => {
+  if (!messagesContainer.value || !chat.hasOlderMessages || chat.isLoadingOlderMessages) return
+  if (messagesContainer.value.scrollTop > 100) return
+
+  const container = messagesContainer.value
+  const prevScrollHeight = container.scrollHeight
+
+  isPrepending.value = true
+  await chat.fetchOlderMessages()
+  await nextTick()
+
+  // Restore scroll position so the view doesn't jump
+  container.scrollTop = container.scrollHeight - prevScrollHeight
+  isPrepending.value = false
+}
 
 // Handle sending a message
 const sendMessage = () => {
@@ -206,9 +228,11 @@ onMounted(() => {
   // Chat initialization (connect, fetch rooms, join) is handled by AppSidebar
   // Just scroll to bottom when messages are ready
   scrollToBottom()
+  messagesContainer.value?.addEventListener('scroll', handleScroll)
 })
 
 onUnmounted(() => {
+  messagesContainer.value?.removeEventListener('scroll', handleScroll)
   chat.leaveRoom()
   chat.disconnect()
 })
@@ -232,6 +256,11 @@ onUnmounted(() => {
         </div>
 
         <div class="messages-container" ref="messagesContainer">
+          <div v-if="chat.isLoadingOlderMessages" class="loading-older">
+            <span class="loading-spinner"></span>
+            Loading older messages...
+          </div>
+
           <div v-if="chat.messages.length === 0" class="no-messages">
             No messages yet. Start the conversation!
           </div>
@@ -645,6 +674,30 @@ onUnmounted(() => {
   color: var(--color-error);
   cursor: pointer;
   text-decoration: underline;
+}
+
+.loading-older {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px;
+  font-size: 0.85em;
+  color: var(--color-text-muted);
+}
+
+.loading-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* Tablet */

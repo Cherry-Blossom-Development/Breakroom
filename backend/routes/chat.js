@@ -104,31 +104,26 @@ router.get('/rooms', authenticateToken, async (req, res) => {
   }
 });
 
-// Get messages for a room (with pagination)
+// Get messages for a room (windowed by date, default: last 7 days)
+// Query params:
+//   since (ISO date) - start of window, defaults to 7 days ago
+//   until (ISO date) - end of window (exclusive), omit to get up to now
 router.get('/rooms/:roomId/messages', authenticateToken, async (req, res) => {
   const { roomId } = req.params;
-  const { limit = 50, before } = req.query; // before is a message ID for pagination
+  const { since, until } = req.query;
+
+  const sinceDate = since ? new Date(since) : (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    return d;
+  })();
 
   const client = await getClient();
   try {
-    let query;
-    let params;
+    let query, params;
 
-    if (before) {
-      // Get messages before a specific message ID (for loading older messages)
-      query = `
-        SELECT
-          m.id, m.message, m.image_path, m.video_path, m.created_at,
-          u.id as user_id, u.handle
-        FROM chat_messages m
-        JOIN users u ON m.user_id = u.id
-        WHERE m.room_id = $1 AND m.id < $2
-        ORDER BY m.created_at DESC
-        LIMIT $3
-      `;
-      params = [roomId, before, parseInt(limit)];
-    } else {
-      // Get most recent messages
+    if (until) {
+      const untilDate = new Date(until);
       query = `
         SELECT
           m.id, m.message, m.image_path, m.video_path, m.created_at,
@@ -136,17 +131,38 @@ router.get('/rooms/:roomId/messages', authenticateToken, async (req, res) => {
         FROM chat_messages m
         JOIN users u ON m.user_id = u.id
         WHERE m.room_id = $1
+          AND m.created_at >= $2
+          AND m.created_at < $3
         ORDER BY m.created_at DESC
-        LIMIT $2
+        LIMIT 1000
       `;
-      params = [roomId, parseInt(limit)];
+      params = [roomId, sinceDate.toISOString(), untilDate.toISOString()];
+    } else {
+      query = `
+        SELECT
+          m.id, m.message, m.image_path, m.video_path, m.created_at,
+          u.id as user_id, u.handle
+        FROM chat_messages m
+        JOIN users u ON m.user_id = u.id
+        WHERE m.room_id = $1
+          AND m.created_at >= $2
+        ORDER BY m.created_at DESC
+        LIMIT 1000
+      `;
+      params = [roomId, sinceDate.toISOString()];
     }
 
     const messages = await client.query(query, params);
 
-    // Reverse to get chronological order
+    // Check whether there are messages older than the current window
+    const olderCheck = await client.query(
+      `SELECT 1 FROM chat_messages WHERE room_id = $1 AND created_at < $2 LIMIT 1`,
+      [roomId, sinceDate.toISOString()]
+    );
+
     res.status(200).json({
-      messages: messages.rows.reverse()
+      messages: messages.rows.reverse(),
+      hasMore: olderCheck.rowCount > 0
     });
   } catch (err) {
     console.error('Error fetching messages:', err);
