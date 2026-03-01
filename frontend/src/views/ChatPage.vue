@@ -224,15 +224,19 @@ const onVideoSelected = async (event) => {
   }
 }
 
+// Attach/detach scroll listener reactively — handles the case where
+// messagesContainer is null at mount because chat.currentRoom isn't set yet
+watch(messagesContainer, (newEl, oldEl) => {
+  if (oldEl) oldEl.removeEventListener('scroll', handleScroll)
+  if (newEl) newEl.addEventListener('scroll', handleScroll)
+})
+
 onMounted(() => {
   // Chat initialization (connect, fetch rooms, join) is handled by AppSidebar
-  // Just scroll to bottom when messages are ready
   scrollToBottom()
-  messagesContainer.value?.addEventListener('scroll', handleScroll)
 })
 
 onUnmounted(() => {
-  messagesContainer.value?.removeEventListener('scroll', handleScroll)
   chat.leaveRoom()
   chat.disconnect()
 })
