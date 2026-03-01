@@ -79,6 +79,10 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
+// Sliding session — refresh the JWT on every authenticated request
+const refreshSession = require('./middleware/refreshSession');
+app.use(refreshSession);
+
 // Use routes
 app.use('/api/auth', authentication);
 app.use('/api/user', user);
