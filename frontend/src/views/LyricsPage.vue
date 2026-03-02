@@ -57,6 +57,13 @@ const onSongSaved = () => {
   lyrics.fetchSongs()
 }
 
+const onSongSavedAndAddLyric = async (song) => {
+  showSongModal.value = false
+  editingSong.value = null
+  await lyrics.fetchSongs()
+  createNewLyric(song.id)
+}
+
 // Lyric functions
 const createNewLyric = (songId = null) => {
   editingLyric.value = songId ? { song_id: songId } : null
@@ -149,6 +156,7 @@ const getSectionLabel = (type) => {
       :song="editingSong"
       @close="showSongModal = false"
       @saved="onSongSaved"
+      @saved-add-lyric="onSongSavedAndAddLyric"
     />
 
     <!-- Song Detail View -->

@@ -7,7 +7,7 @@ const props = defineProps({
   song: Object
 })
 
-const emit = defineEmits(['close', 'saved'])
+const emit = defineEmits(['close', 'saved', 'saved-add-lyric'])
 
 const title = ref('')
 const description = ref('')
@@ -106,9 +106,10 @@ function requestClose() {
 }
 
 async function saveAndClose() {
-  await save()
-  if (!error.value) {
+  const song = await save()
+  if (song) {
     showUnsavedWarning.value = false
+    emit('saved')
   }
 }
 
@@ -120,7 +121,7 @@ function discardAndClose() {
 async function save() {
   if (!title.value.trim()) {
     error.value = 'Song title is required'
-    return
+    return null
   }
 
   saving.value = true
@@ -137,17 +138,26 @@ async function save() {
     }
 
     if (isEditing.value) {
-      await lyrics.updateSong(props.song.id, songData)
+      return await lyrics.updateSong(props.song.id, songData)
     } else {
-      await lyrics.createSong(songData)
+      return await lyrics.createSong(songData)
     }
-
-    emit('saved')
   } catch (err) {
     error.value = err.message
+    return null
   } finally {
     saving.value = false
   }
+}
+
+async function handleSave() {
+  const song = await save()
+  if (song) emit('saved')
+}
+
+async function handleSaveAndAddLyric() {
+  const song = await save()
+  if (song) emit('saved-add-lyric', song)
 }
 
 function selectFriend(friend) {
@@ -315,7 +325,15 @@ function selectGenre(g) {
 
       <div class="modal-footer">
         <button class="btn-secondary" @click="requestClose">Cancel</button>
-        <button class="btn-primary" @click="save" :disabled="saving">
+        <button
+          v-if="!isEditing"
+          class="btn-secondary"
+          @click="handleSaveAndAddLyric"
+          :disabled="saving"
+        >
+          {{ saving ? 'Saving...' : 'Create & Add Lyric' }}
+        </button>
+        <button class="btn-primary" @click="handleSave" :disabled="saving">
           {{ saving ? 'Saving...' : (isEditing ? 'Update' : 'Create') }}
         </button>
       </div>
