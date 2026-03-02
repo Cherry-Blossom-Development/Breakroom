@@ -665,6 +665,7 @@ const getSectionLabel = (type) => {
   color: var(--color-text-secondary);
   margin: 0 0 15px;
   line-height: 1.5;
+  white-space: pre-wrap;
 }
 
 .song-detail-actions {
