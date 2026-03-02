@@ -20,8 +20,20 @@ const collaboratorSearch = ref('')
 const showCollabDropdown = ref(false)
 const saving = ref(false)
 const error = ref(null)
+const showUnsavedWarning = ref(false)
+
+const originalValues = ref(null)
 
 const isEditing = computed(() => props.song && props.song.id)
+
+const isDirty = computed(() => {
+  if (!originalValues.value) return false
+  return title.value !== originalValues.value.title ||
+    description.value !== originalValues.value.description ||
+    genre.value !== originalValues.value.genre ||
+    status.value !== originalValues.value.status ||
+    visibility.value !== originalValues.value.visibility
+})
 
 // Filter friends for autocomplete - exclude existing collaborators and self
 const filteredFriends = computed(() => {
@@ -66,7 +78,34 @@ onMounted(async () => {
       await friends.fetchFriends()
     }
   }
+  originalValues.value = {
+    title: title.value,
+    description: description.value,
+    genre: genre.value,
+    status: status.value,
+    visibility: visibility.value
+  }
 })
+
+function requestClose() {
+  if (isDirty.value) {
+    showUnsavedWarning.value = true
+  } else {
+    emit('close')
+  }
+}
+
+async function saveAndClose() {
+  await save()
+  if (!error.value) {
+    showUnsavedWarning.value = false
+  }
+}
+
+function discardAndClose() {
+  showUnsavedWarning.value = false
+  emit('close')
+}
 
 async function save() {
   if (!title.value.trim()) {
@@ -134,11 +173,11 @@ function selectGenre(g) {
 </script>
 
 <template>
-  <div class="modal-overlay" @click.self="emit('close')">
+  <div class="modal-overlay">
     <div class="modal-content">
       <div class="modal-header">
         <h2>{{ isEditing ? 'Edit Song' : 'New Song' }}</h2>
-        <button class="close-btn" @click="emit('close')">&times;</button>
+        <button class="close-btn" @click="requestClose">&times;</button>
       </div>
 
       <div class="modal-body">
@@ -254,10 +293,25 @@ function selectGenre(g) {
       </div>
 
       <div class="modal-footer">
-        <button class="btn-secondary" @click="emit('close')">Cancel</button>
+        <button class="btn-secondary" @click="requestClose">Cancel</button>
         <button class="btn-primary" @click="save" :disabled="saving">
           {{ saving ? 'Saving...' : (isEditing ? 'Update' : 'Create') }}
         </button>
+      </div>
+    </div>
+
+    <!-- Unsaved changes warning -->
+    <div v-if="showUnsavedWarning" class="warning-overlay">
+      <div class="warning-dialog">
+        <h3>Unsaved Changes</h3>
+        <p>You have unsaved changes. What would you like to do?</p>
+        <div class="warning-actions">
+          <button class="btn-secondary" @click="showUnsavedWarning = false">Keep Editing</button>
+          <button class="btn-danger" @click="discardAndClose">Discard</button>
+          <button class="btn-primary" @click="saveAndClose" :disabled="saving">
+            {{ saving ? 'Saving...' : 'Save' }}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -286,6 +340,7 @@ function selectGenre(g) {
   max-height: 90vh;
   overflow-y: auto;
   box-shadow: var(--shadow-lg);
+  position: relative;
 }
 
 .modal-header {
@@ -580,6 +635,60 @@ function selectGenre(g) {
   background: var(--color-button-secondary-hover);
 }
 
+.warning-overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--color-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  z-index: 10;
+}
+
+.warning-dialog {
+  background: var(--color-background-card);
+  border-radius: 10px;
+  padding: 24px;
+  max-width: 340px;
+  width: 90%;
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+
+.warning-dialog h3 {
+  margin: 0 0 10px;
+  color: var(--color-text);
+  font-size: 1.1rem;
+}
+
+.warning-dialog p {
+  margin: 0 0 20px;
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+}
+
+.warning-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.btn-danger {
+  background: var(--color-error);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.btn-danger:hover {
+  opacity: 0.9;
+}
+
 @media (max-width: 500px) {
   .form-row {
     grid-template-columns: 1fr;
@@ -591,6 +700,10 @@ function selectGenre(g) {
 
   .add-collaborator input {
     width: 100%;
+  }
+
+  .warning-actions {
+    flex-direction: column;
   }
 }
 </style>
