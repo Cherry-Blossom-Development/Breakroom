@@ -66,7 +66,8 @@ const visibilityOptions = [
 
 const genreSuggestions = [
   'Rock', 'Pop', 'Country', 'Hip-Hop', 'R&B', 'Jazz', 'Blues', 'Folk',
-  'Electronic', 'Indie', 'Alternative', 'Metal', 'Punk', 'Soul', 'Gospel'
+  'Electronic', 'Indie', 'Alternative', 'Metal', 'Punk', 'Goth', 'Industrial',
+  'Soul', 'Gospel'
 ]
 
 const todayStr = () => new Date().toISOString().split('T')[0]
