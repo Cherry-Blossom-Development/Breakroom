@@ -14,6 +14,7 @@ const description = ref('')
 const genre = ref('')
 const status = ref('idea')
 const visibility = ref('private')
+const songDate = ref('')
 const newCollaborator = ref('')
 const collaboratorRole = ref('editor')
 const collaboratorSearch = ref('')
@@ -32,7 +33,8 @@ const isDirty = computed(() => {
     description.value !== originalValues.value.description ||
     genre.value !== originalValues.value.genre ||
     status.value !== originalValues.value.status ||
-    visibility.value !== originalValues.value.visibility
+    visibility.value !== originalValues.value.visibility ||
+    songDate.value !== originalValues.value.songDate
 })
 
 // Filter friends for autocomplete - exclude existing collaborators and self
@@ -67,6 +69,8 @@ const genreSuggestions = [
   'Electronic', 'Indie', 'Alternative', 'Metal', 'Punk', 'Soul', 'Gospel'
 ]
 
+const todayStr = () => new Date().toISOString().split('T')[0]
+
 onMounted(async () => {
   if (props.song) {
     title.value = props.song.title || ''
@@ -74,16 +78,22 @@ onMounted(async () => {
     genre.value = props.song.genre || ''
     status.value = props.song.status || 'idea'
     visibility.value = props.song.visibility || 'private'
+    songDate.value = props.song.song_date
+      ? props.song.song_date.split('T')[0]
+      : todayStr()
     if (props.song.role === 'owner') {
       await friends.fetchFriends()
     }
+  } else {
+    songDate.value = todayStr()
   }
   originalValues.value = {
     title: title.value,
     description: description.value,
     genre: genre.value,
     status: status.value,
-    visibility: visibility.value
+    visibility: visibility.value,
+    songDate: songDate.value
   }
 })
 
@@ -122,7 +132,8 @@ async function save() {
       description: description.value.trim() || null,
       genre: genre.value.trim() || null,
       status: status.value,
-      visibility: visibility.value
+      visibility: visibility.value,
+      song_date: songDate.value || null
     }
 
     if (isEditing.value) {
@@ -191,6 +202,16 @@ function selectGenre(g) {
             v-model="title"
             type="text"
             placeholder="Song title"
+          />
+        </div>
+
+        <!-- Date -->
+        <div class="form-group">
+          <label for="song-date">Date</label>
+          <input
+            id="song-date"
+            v-model="songDate"
+            type="date"
           />
         </div>
 

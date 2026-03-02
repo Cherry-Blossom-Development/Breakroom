@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS songs (
   genre VARCHAR(100) DEFAULT NULL,
   status ENUM('idea', 'writing', 'complete', 'recorded', 'released') DEFAULT 'idea',
   visibility ENUM('private', 'collaborators', 'public') DEFAULT 'private',
+  song_date DATE DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS lyrics (
   mood VARCHAR(100) DEFAULT NULL,
   notes TEXT DEFAULT NULL,
   status ENUM('draft', 'in-progress', 'complete', 'archived') DEFAULT 'draft',
+  lyric_date DATE DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,

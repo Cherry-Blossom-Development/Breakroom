@@ -98,7 +98,7 @@ router.get('/songs', authenticate, async (req, res) => {
        JOIN users u ON s.user_id = u.id
        JOIN song_collaborators sc ON sc.song_id = s.id
        WHERE sc.user_id = $2
-       ORDER BY updated_at DESC`,
+       ORDER BY COALESCE(song_date, DATE(updated_at)) DESC`,
       [req.user.id, req.user.id]
     );
 
@@ -166,7 +166,7 @@ router.get('/songs/:id', authenticate, async (req, res) => {
 
 // Create a new song
 router.post('/songs', authenticate, async (req, res) => {
-  const { title, description, genre, status, visibility } = req.body;
+  const { title, description, genre, status, visibility, song_date } = req.body;
   const client = await getClient();
 
   try {
@@ -175,15 +175,16 @@ router.post('/songs', authenticate, async (req, res) => {
     }
 
     await client.query(
-      `INSERT INTO songs (user_id, title, description, genre, status, visibility)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+      `INSERT INTO songs (user_id, title, description, genre, status, visibility, song_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [
         req.user.id,
         title.trim(),
         description || null,
         genre || null,
         status || 'idea',
-        visibility || 'private'
+        visibility || 'private',
+        song_date || null
       ]
     );
 
@@ -205,7 +206,7 @@ router.post('/songs', authenticate, async (req, res) => {
 // Update a song
 router.put('/songs/:id', authenticate, async (req, res) => {
   const { id } = req.params;
-  const { title, description, genre, status, visibility } = req.body;
+  const { title, description, genre, status, visibility, song_date } = req.body;
   const client = await getClient();
 
   try {
@@ -220,9 +221,9 @@ router.put('/songs/:id', authenticate, async (req, res) => {
 
     await client.query(
       `UPDATE songs
-       SET title = $1, description = $2, genre = $3, status = $4, visibility = $5
-       WHERE id = $6`,
-      [title.trim(), description || null, genre || null, status || 'idea', visibility || 'private', id]
+       SET title = $1, description = $2, genre = $3, status = $4, visibility = $5, song_date = $6
+       WHERE id = $7`,
+      [title.trim(), description || null, genre || null, status || 'idea', visibility || 'private', song_date || null, id]
     );
 
     const result = await client.query('SELECT * FROM songs WHERE id = $1', [id]);
@@ -421,7 +422,7 @@ router.get('/:id', authenticate, async (req, res) => {
 
 // Create a new lyric
 router.post('/', authenticate, async (req, res) => {
-  const { song_id, title, content, section_type, section_order, mood, notes, status } = req.body;
+  const { song_id, title, content, section_type, section_order, mood, notes, status, lyric_date } = req.body;
   const client = await getClient();
 
   try {
@@ -438,8 +439,8 @@ router.post('/', authenticate, async (req, res) => {
     }
 
     await client.query(
-      `INSERT INTO lyrics (user_id, song_id, title, content, section_type, section_order, mood, notes, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      `INSERT INTO lyrics (user_id, song_id, title, content, section_type, section_order, mood, notes, status, lyric_date)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
       [
         req.user.id,
         song_id || null,
@@ -449,7 +450,8 @@ router.post('/', authenticate, async (req, res) => {
         section_order || null,
         mood || null,
         notes || null,
-        status || 'draft'
+        status || 'draft',
+        lyric_date || null
       ]
     );
 
@@ -470,7 +472,7 @@ router.post('/', authenticate, async (req, res) => {
 // Update a lyric
 router.put('/:id', authenticate, async (req, res) => {
   const { id } = req.params;
-  const { song_id, title, content, section_type, section_order, mood, notes, status } = req.body;
+  const { song_id, title, content, section_type, section_order, mood, notes, status, lyric_date } = req.body;
   const client = await getClient();
 
   try {
@@ -509,8 +511,8 @@ router.put('/:id', authenticate, async (req, res) => {
     await client.query(
       `UPDATE lyrics
        SET song_id = $1, title = $2, content = $3, section_type = $4,
-           section_order = $5, mood = $6, notes = $7, status = $8
-       WHERE id = $9`,
+           section_order = $5, mood = $6, notes = $7, status = $8, lyric_date = $9
+       WHERE id = $10`,
       [
         song_id !== undefined ? song_id : lyric.song_id,
         title || null,
@@ -520,6 +522,7 @@ router.put('/:id', authenticate, async (req, res) => {
         mood || null,
         notes || null,
         status || 'draft',
+        lyric_date !== undefined ? lyric_date : lyric.lyric_date,
         id
       ]
     );

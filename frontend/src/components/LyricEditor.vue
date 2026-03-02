@@ -18,8 +18,11 @@ const mood = ref('')
 const notes = ref('')
 const status = ref('draft')
 const selectedSongId = ref(null)
+const lyricDate = ref('')
 const saving = ref(false)
 const error = ref(null)
+
+const todayStr = () => new Date().toISOString().split('T')[0]
 
 const isEditing = computed(() => props.lyric && props.lyric.id)
 
@@ -57,8 +60,12 @@ onMounted(() => {
     notes.value = props.lyric.notes || ''
     status.value = props.lyric.status || 'draft'
     selectedSongId.value = props.lyric.song_id || props.songId || null
+    lyricDate.value = props.lyric.lyric_date
+      ? props.lyric.lyric_date.split('T')[0]
+      : todayStr()
   } else {
     selectedSongId.value = props.songId || null
+    lyricDate.value = todayStr()
   }
 })
 
@@ -80,7 +87,8 @@ async function save() {
       mood: mood.value.trim() || null,
       notes: notes.value.trim() || null,
       status: status.value,
-      song_id: selectedSongId.value || null
+      song_id: selectedSongId.value || null,
+      lyric_date: lyricDate.value || null
     }
 
     if (isEditing.value) {
@@ -181,14 +189,25 @@ function selectMood(m) {
           </div>
         </div>
 
-        <!-- Status -->
-        <div class="form-group">
-          <label for="status">Status</label>
-          <select id="status" v-model="status">
-            <option v-for="opt in statusOptions" :key="opt.value" :value="opt.value">
-              {{ opt.label }}
-            </option>
-          </select>
+        <!-- Status and Date -->
+        <div class="form-row">
+          <div class="form-group">
+            <label for="status">Status</label>
+            <select id="status" v-model="status">
+              <option v-for="opt in statusOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="lyric-date">Date</label>
+            <input
+              id="lyric-date"
+              v-model="lyricDate"
+              type="date"
+            />
+          </div>
         </div>
 
         <!-- Notes -->

@@ -91,7 +91,10 @@ const onLyricSaved = async () => {
 
 // Helpers
 const formatDate = (dateStr) => {
-  const date = new Date(dateStr)
+  if (!dateStr) return ''
+  // DATE columns come back as "YYYY-MM-DD"; parse without time zone shift
+  const parts = dateStr.split('T')[0].split('-')
+  const date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
   return date.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -201,7 +204,7 @@ const getSectionLabel = (type) => {
           </div>
           <div class="lyric-content">{{ lyric.content }}</div>
           <div class="lyric-footer">
-            <span class="lyric-date">{{ formatDate(lyric.updated_at) }}</span>
+            <span class="lyric-date">{{ formatDate(lyric.lyric_date || lyric.updated_at) }}</span>
             <div class="lyric-actions" @click.stop>
               <button class="btn-icon" @click="editLyric(lyric)">Edit</button>
               <button class="btn-icon btn-danger" @click="deleteLyric(lyric)">Delete</button>
@@ -271,7 +274,7 @@ const getSectionLabel = (type) => {
                 <div v-if="song.genre" class="song-genre">{{ song.genre }}</div>
                 <div class="song-meta">
                   <span>{{ song.lyric_count || 0 }} lyrics</span>
-                  <span>{{ formatDate(song.updated_at) }}</span>
+                  <span>{{ formatDate(song.song_date || song.updated_at) }}</span>
                 </div>
                 <div class="song-actions" @click.stop>
                   <button class="btn-icon" @click="editSong(song)">Edit</button>
@@ -327,7 +330,7 @@ const getSectionLabel = (type) => {
             <div class="idea-meta">
               <StatusBadge v-if="lyric.mood" color="gray" soft>{{ lyric.mood }}</StatusBadge>
               <StatusBadge :color="getStatusBadgeColor(lyric.status)" soft>{{ lyric.status }}</StatusBadge>
-              <span class="idea-date">{{ formatDate(lyric.updated_at) }}</span>
+              <span class="idea-date">{{ formatDate(lyric.lyric_date || lyric.updated_at) }}</span>
             </div>
             <div class="idea-actions" @click.stop>
               <button class="btn-icon" @click="editLyric(lyric)">Edit</button>
