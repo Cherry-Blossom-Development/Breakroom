@@ -69,15 +69,13 @@ const scrollToBottom = (immediate = false) => {
   }
 }
 
-// Fetch messages via REST (last 7 days)
+// Fetch messages via REST (most recent 50)
 const fetchMessages = async () => {
   try {
     loading.value = true
     hasOlderMessages.value = false
     oldestMessageDate.value = null
-    const since = new Date()
-    since.setDate(since.getDate() - 7)
-    const res = await fetch(`/api/chat/rooms/${props.roomId}/messages?since=${since.toISOString()}`, {
+    const res = await fetch(`/api/chat/rooms/${props.roomId}/messages?limit=50`, {
       credentials: 'include'
     })
     if (!res.ok) throw new Error('Failed to fetch messages')
@@ -94,16 +92,13 @@ const fetchMessages = async () => {
   }
 }
 
-// Load the previous 7-day window of messages and prepend them
+// Fetch the previous batch of messages (50 older than current oldest)
 const fetchOlderMessages = async () => {
   if (isLoadingOlderMessages.value || !hasOlderMessages.value || !oldestMessageDate.value) return
   isLoadingOlderMessages.value = true
   try {
-    const until = oldestMessageDate.value
-    const since = new Date(until)
-    since.setDate(since.getDate() - 7)
     const res = await fetch(
-      `/api/chat/rooms/${props.roomId}/messages?since=${since.toISOString()}&until=${encodeURIComponent(until)}`,
+      `/api/chat/rooms/${props.roomId}/messages?limit=50&before=${encodeURIComponent(oldestMessageDate.value)}`,
       { credentials: 'include' }
     )
     if (!res.ok) throw new Error('Failed to fetch older messages')
@@ -122,10 +117,8 @@ const fetchOlderMessages = async () => {
   }
 }
 
-// Load older messages when user scrolls near the top
-const handleScroll = async () => {
+const loadOlderMessages = async () => {
   if (!messagesContainer.value || !hasOlderMessages.value || isLoadingOlderMessages.value) return
-  if (messagesContainer.value.scrollTop > 100) return
 
   const container = messagesContainer.value
   const prevScrollHeight = container.scrollHeight
@@ -136,6 +129,13 @@ const handleScroll = async () => {
 
   container.scrollTop = container.scrollHeight - prevScrollHeight
   isPrepending.value = false
+}
+
+// Load older messages when user scrolls near the top
+const handleScroll = async () => {
+  if (!messagesContainer.value || !hasOlderMessages.value || isLoadingOlderMessages.value) return
+  if (messagesContainer.value.scrollTop > 100) return
+  loadOlderMessages()
 }
 
 // Send message
@@ -418,6 +418,12 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
         <div v-if="isLoadingOlderMessages" class="loading-older">
           <span class="loading-spinner"></span>
           Loading older messages...
+        </div>
+
+        <div v-else-if="hasOlderMessages" class="load-more-btn-wrapper">
+          <button class="load-more-btn" @click="loadOlderMessages">
+            ↑ Load older messages
+          </button>
         </div>
 
         <div v-if="messages.length === 0" class="no-messages">
@@ -780,5 +786,26 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+.load-more-btn-wrapper {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0;
+}
+
+.load-more-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 3px 12px;
+  font-size: 0.75em;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.load-more-btn:hover {
+  background: var(--color-background-mute);
+  color: var(--color-text);
 }
 </style>

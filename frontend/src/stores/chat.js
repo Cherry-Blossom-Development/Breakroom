@@ -155,13 +155,10 @@ export const chat = reactive({
     }
   },
 
-  // Fetch messages for a room via REST API (last 7 days by default)
+  // Fetch messages for a room via REST API (most recent 50)
   async fetchMessages(roomId) {
     try {
-      const since = new Date()
-      since.setDate(since.getDate() - 7)
-      const url = `/api/chat/rooms/${roomId}/messages?since=${since.toISOString()}`
-      const res = await authFetch(url)
+      const res = await authFetch(`/api/chat/rooms/${roomId}/messages?limit=50`)
       if (!res.ok) throw new Error('Failed to fetch messages')
       const data = await res.json()
       state.hasOlderMessages = data.hasMore
@@ -174,33 +171,21 @@ export const chat = reactive({
     }
   },
 
-  // Fetch the previous week of messages and prepend them.
-  // Automatically skips empty windows (gaps in chat history) so a single
-  // scroll-to-top always surfaces the next batch of real messages.
+  // Fetch the previous batch of messages (50 older than current oldest)
   async fetchOlderMessages() {
-    if (state.isLoadingOlderMessages || !state.hasOlderMessages || !state.currentRoom) return null
+    if (state.isLoadingOlderMessages || !state.hasOlderMessages || !state.currentRoom || !state.oldestMessageDate) return null
     state.isLoadingOlderMessages = true
     try {
-      let found = []
-      while (found.length === 0 && state.hasOlderMessages) {
-        const until = state.oldestMessageDate
-        const since = new Date(until)
-        since.setDate(since.getDate() - 7)
-        const url = `/api/chat/rooms/${state.currentRoom}/messages?since=${since.toISOString()}&until=${encodeURIComponent(until)}`
-        const res = await authFetch(url)
-        if (!res.ok) throw new Error('Failed to fetch older messages')
-        const data = await res.json()
-        state.hasOlderMessages = data.hasMore
-        if (data.messages.length > 0) {
-          state.oldestMessageDate = data.messages[0].created_at
-          state.messages = [...data.messages, ...state.messages]
-          found = data.messages
-        } else {
-          // Empty window — advance cursor back and loop again
-          state.oldestMessageDate = since.toISOString()
-        }
+      const url = `/api/chat/rooms/${state.currentRoom}/messages?limit=50&before=${encodeURIComponent(state.oldestMessageDate)}`
+      const res = await authFetch(url)
+      if (!res.ok) throw new Error('Failed to fetch older messages')
+      const data = await res.json()
+      state.hasOlderMessages = data.hasMore
+      if (data.messages.length > 0) {
+        state.oldestMessageDate = data.messages[0].created_at
+        state.messages = [...data.messages, ...state.messages]
       }
-      return found
+      return data.messages.length > 0 ? data.messages : null
     } catch (err) {
       console.error('Error fetching older messages:', err)
       state.error = err.message

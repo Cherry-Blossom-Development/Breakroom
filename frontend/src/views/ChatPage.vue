@@ -62,10 +62,9 @@ watch(() => chat.messages, () => {
   }
 }, { flush: 'post' })
 
-// Load older messages when user scrolls near the top
-const handleScroll = async () => {
+// Load older messages — called by scroll handler and "load more" button
+const loadOlderMessages = async () => {
   if (!messagesContainer.value || !chat.hasOlderMessages || chat.isLoadingOlderMessages) return
-  if (messagesContainer.value.scrollTop > 100) return
 
   const container = messagesContainer.value
   const prevScrollHeight = container.scrollHeight
@@ -77,6 +76,13 @@ const handleScroll = async () => {
   // Restore scroll position so the view doesn't jump
   container.scrollTop = container.scrollHeight - prevScrollHeight
   isPrepending.value = false
+}
+
+// Load older messages when user scrolls near the top
+const handleScroll = async () => {
+  if (!messagesContainer.value || !chat.hasOlderMessages || chat.isLoadingOlderMessages) return
+  if (messagesContainer.value.scrollTop > 100) return
+  loadOlderMessages()
 }
 
 // Handle sending a message
@@ -263,6 +269,12 @@ onUnmounted(() => {
           <div v-if="chat.isLoadingOlderMessages" class="loading-older">
             <span class="loading-spinner"></span>
             Loading older messages...
+          </div>
+
+          <div v-else-if="chat.hasOlderMessages" class="load-more-btn-wrapper">
+            <button class="load-more-btn" @click="loadOlderMessages">
+              ↑ Load older messages
+            </button>
           </div>
 
           <div v-if="chat.messages.length === 0" class="no-messages">
@@ -688,6 +700,27 @@ onUnmounted(() => {
   padding: 10px;
   font-size: 0.85em;
   color: var(--color-text-muted);
+}
+
+.load-more-btn-wrapper {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.load-more-btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 4px 14px;
+  font-size: 0.82em;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.load-more-btn:hover {
+  background: var(--color-background-mute);
+  color: var(--color-text);
 }
 
 .loading-spinner {
