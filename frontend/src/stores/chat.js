@@ -190,6 +190,9 @@ export const chat = reactive({
       if (data.messages.length > 0) {
         state.oldestMessageDate = data.messages[0].created_at
         state.messages = [...data.messages, ...state.messages]
+      } else if (data.hasMore) {
+        // Empty window (gap in history) but older messages exist — advance cursor back
+        state.oldestMessageDate = since.toISOString()
       }
       return data.messages
     } catch (err) {
