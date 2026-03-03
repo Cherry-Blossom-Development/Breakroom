@@ -81,7 +81,7 @@ router.get('/notification-types', async (req, res) => {
       );
 
       const targetUsersResult = await client.query(
-        `SELECT target_type FROM notification_type_users WHERE notification_type_id = ?`,
+        `SELECT target_type FROM notification_type_users WHERE notification_type_id = $1`,
         [nt.id]
       );
 
@@ -118,7 +118,7 @@ router.post('/notification-types', async (req, res) => {
 
     const insertResult = await client.query(
       `INSERT INTO notification_types (name, description, display_type, event_id, repeat_rule)
-       VALUES (?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5)`,
       [name, description || null, display_type || 'header', event_id || null, repeat_rule || 'forever']
     );
 
@@ -128,7 +128,7 @@ router.post('/notification-types', async (req, res) => {
     if (group_ids && group_ids.length > 0) {
       for (const groupId of group_ids) {
         await client.query(
-          'INSERT INTO notification_type_groups (notification_type_id, group_id) VALUES (?, ?)',
+          'INSERT INTO notification_type_groups (notification_type_id, group_id) VALUES ($1, $2)',
           [notificationTypeId, groupId]
         );
       }
@@ -138,7 +138,7 @@ router.post('/notification-types', async (req, res) => {
     if (target_users && target_users.length > 0) {
       for (const targetType of target_users) {
         await client.query(
-          'INSERT INTO notification_type_users (notification_type_id, target_type) VALUES (?, ?)',
+          'INSERT INTO notification_type_users (notification_type_id, target_type) VALUES ($1, $2)',
           [notificationTypeId, targetType]
         );
       }
@@ -153,7 +153,7 @@ router.post('/notification-types', async (req, res) => {
               et.type as event_type
        FROM notification_types nt
        LEFT JOIN event_types et ON nt.event_id = et.id
-       WHERE nt.id = ?`,
+       WHERE nt.id = $1`,
       [notificationTypeId]
     );
 
@@ -185,9 +185,9 @@ router.put('/notification-types/:id', async (req, res) => {
 
     const updateResult = await client.query(
       `UPDATE notification_types
-       SET name = ?, description = ?, display_type = ?, event_id = ?,
-           repeat_rule = ?, is_active = ?
-       WHERE id = ?`,
+       SET name = $1, description = $2, display_type = $3, event_id = $4,
+           repeat_rule = $5, is_active = $6
+       WHERE id = $7`,
       [name, description || null, display_type || 'header', event_id || null,
        repeat_rule || 'forever', is_active ?? true, id]
     );
@@ -199,14 +199,14 @@ router.put('/notification-types/:id', async (req, res) => {
 
     // Clear and re-insert group associations
     await client.query(
-      'DELETE FROM notification_type_groups WHERE notification_type_id = ?',
+      'DELETE FROM notification_type_groups WHERE notification_type_id = $1',
       [id]
     );
 
     if (group_ids && group_ids.length > 0) {
       for (const groupId of group_ids) {
         await client.query(
-          'INSERT INTO notification_type_groups (notification_type_id, group_id) VALUES (?, ?)',
+          'INSERT INTO notification_type_groups (notification_type_id, group_id) VALUES ($1, $2)',
           [id, groupId]
         );
       }
@@ -214,14 +214,14 @@ router.put('/notification-types/:id', async (req, res) => {
 
     // Clear and re-insert target user types
     await client.query(
-      'DELETE FROM notification_type_users WHERE notification_type_id = ?',
+      'DELETE FROM notification_type_users WHERE notification_type_id = $1',
       [id]
     );
 
     if (target_users && target_users.length > 0) {
       for (const targetType of target_users) {
         await client.query(
-          'INSERT INTO notification_type_users (notification_type_id, target_type) VALUES (?, ?)',
+          'INSERT INTO notification_type_users (notification_type_id, target_type) VALUES ($1, $2)',
           [id, targetType]
         );
       }
@@ -236,7 +236,7 @@ router.put('/notification-types/:id', async (req, res) => {
               et.type as event_type
        FROM notification_types nt
        LEFT JOIN event_types et ON nt.event_id = et.id
-       WHERE nt.id = ?`,
+       WHERE nt.id = $1`,
       [id]
     );
 
@@ -260,7 +260,7 @@ router.delete('/notification-types/:id', async (req, res) => {
   const client = await getClient();
   try {
     const result = await client.query(
-      'DELETE FROM notification_types WHERE id = ?',
+      'DELETE FROM notification_types WHERE id = $1',
       [id]
     );
 
@@ -289,7 +289,7 @@ router.get('/my', authenticate, async (req, res) => {
               nt.name, nt.description, nt.display_type
        FROM notifications n
        JOIN notification_types nt ON n.notif_id = nt.id
-       WHERE n.user_id = ? AND n.status != 'dismissed'
+       WHERE n.user_id = $1 AND n.status != 'dismissed'
        ORDER BY n.created_at DESC`,
       [req.user.id]
     );
@@ -317,7 +317,7 @@ router.put('/:id/status', authenticate, async (req, res) => {
   const client = await getClient();
   try {
     const result = await client.query(
-      'UPDATE notifications SET status = ? WHERE id = ? AND user_id = ?',
+      'UPDATE notifications SET status = $1 WHERE id = $2 AND user_id = $3',
       [status, id, req.user.id]
     );
 
@@ -346,7 +346,7 @@ router.post('/trigger/:eventTypeCode', authenticate, async (req, res) => {
   try {
     // Find the event type
     const eventTypeResult = await client.query(
-      'SELECT id FROM event_types WHERE type = ?',
+      'SELECT id FROM event_types WHERE type = $1',
       [eventTypeCode]
     );
 
@@ -358,7 +358,7 @@ router.post('/trigger/:eventTypeCode', authenticate, async (req, res) => {
 
     // Log the event
     await client.query(
-      'INSERT INTO events (type_id, user_id, data_json) VALUES (?, ?, ?)',
+      'INSERT INTO events (type_id, user_id, data_json) VALUES ($1, $2, $3)',
       [eventTypeId, req.user.id, JSON.stringify(eventData)]
     );
 
@@ -366,7 +366,7 @@ router.post('/trigger/:eventTypeCode', authenticate, async (req, res) => {
     const notifTypesResult = await client.query(
       `SELECT id, name, description, display_type, repeat_rule
        FROM notification_types
-       WHERE event_id = ? AND is_active = TRUE`,
+       WHERE event_id = $1 AND is_active = TRUE`,
       [eventTypeId]
     );
 
@@ -375,13 +375,13 @@ router.post('/trigger/:eventTypeCode', authenticate, async (req, res) => {
     for (const notifType of notifTypesResult.rows) {
       // Get target groups for this notification type
       const groupsResult = await client.query(
-        'SELECT group_id FROM notification_type_groups WHERE notification_type_id = ?',
+        'SELECT group_id FROM notification_type_groups WHERE notification_type_id = $1',
         [notifType.id]
       );
 
       // Get target user types for this notification type
       const targetUsersResult = await client.query(
-        'SELECT target_type FROM notification_type_users WHERE notification_type_id = ?',
+        'SELECT target_type FROM notification_type_users WHERE notification_type_id = $1',
         [notifType.id]
       );
       const targetUserTypes = targetUsersResult.rows.map(r => r.target_type);
@@ -397,11 +397,11 @@ router.post('/trigger/:eventTypeCode', authenticate, async (req, res) => {
         // Get friends of the trigger user
         const friendsResult = await client.query(
           `SELECT CASE
-             WHEN user_id = ? THEN friend_id
+             WHEN user_id = $1 THEN friend_id
              ELSE user_id
            END as friend_id
            FROM friends
-           WHERE (user_id = ? OR friend_id = ?) AND status = 'accepted'`,
+           WHERE (user_id = $2 OR friend_id = $3) AND status = 'accepted'`,
           [req.user.id, req.user.id, req.user.id]
         );
         friendsResult.rows.forEach(r => targetUserIds.add(r.friend_id));
@@ -416,7 +416,7 @@ router.post('/trigger/:eventTypeCode', authenticate, async (req, res) => {
         } else {
           // Get users in the specified groups
           const groupIds = groupsResult.rows.map(g => g.group_id);
-          const placeholders = groupIds.map(() => '?').join(',');
+          const placeholders = groupIds.map((_, i) => `$${i + 1}`).join(',');
           const usersInGroupsResult = await client.query(
             `SELECT DISTINCT user_id FROM user_groups WHERE group_id IN (${placeholders})`,
             groupIds
@@ -435,7 +435,7 @@ router.post('/trigger/:eventTypeCode', authenticate, async (req, res) => {
           const maxCount = parseInt(notifType.repeat_rule, 10);
           if (!isNaN(maxCount)) {
             const countResult = await client.query(
-              'SELECT COUNT(*) as count FROM notifications WHERE notif_id = ? AND user_id = ?',
+              'SELECT COUNT(*) as count FROM notifications WHERE notif_id = $1 AND user_id = $2',
               [notifType.id, userId]
             );
             if (countResult.rows[0].count >= maxCount) {
@@ -446,7 +446,7 @@ router.post('/trigger/:eventTypeCode', authenticate, async (req, res) => {
 
         // Create the notification
         const insertResult = await client.query(
-          'INSERT INTO notifications (notif_id, user_id) VALUES (?, ?)',
+          'INSERT INTO notifications (notif_id, user_id) VALUES ($1, $2)',
           [notifType.id, userId]
         );
 
