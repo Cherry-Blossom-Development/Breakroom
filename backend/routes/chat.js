@@ -77,7 +77,7 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
-// Get all chat rooms (only rooms user is a member of, plus General)
+// Get all chat rooms (rooms user is a member of, plus any discoverable rooms)
 router.get('/rooms', authenticateToken, async (req, res) => {
   const client = await getClient();
   try {
@@ -89,7 +89,11 @@ router.get('/rooms', authenticateToken, async (req, res) => {
        LEFT JOIN users u ON cr.owner_id = u.id
        LEFT JOIN users_rooms ur ON cr.id = ur.room_id AND ur.user_id = $1
        WHERE cr.is_active = true
-         AND (cr.owner_id IS NULL OR (ur.user_id IS NOT NULL AND ur.accepted = true))
+         AND (
+           cr.owner_id IS NULL
+           OR (ur.user_id IS NOT NULL AND ur.accepted = true)
+           OR cr.discoverable = true
+         )
        ORDER BY cr.name`,
       [req.user.id]
     );
