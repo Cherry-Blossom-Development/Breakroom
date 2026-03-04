@@ -88,6 +88,10 @@ const createRoom = async () => {
     formError.value = 'Room name is required'
     return
   }
+  if (!newRoomDescription.value.trim()) {
+    formError.value = 'Description is required'
+    return
+  }
 
   try {
     const room = await chat.createRoom(newRoomName.value, newRoomDescription.value)
@@ -237,7 +241,8 @@ const openInviteModal = (room) => {
           />
           <textarea
             v-model="newRoomDescription"
-            placeholder="Description (optional)"
+            placeholder="Description"
+            required
           ></textarea>
 
           <!-- Invite users section -->
@@ -465,7 +470,7 @@ const openInviteModal = (room) => {
 }
 
 .modal textarea {
-  height: 80px;
+  height: 160px;
   resize: vertical;
 }
 
