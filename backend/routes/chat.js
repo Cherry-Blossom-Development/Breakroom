@@ -83,7 +83,8 @@ router.get('/rooms', authenticateToken, async (req, res) => {
   try {
     const rooms = await client.query(
       `SELECT cr.id, cr.name, cr.description, cr.is_active, cr.created_at,
-              cr.owner_id, u.handle as owner_handle
+              cr.owner_id, u.handle as owner_handle,
+              cr.discoverable, cr.is_default
        FROM chat_rooms cr
        LEFT JOIN users u ON cr.owner_id = u.id
        LEFT JOIN users_rooms ur ON cr.id = ur.room_id AND ur.user_id = $1
@@ -400,7 +401,8 @@ router.post('/rooms', authenticateToken, checkPermission('create_room'), async (
     // Fetch the created room
     const newRoom = await client.query(
       `SELECT cr.id, cr.name, cr.description, cr.is_active, cr.created_at,
-              cr.owner_id, u.handle as owner_handle
+              cr.owner_id, u.handle as owner_handle,
+              cr.discoverable, cr.is_default
        FROM chat_rooms cr
        LEFT JOIN users u ON cr.owner_id = u.id
        WHERE cr.id = $1`,
@@ -464,7 +466,8 @@ router.put('/rooms/:id', authenticateToken, async (req, res) => {
     // Fetch updated room
     const updated = await client.query(
       `SELECT cr.id, cr.name, cr.description, cr.is_active, cr.created_at,
-              cr.owner_id, u.handle as owner_handle
+              cr.owner_id, u.handle as owner_handle,
+              cr.discoverable, cr.is_default
        FROM chat_rooms cr
        LEFT JOIN users u ON cr.owner_id = u.id
        WHERE cr.id = $1`,
@@ -679,7 +682,8 @@ router.post('/invites/:roomId/accept', authenticateToken, async (req, res) => {
     // Fetch the room details
     const room = await client.query(
       `SELECT cr.id, cr.name, cr.description, cr.is_active, cr.created_at,
-              cr.owner_id, u.handle as owner_handle
+              cr.owner_id, u.handle as owner_handle,
+              cr.discoverable, cr.is_default
        FROM chat_rooms cr
        LEFT JOIN users u ON cr.owner_id = u.id
        WHERE cr.id = $1`,
