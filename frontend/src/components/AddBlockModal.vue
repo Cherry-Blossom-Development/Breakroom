@@ -21,7 +21,7 @@ const availableRooms = computed(() => {
 
 const blockType = ref('widget')
 const selectedRoom = ref(null)
-const selectedWidget = ref('placeholder')
+const selectedWidget = ref('updates')
 const blockWidth = ref(2)
 const blockHeight = ref(2)
 const customTitle = ref('')
@@ -30,7 +30,6 @@ const error = ref('')
 
 // Available widget types with default sizes
 const widgetTypes = [
-  { value: 'placeholder', label: 'Placeholder', desc: 'Empty block for later', w: 2, h: 2 },
   { value: 'updates', label: 'Breakroom Updates', desc: 'Latest news and updates', w: 2, h: 2 },
   { value: 'calendar', label: 'Calendar/Time', desc: 'Date and time display', w: 1, h: 2 },
   { value: 'weather', label: 'Weather', desc: 'Current weather conditions', w: 1, h: 2 },
