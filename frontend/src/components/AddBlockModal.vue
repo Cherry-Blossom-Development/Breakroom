@@ -14,9 +14,15 @@ const existingChatRoomIds = computed(() => {
   )
 })
 
-// Filter out rooms already on the page
+// Filter out rooms already on the page (joined + discoverable, deduplicated)
 const availableRooms = computed(() => {
-  return chat.rooms.filter(room => !existingChatRoomIds.value.has(room.id))
+  const seen = new Set()
+  return [...chat.rooms, ...chat.discoverableRooms]
+    .filter(room => {
+      if (existingChatRoomIds.value.has(room.id) || seen.has(room.id)) return false
+      seen.add(room.id)
+      return true
+    })
 })
 
 const blockType = ref('widget')
@@ -70,9 +76,10 @@ watch(selectedWidget, (newWidget) => {
 
 // Fetch rooms when modal opens
 onMounted(async () => {
-  if (chat.rooms.length === 0) {
-    await chat.fetchRooms()
-  }
+  await Promise.all([
+    chat.rooms.length === 0 ? chat.fetchRooms() : Promise.resolve(),
+    chat.discoverableRooms.length === 0 ? chat.fetchDiscoverableRooms() : Promise.resolve()
+  ])
   // Select first available room (not already on page)
   if (availableRooms.value.length > 0) {
     selectedRoom.value = availableRooms.value[0].id
