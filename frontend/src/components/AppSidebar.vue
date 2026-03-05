@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { RouterLink, useRouter, useRoute } from 'vue-router'
 import { user } from '@/stores/user.js'
 import { chat } from '@/stores/chat.js'
+import { breakroom } from '@/stores/breakroom.js'
 import { friends } from '@/stores/friends.js'
 import InviteModal from './InviteModal.vue'
 
@@ -20,6 +21,8 @@ const route = useRoute()
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
 const showInviteModal = ref(false)
+const showWarningModal = ref(false)
+const warningMessage = ref('')
 const showAddRoomPanel = ref(false)
 const inviteRoomId = ref(null)
 const newRoomName = ref('')
@@ -67,7 +70,8 @@ async function initChat() {
     chat.fetchCurrentUser(),
     chat.checkCreatePermission(),
     chat.fetchRooms(),
-    chat.fetchInvites()
+    chat.fetchInvites(),
+    breakroom.blocks.length === 0 ? breakroom.fetchLayout() : Promise.resolve()
   ])
   friends.fetchFriends()
   // Auto-join first room if none selected
@@ -178,6 +182,12 @@ async function deleteRoom(room) {
 
 // Leave room
 async function leaveRoom(room) {
+  const hasWidget = breakroom.blocks.some(b => b.block_type === 'chat' && b.content_id === room.id)
+  if (hasWidget) {
+    warningMessage.value = `"${room.name}" is currently on your Breakroom page as a widget. Remove the widget first before leaving this room.`
+    showWarningModal.value = true
+    return
+  }
   if (!confirm(`Leave "${room.name}"?`)) return
   try {
     await chat.quitRoom(room.id)
@@ -477,6 +487,17 @@ function handleNavClick() {
     :room-id="inviteRoomId"
     @close="showInviteModal = false"
   />
+
+  <!-- Warning Modal -->
+  <div v-if="showWarningModal" class="modal-overlay" @click.self="showWarningModal = false">
+    <div class="modal warning-modal">
+      <h2>Cannot Leave Room</h2>
+      <p>{{ warningMessage }}</p>
+      <div class="modal-actions">
+        <button class="btn-primary" @click="showWarningModal = false">OK</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
