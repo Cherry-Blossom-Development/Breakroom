@@ -266,8 +266,7 @@ function goToProfile(handle) {
               <span v-else class="avatar-placeholder">{{ getInitial(u) }}</span>
             </div>
             <div class="user-info">
-              <span class="user-handle clickable" @click="goToProfile(u.handle)">{{ u.handle }}</span>
-              <span v-if="u.first_name || u.last_name" class="user-name">
+              <span class="user-name clickable" @click="goToProfile(u.handle)">
                 {{ u.first_name }} {{ u.last_name }}
               </span>
             </div>
