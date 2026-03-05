@@ -7,6 +7,7 @@ const state = reactive({
   connected: false,
   currentRoom: null,
   rooms: [],
+  discoverableRooms: [],
   messages: [],
   typingUsers: [],
   error: null,
@@ -120,6 +121,9 @@ export const chat = reactive({
   get members() {
     return state.members
   },
+  get discoverableRooms() {
+    return state.discoverableRooms
+  },
   get isLoadingOlderMessages() {
     return state.isLoadingOlderMessages
   },
@@ -142,7 +146,7 @@ export const chat = reactive({
     }
   },
 
-  // Fetch available rooms via REST API
+  // Fetch rooms the user has joined
   async fetchRooms() {
     try {
       const res = await authFetch('/api/chat/rooms')
@@ -152,6 +156,36 @@ export const chat = reactive({
     } catch (err) {
       console.error('Error fetching rooms:', err)
       state.error = err.message
+    }
+  },
+
+  // Fetch discoverable rooms the user hasn't joined yet
+  async fetchDiscoverableRooms() {
+    try {
+      const res = await authFetch('/api/chat/rooms/discoverable')
+      if (!res.ok) throw new Error('Failed to fetch discoverable rooms')
+      const data = await res.json()
+      state.discoverableRooms = data.rooms
+    } catch (err) {
+      console.error('Error fetching discoverable rooms:', err)
+    }
+  },
+
+  // Self-join a discoverable room and add it to the user's room list
+  async addRoomToChat(roomId) {
+    try {
+      const res = await authFetch(`/api/chat/rooms/${roomId}/join`, { method: 'POST' })
+      if (!res.ok) {
+        const error = await res.json()
+        throw new Error(error.message || 'Failed to join room')
+      }
+      const data = await res.json()
+      state.rooms.push(data.room)
+      state.discoverableRooms = state.discoverableRooms.filter(r => r.id !== roomId)
+      return data.room
+    } catch (err) {
+      state.error = err.message
+      throw err
     }
   },
 

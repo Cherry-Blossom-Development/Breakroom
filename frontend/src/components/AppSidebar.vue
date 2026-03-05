@@ -20,6 +20,7 @@ const route = useRoute()
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
 const showInviteModal = ref(false)
+const showAddRoomPanel = ref(false)
 const inviteRoomId = ref(null)
 const newRoomName = ref('')
 const newRoomDescription = ref('')
@@ -199,6 +200,23 @@ function openInviteModal(room) {
   showInviteModal.value = true
 }
 
+async function openAddRoomPanel() {
+  showAddRoomPanel.value = !showAddRoomPanel.value
+  if (showAddRoomPanel.value) {
+    await chat.fetchDiscoverableRooms()
+  }
+}
+
+async function addDiscoverableRoom(room) {
+  try {
+    const joined = await chat.addRoomToChat(room.id)
+    showAddRoomPanel.value = false
+    await selectRoom(joined)
+  } catch (err) {
+    alert(err.message)
+  }
+}
+
 function handleLogout() {
   emit('logout')
   emit('close')
@@ -274,6 +292,24 @@ function handleNavClick() {
           >
             + Create Room
           </button>
+
+          <!-- Add discoverable room -->
+          <button class="create-room-btn" @click="openAddRoomPanel">
+            {{ showAddRoomPanel ? '− Add Room' : '+ Add Room' }}
+          </button>
+          <div v-if="showAddRoomPanel" class="add-room-panel">
+            <div v-if="chat.discoverableRooms.length === 0" class="no-discoverable">
+              No rooms to add
+            </div>
+            <div
+              v-for="room in chat.discoverableRooms"
+              :key="room.id"
+              class="discoverable-room-item"
+              @click="addDiscoverableRoom(room)"
+            >
+              # {{ room.name }}
+            </div>
+          </div>
         </div>
 
         <RouterLink to="/blog" class="nav-item" @click="handleNavClick">
@@ -669,6 +705,31 @@ function handleNavClick() {
 
 .create-room-btn:hover {
   background: rgba(255, 255, 255, 0.08);
+}
+
+.add-room-panel {
+  background: rgba(0, 0, 0, 0.15);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.discoverable-room-item {
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.7);
+  transition: background-color 0.15s;
+}
+
+.discoverable-room-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.no-discoverable {
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.4);
+  font-style: italic;
 }
 
 /* ============================================

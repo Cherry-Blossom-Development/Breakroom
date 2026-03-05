@@ -77,7 +77,7 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
-// Get all chat rooms (rooms user is a member of, plus any discoverable rooms)
+// Get chat rooms the user has joined (default room + accepted memberships)
 router.get('/rooms', authenticateToken, async (req, res) => {
   const client = await getClient();
   try {
@@ -92,7 +92,6 @@ router.get('/rooms', authenticateToken, async (req, res) => {
          AND (
            cr.owner_id IS NULL
            OR (ur.user_id IS NOT NULL AND ur.accepted = true)
-           OR cr.discoverable = true
          )
        ORDER BY cr.name`,
       [req.user.id]
@@ -104,6 +103,89 @@ router.get('/rooms', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('Error fetching chat rooms:', err);
     res.status(500).json({ message: 'Failed to retrieve chat rooms' });
+  } finally {
+    client.release();
+  }
+});
+
+// Get discoverable rooms the user has NOT yet joined (for the "Add Room" picker)
+router.get('/rooms/discoverable', authenticateToken, async (req, res) => {
+  const client = await getClient();
+  try {
+    const rooms = await client.query(
+      `SELECT cr.id, cr.name, cr.description, cr.is_active, cr.created_at,
+              cr.owner_id, u.handle as owner_handle,
+              cr.discoverable, cr.is_default
+       FROM chat_rooms cr
+       LEFT JOIN users u ON cr.owner_id = u.id
+       WHERE cr.is_active = true
+         AND cr.discoverable = true
+         AND cr.owner_id IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM users_rooms ur
+           WHERE ur.user_id = $1 AND ur.room_id = cr.id AND ur.accepted = true
+         )
+       ORDER BY cr.name`,
+      [req.user.id]
+    );
+
+    res.status(200).json({ rooms: rooms.rows });
+  } catch (err) {
+    console.error('Error fetching discoverable rooms:', err);
+    res.status(500).json({ message: 'Failed to retrieve discoverable rooms' });
+  } finally {
+    client.release();
+  }
+});
+
+// Self-join a discoverable room
+router.post('/rooms/:roomId/join', authenticateToken, async (req, res) => {
+  const { roomId } = req.params;
+
+  const client = await getClient();
+  try {
+    const room = await client.query(
+      `SELECT cr.id, cr.name, cr.description, cr.is_active, cr.created_at,
+              cr.owner_id, u.handle as owner_handle,
+              cr.discoverable, cr.is_default
+       FROM chat_rooms cr
+       LEFT JOIN users u ON cr.owner_id = u.id
+       WHERE cr.id = $1 AND cr.is_active = true`,
+      [roomId]
+    );
+
+    if (room.rowCount === 0) {
+      return res.status(404).json({ message: 'Room not found' });
+    }
+
+    if (!room.rows[0].discoverable) {
+      return res.status(403).json({ message: 'This room is not open to join' });
+    }
+
+    const existing = await client.query(
+      'SELECT accepted FROM users_rooms WHERE user_id = $1 AND room_id = $2',
+      [req.user.id, roomId]
+    );
+
+    if (existing.rowCount > 0) {
+      if (existing.rows[0].accepted) {
+        return res.status(409).json({ message: 'Already a member of this room' });
+      }
+      await client.query(
+        'UPDATE users_rooms SET accepted = true WHERE user_id = $1 AND room_id = $2',
+        [req.user.id, roomId]
+      );
+    } else {
+      await client.query(
+        'INSERT INTO users_rooms (user_id, room_id, accepted) VALUES ($1, $2, true)',
+        [req.user.id, roomId]
+      );
+    }
+
+    res.status(200).json({ room: room.rows[0] });
+  } catch (err) {
+    console.error('Error joining room:', err);
+    res.status(500).json({ message: 'Failed to join room' });
   } finally {
     client.release();
   }
