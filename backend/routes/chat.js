@@ -626,7 +626,7 @@ router.get('/invites', authenticateToken, async (req, res) => {
        FROM users_rooms ur
        JOIN chat_rooms cr ON ur.room_id = cr.id
        LEFT JOIN users u ON ur.invited_by = u.id
-       WHERE ur.user_id = $1 AND ur.accepted = false AND cr.is_active = true
+       WHERE ur.user_id = $1 AND ur.accepted = false AND ur.invited_by IS NOT NULL AND cr.is_active = true
        ORDER BY ur.created_at DESC`,
       [req.user.id]
     );
