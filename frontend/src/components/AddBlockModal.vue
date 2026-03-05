@@ -153,6 +153,14 @@ const handleSubmit = async () => {
       }
     )
 
+    // If a discoverable (not yet joined) room was added as a widget, auto-join it
+    if (blockType.value === 'chat' && selectedRoom.value) {
+      const isDiscoverable = chat.discoverableRooms.some(r => r.id === selectedRoom.value)
+      if (isDiscoverable) {
+        await chat.addRoomToChat(selectedRoom.value)
+      }
+    }
+
     emit('added')
   } catch (err) {
     error.value = err.message
