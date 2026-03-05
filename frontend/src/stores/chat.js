@@ -428,6 +428,29 @@ export const chat = reactive({
     }
   },
 
+  // Leave a room (removes membership; default room records opt-out)
+  async quitRoom(roomId) {
+    try {
+      const res = await authFetch(`/api/chat/rooms/${roomId}/leave`, { method: 'DELETE' })
+      if (!res.ok) {
+        const error = await res.json()
+        throw new Error(error.message || 'Failed to leave room')
+      }
+      state.rooms = state.rooms.filter(r => r.id !== roomId)
+      // If leaving the currently active room, clear socket and state
+      if (state.currentRoom === roomId) {
+        const socket = getSocket()
+        if (socket.connected) socket.emit('leave_room', roomId)
+        state.currentRoom = null
+        state.messages = []
+        state.typingUsers = []
+      }
+    } catch (err) {
+      state.error = err.message
+      throw err
+    }
+  },
+
   // Check if current user owns a room
   isRoomOwner(room) {
     return room && room.owner_id === state.currentUserId

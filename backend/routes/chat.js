@@ -90,8 +90,8 @@ router.get('/rooms', authenticateToken, async (req, res) => {
        LEFT JOIN users_rooms ur ON cr.id = ur.room_id AND ur.user_id = $1
        WHERE cr.is_active = true
          AND (
-           cr.owner_id IS NULL
-           OR (ur.user_id IS NOT NULL AND ur.accepted = true)
+           (cr.owner_id IS NULL AND (ur.user_id IS NULL OR ur.accepted = true))
+           OR (cr.owner_id IS NOT NULL AND ur.user_id IS NOT NULL AND ur.accepted = true)
          )
        ORDER BY cr.name`,
       [req.user.id]
@@ -119,11 +119,16 @@ router.get('/rooms/discoverable', authenticateToken, async (req, res) => {
        FROM chat_rooms cr
        LEFT JOIN users u ON cr.owner_id = u.id
        WHERE cr.is_active = true
-         AND cr.discoverable = true
-         AND cr.owner_id IS NOT NULL
-         AND NOT EXISTS (
-           SELECT 1 FROM users_rooms ur
-           WHERE ur.user_id = $1 AND ur.room_id = cr.id AND ur.accepted = true
+         AND (
+           (cr.discoverable = true AND cr.owner_id IS NOT NULL
+            AND NOT EXISTS (
+              SELECT 1 FROM users_rooms ur
+              WHERE ur.user_id = $1 AND ur.room_id = cr.id AND ur.accepted = true
+            ))
+           OR (cr.owner_id IS NULL AND EXISTS (
+              SELECT 1 FROM users_rooms ur
+              WHERE ur.user_id = $1 AND ur.room_id = cr.id AND ur.accepted = false
+           ))
          )
        ORDER BY cr.name`,
       [req.user.id]
@@ -158,7 +163,8 @@ router.post('/rooms/:roomId/join', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Room not found' });
     }
 
-    if (!room.rows[0].discoverable) {
+    const isDefaultRoom = room.rows[0].owner_id === null;
+    if (!isDefaultRoom && !room.rows[0].discoverable) {
       return res.status(403).json({ message: 'This room is not open to join' });
     }
 
@@ -811,6 +817,56 @@ router.post('/invites/:roomId/decline', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('Error declining invite:', err);
     res.status(500).json({ message: 'Failed to decline invite' });
+  } finally {
+    client.release();
+  }
+});
+
+// Leave a room (removes membership; for default room, records opt-out)
+router.delete('/rooms/:roomId/leave', authenticateToken, async (req, res) => {
+  const { roomId } = req.params;
+
+  const client = await getClient();
+  try {
+    const room = await client.query(
+      'SELECT id, owner_id FROM chat_rooms WHERE id = $1 AND is_active = true',
+      [roomId]
+    );
+
+    if (room.rowCount === 0) {
+      return res.status(404).json({ message: 'Room not found' });
+    }
+
+    const isDefaultRoom = room.rows[0].owner_id === null;
+
+    if (isDefaultRoom) {
+      // Upsert an opted-out record so the room is hidden for this user
+      const existing = await client.query(
+        'SELECT 1 FROM users_rooms WHERE user_id = $1 AND room_id = $2',
+        [req.user.id, roomId]
+      );
+      if (existing.rowCount > 0) {
+        await client.query(
+          'UPDATE users_rooms SET accepted = false WHERE user_id = $1 AND room_id = $2',
+          [req.user.id, roomId]
+        );
+      } else {
+        await client.query(
+          'INSERT INTO users_rooms (user_id, room_id, accepted) VALUES ($1, $2, false)',
+          [req.user.id, roomId]
+        );
+      }
+    } else {
+      await client.query(
+        'DELETE FROM users_rooms WHERE user_id = $1 AND room_id = $2',
+        [req.user.id, roomId]
+      );
+    }
+
+    res.status(200).json({ message: 'Left room successfully' });
+  } catch (err) {
+    console.error('Error leaving room:', err);
+    res.status(500).json({ message: 'Failed to leave room' });
   } finally {
     client.release();
   }

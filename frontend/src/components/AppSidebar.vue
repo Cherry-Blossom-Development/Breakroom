@@ -176,6 +176,20 @@ async function deleteRoom(room) {
   }
 }
 
+// Leave room
+async function leaveRoom(room) {
+  if (!confirm(`Leave "${room.name}"?`)) return
+  try {
+    await chat.quitRoom(room.id)
+    // Auto-join first remaining room if we left the active one
+    if (!chat.currentRoom && chat.rooms.length > 0) {
+      await selectRoom(chat.rooms[0])
+    }
+  } catch (err) {
+    alert(err.message)
+  }
+}
+
 // Invites
 async function acceptInvite(invite) {
   try {
@@ -277,10 +291,13 @@ function handleNavClick() {
             @click="selectRoom(room)"
           >
             <span class="room-name"># {{ room.name }}</span>
-            <div v-if="chat.isRoomOwner(room)" class="room-actions" @click.stop>
-              <button @click="openInviteModal(room)" class="room-action-btn" title="Invite">Inv</button>
-              <button @click="openEditModal(room)" class="room-action-btn" title="Edit">Ed</button>
-              <button @click="deleteRoom(room)" class="room-action-btn delete" title="Delete">Del</button>
+            <div class="room-actions" @click.stop>
+              <template v-if="chat.isRoomOwner(room)">
+                <button @click="openInviteModal(room)" class="room-action-btn" title="Invite">Inv</button>
+                <button @click="openEditModal(room)" class="room-action-btn" title="Edit">Ed</button>
+                <button @click="deleteRoom(room)" class="room-action-btn delete" title="Delete">Del</button>
+              </template>
+              <button @click="leaveRoom(room)" class="room-action-btn leave" title="Leave">Leave</button>
             </div>
           </div>
 
@@ -688,6 +705,10 @@ function handleNavClick() {
 
 .room-action-btn.delete:hover {
   background: var(--color-error);
+}
+
+.room-action-btn.leave:hover {
+  background: rgba(255, 180, 0, 0.5);
 }
 
 .create-room-btn {
