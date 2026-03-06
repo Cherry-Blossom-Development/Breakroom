@@ -35,7 +35,7 @@ services:
       VITE_ALLOWED_HOST: ${VITE_ALLOWED_HOST}
 
     # start command for non-prod environment
-    command: sh -c "npm run dev"
+    command: sh -c "npm install && npm run dev"
 
 
   backend:

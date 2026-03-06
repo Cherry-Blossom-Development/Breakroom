@@ -41,14 +41,22 @@ router.get('/company/:companyId', authenticate, async (req, res) => {
   const client = await getClient();
 
   try {
+    // Check if requesting user is an active employee
+    const empCheck = await client.query(
+      `SELECT 1 FROM employees WHERE user_id = $1 AND company_id = $2 AND status = 'active'`,
+      [req.user.id, companyId]
+    );
+    const isEmployee = empCheck.rowCount > 0;
+
     const result = await client.query(
       `SELECT p.id, p.title, p.description, p.is_default, p.is_active, p.is_public,
               p.created_at, p.updated_at,
               (SELECT COUNT(*) FROM ticket_projects tp WHERE tp.project_id = p.id) as ticket_count
        FROM projects p
        WHERE p.company_id = $1
+         AND ($2 = TRUE OR p.is_public = TRUE)
        ORDER BY p.is_default DESC, p.title`,
-      [companyId]
+      [companyId, isEmployee]
     );
 
     res.json({ projects: result.rows });
@@ -78,6 +86,17 @@ router.get('/:id', authenticate, async (req, res) => {
 
     if (projectResult.rowCount === 0) {
       return res.status(404).json({ message: 'Project not found' });
+    }
+
+    // If project is private, verify user is an employee
+    if (!projectResult.rows[0].is_public) {
+      const empCheck = await client.query(
+        `SELECT 1 FROM employees WHERE user_id = $1 AND company_id = $2 AND status = 'active'`,
+        [req.user.id, projectResult.rows[0].company_id]
+      );
+      if (empCheck.rowCount === 0) {
+        return res.status(403).json({ message: 'Access denied' });
+      }
     }
 
     const ticketsResult = await client.query(

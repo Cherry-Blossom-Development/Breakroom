@@ -148,7 +148,19 @@ onMounted(() => {
   <div class="page-container employment-page">
     <header class="page-header">
       <h1>Employment Opportunities</h1>
-      <p class="subtitle">Find your next career opportunity</p>
+      <p class="subtitle">
+        Welcome to the Prosaurus Job Board! We're brand new, so we don't have any real jobs yet -
+        but what we do have is ideas. That's why, in addition to all the standard job types, we've
+        added one called <i>Prospecting</i>
+      </p><br/>
+      <p class="subtitle">These are the roles we think we might have
+        someday, if we ever become a *real company. We invite you to check out our Prospecting
+        positions and post your own. We think it's a good thing to dream about what the future
+        looks like, and we'd love for you to join us in that endeavor.
+      </p><br/>
+      <p class="subtitle">
+        * For the record, Cherry Blossom Development LLC <i>is</i> a real company, we just haven't made any money yet so we can't afford to hire anyone.
+      </p>
     </header>
 
     <!-- Filters -->
@@ -174,6 +186,7 @@ onMounted(() => {
           <option value="contract">Contract</option>
           <option value="internship">Internship</option>
           <option value="temporary">Temporary</option>
+          <option value="prospecting">Prospecting</option>
         </select>
         <button v-if="searchQuery || locationFilter || employmentFilter" @click="clearFilters" class="btn-clear">
           Clear
@@ -220,7 +233,7 @@ onMounted(() => {
             <span class="meta-location">{{ getLocationString(pos) }}</span>
           </div>
           <p v-if="pos.description" class="position-excerpt">
-            {{ pos.description.substring(0, 150) }}{{ pos.description.length > 150 ? '...' : '' }}
+            {{ pos.description.replace(/<[^>]*>/g, '').substring(0, 150) }}{{ pos.description.replace(/<[^>]*>/g, '').length > 150 ? '...' : '' }}
           </p>
           <div class="position-footer">
             <span class="posted-date">Posted {{ formatDate(pos.created_at) }}</span>
@@ -266,17 +279,17 @@ onMounted(() => {
 
         <div v-if="selectedPosition.description" class="detail-section">
           <h3>Description</h3>
-          <p>{{ selectedPosition.description }}</p>
+          <div class="rich-content" v-html="selectedPosition.description"></div>
         </div>
 
         <div v-if="selectedPosition.requirements" class="detail-section">
           <h3>Requirements</h3>
-          <p>{{ selectedPosition.requirements }}</p>
+          <div class="rich-content" v-html="selectedPosition.requirements"></div>
         </div>
 
         <div v-if="selectedPosition.benefits" class="detail-section">
           <h3>Benefits</h3>
-          <p>{{ selectedPosition.benefits }}</p>
+          <div class="rich-content" v-html="selectedPosition.benefits"></div>
         </div>
 
         <div class="detail-footer">
@@ -294,6 +307,13 @@ onMounted(() => {
 .employment-page {
   max-width: 1000px;
 }
+
+.rich-content :deep(p) { margin: 0 0 0.75em; }
+.rich-content :deep(p:last-child) { margin-bottom: 0; }
+.rich-content :deep(ul), .rich-content :deep(ol) { padding-left: 1.5em; margin: 0.5em 0; }
+.rich-content :deep(h3) { font-size: 1.05rem; font-weight: 600; margin: 0.75em 0 0.4em; }
+.rich-content :deep(strong) { font-weight: 700; }
+.rich-content :deep(em) { font-style: italic; }
 
 .page-header {
   margin-bottom: 24px;

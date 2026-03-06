@@ -397,13 +397,19 @@ router.get('/can/:permission', async (req, res) => {
 });
 
 router.post('/logout', (req, res) => {
-  res.clearCookie('jwtToken', {
-    domain: process.env.NODE_ENV === 'production' ? '.prosaurus.com' : undefined,
+  const cookieOptions = {
     path: '/',
     httpOnly: false,
     secure: process.env.CORS_ORIGIN?.startsWith('https') || process.env.NODE_ENV === 'production',
     sameSite: 'lax'
-  });
+  };
+
+  // Clear cookie for current domain
+  res.clearCookie('jwtToken', { ...cookieOptions });
+
+  // Also clear the production .prosaurus.com domain cookie (handles the case
+  // where a production login cookie bleeds into local development)
+  res.clearCookie('jwtToken', { ...cookieOptions, domain: '.prosaurus.com' });
 
   res.json({ message: 'Logged out successfully' });
 });

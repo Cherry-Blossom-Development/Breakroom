@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
 import StatusBadge from '../components/StatusBadge.vue'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
+import RichTextEditor from '../components/RichTextEditor.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -819,7 +820,7 @@ onMounted(() => {
             <template v-if="!editingCompanyInfo">
               <div v-if="company.description" class="info-row">
                 <label>Description</label>
-                <p>{{ company.description }}</p>
+                <div class="rich-content" v-html="company.description"></div>
               </div>
 
               <div v-if="getLocationString()" class="info-row">
@@ -855,8 +856,8 @@ onMounted(() => {
               </div>
 
               <div class="form-group">
-                <label for="company-description">Description</label>
-                <textarea id="company-description" v-model="companyForm.description" rows="4" placeholder="Tell people about your company..."></textarea>
+                <label>Description</label>
+                <RichTextEditor v-model="companyForm.description" />
               </div>
 
               <h3 class="form-section-title">Location</h3>
@@ -980,7 +981,7 @@ onMounted(() => {
                     <span v-if="pos.city || pos.state" class="meta-item">{{ [pos.city, pos.state].filter(Boolean).join(', ') }}</span>
                     <span class="meta-item pay">{{ formatPay(pos) }}</span>
                   </div>
-                  <p v-if="pos.description" class="position-description">{{ pos.description }}</p>
+                  <div v-if="pos.description" class="position-description rich-content" v-html="pos.description"></div>
                 </div>
                 <div v-if="canManagePositions" class="position-actions">
                   <button @click="openPositionModal(pos)" class="btn-small">Edit</button>
@@ -1056,7 +1057,7 @@ onMounted(() => {
     </template>
 
     <!-- Position Modal -->
-    <div v-if="showPositionModal" class="modal-overlay" @click.self="closePositionModal">
+    <div v-if="showPositionModal" class="modal-overlay">
       <div class="modal-content">
         <h2>{{ editingPosition ? 'Edit Position' : 'Add New Position' }}</h2>
 
@@ -1068,7 +1069,7 @@ onMounted(() => {
 
           <div class="form-group">
             <label for="pos-description">Description</label>
-            <textarea id="pos-description" v-model="positionForm.description" rows="3" placeholder="Job description..."></textarea>
+            <RichTextEditor v-model="positionForm.description" class="lg" />
           </div>
 
           <div class="form-row">
@@ -1084,6 +1085,7 @@ onMounted(() => {
                 <option value="contract">Contract</option>
                 <option value="internship">Internship</option>
                 <option value="temporary">Temporary</option>
+                <option value="prospecting">Prospecting</option>
               </select>
             </div>
           </div>
@@ -1136,12 +1138,12 @@ onMounted(() => {
 
           <div class="form-group">
             <label for="pos-requirements">Requirements</label>
-            <textarea id="pos-requirements" v-model="positionForm.requirements" rows="3" placeholder="Required skills, experience, etc."></textarea>
+            <RichTextEditor v-model="positionForm.requirements" class="lg" />
           </div>
 
           <div class="form-group">
             <label for="pos-benefits">Benefits</label>
-            <textarea id="pos-benefits" v-model="positionForm.benefits" rows="2" placeholder="Health insurance, PTO, etc."></textarea>
+            <RichTextEditor v-model="positionForm.benefits" class="lg" />
           </div>
 
           <div v-if="positionError" class="error-message">{{ positionError }}</div>
@@ -1305,6 +1307,13 @@ onMounted(() => {
 .company-detail-page {
   max-width: 1000px;
 }
+
+.rich-content :deep(p) { margin: 0 0 0.75em; }
+.rich-content :deep(p:last-child) { margin-bottom: 0; }
+.rich-content :deep(ul), .rich-content :deep(ol) { padding-left: 1.5em; margin: 0.5em 0; }
+.rich-content :deep(h3) { font-size: 1.05rem; font-weight: 600; margin: 0.75em 0 0.4em; }
+.rich-content :deep(strong) { font-weight: 700; }
+.rich-content :deep(em) { font-style: italic; }
 
 .company-header {
   display: flex;

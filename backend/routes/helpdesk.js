@@ -50,7 +50,12 @@ router.get('/company/:id', authenticate, async (req, res) => {
       return res.status(404).json({ message: 'Company not found' });
     }
 
-    res.json({ company: result.rows[0] });
+    const empResult = await client.query(
+      `SELECT 1 FROM employees WHERE user_id = $1 AND company_id = $2 AND status = 'active'`,
+      [req.user.id, id]
+    );
+
+    res.json({ company: result.rows[0], isEmployee: empResult.rowCount > 0 });
   } catch (err) {
     console.error('Error fetching company:', err);
     res.status(500).json({ message: 'Failed to fetch company' });

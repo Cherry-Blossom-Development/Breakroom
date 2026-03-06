@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import LoadingSpinner from '../../components/LoadingSpinner.vue'
+import RichTextEditor from '../../components/RichTextEditor.vue'
 
 const isEditing = ref(false)
 const isLoading = ref(true)
@@ -552,13 +553,13 @@ onMounted(() => {
         <template v-if="!isEditing">
           <div class="bio-section">
             <h2>About</h2>
-            <p v-if="profile.bio" class="bio-text">{{ profile.bio }}</p>
+            <div v-if="profile.bio" class="bio-text rich-content" v-html="profile.bio"></div>
             <p v-else class="bio-empty">No bio yet. Click edit to add one!</p>
           </div>
 
           <div class="work-bio-section">
             <h2>Work Biography</h2>
-            <p v-if="profile.workBio" class="bio-text">{{ profile.workBio }}</p>
+            <div v-if="profile.workBio" class="bio-text rich-content" v-html="profile.workBio"></div>
             <p v-else class="bio-empty">No work biography yet. Click edit to add one!</p>
           </div>
 
@@ -717,27 +718,13 @@ onMounted(() => {
             </div>
 
             <div class="form-group">
-              <label for="bio">Bio</label>
-              <textarea
-                id="bio"
-                v-model="editForm.bio"
-                placeholder="Tell us about yourself..."
-                rows="4"
-                maxlength="500"
-              ></textarea>
-              <span class="char-count">{{ editForm.bio?.length || 0 }}/500</span>
+              <label>Bio</label>
+              <RichTextEditor v-model="editForm.bio" />
             </div>
 
             <div class="form-group">
-              <label for="workBio">Work Biography</label>
-              <textarea
-                id="workBio"
-                v-model="editForm.workBio"
-                placeholder="Describe your professional background, experience, and career journey..."
-                rows="4"
-                maxlength="1000"
-              ></textarea>
-              <span class="char-count">{{ editForm.workBio?.length || 0 }}/1000</span>
+              <label>Work Biography</label>
+              <RichTextEditor v-model="editForm.workBio" />
             </div>
 
             <div class="form-actions">
@@ -1559,4 +1546,12 @@ onMounted(() => {
   height: 16px;
   cursor: pointer;
 }
+
+.rich-content :deep(p) { margin: 0 0 0.75em; }
+.rich-content :deep(p:last-child) { margin-bottom: 0; }
+.rich-content :deep(ul),
+.rich-content :deep(ol) { padding-left: 1.5em; margin: 0.5em 0; }
+.rich-content :deep(h3) { font-size: 1.05rem; font-weight: 600; margin: 0.75em 0 0.4em; }
+.rich-content :deep(strong) { font-weight: 700; }
+.rich-content :deep(em) { font-style: italic; }
 </style>

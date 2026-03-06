@@ -5,6 +5,7 @@ import { authFetch } from '../utilities/authFetch'
 import draggable from 'vuedraggable'
 import StatusBadge from '../components/StatusBadge.vue'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
+import RichTextEditor from '../components/RichTextEditor.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -401,7 +402,7 @@ onMounted(async () => {
     </div>
 
     <!-- Ticket Detail Modal -->
-    <div v-if="selectedTicket" class="modal-overlay" @click.self="closeDetail">
+    <div v-if="selectedTicket" class="modal-overlay" @click.self="!editingTicket && closeDetail()">
       <div class="modal ticket-detail">
         <div class="detail-header">
           <h2 v-if="!editingTicket">{{ selectedTicket.title }}</h2>
@@ -446,7 +447,8 @@ onMounted(async () => {
 
           <div class="detail-description">
             <h3>Description</h3>
-            <p>{{ selectedTicket.description || 'No description provided.' }}</p>
+            <div v-if="selectedTicket.description" class="rich-content" v-html="selectedTicket.description"></div>
+            <p v-else class="no-description">No description provided.</p>
           </div>
 
           <div class="detail-actions" v-if="getAvailableTransitions(selectedTicket.status).length > 0">
@@ -479,13 +481,8 @@ onMounted(async () => {
           </div>
 
           <div class="form-group">
-            <label for="edit-description">Description</label>
-            <textarea
-              id="edit-description"
-              v-model="editForm.description"
-              rows="5"
-              placeholder="Ticket description..."
-            ></textarea>
+            <label>Description</label>
+            <RichTextEditor v-model="editForm.description" />
           </div>
 
           <div class="form-group">
@@ -833,6 +830,24 @@ onMounted(async () => {
   color: var(--color-text-secondary);
   line-height: 1.6;
   white-space: pre-wrap;
+}
+
+.rich-content {
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+.rich-content :deep(p) { margin: 0 0 0.75em; }
+.rich-content :deep(p:last-child) { margin-bottom: 0; }
+.rich-content :deep(ul),
+.rich-content :deep(ol) { padding-left: 1.5em; margin: 0.5em 0; }
+.rich-content :deep(h3) { font-size: 1.05rem; font-weight: 600; margin: 0.75em 0 0.4em; }
+.rich-content :deep(strong) { font-weight: 700; }
+.rich-content :deep(em) { font-style: italic; }
+
+.no-description {
+  color: var(--color-text-light);
+  font-style: italic;
 }
 
 .detail-actions h3 {
