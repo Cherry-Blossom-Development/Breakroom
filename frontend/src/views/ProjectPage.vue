@@ -6,6 +6,7 @@ import draggable from 'vuedraggable'
 import StatusBadge from '../components/StatusBadge.vue'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
 import RichTextEditor from '../components/RichTextEditor.vue'
+import { user } from '../stores/user'
 
 const route = useRoute()
 const router = useRouter()
@@ -408,7 +409,7 @@ onMounted(async () => {
           <h2 v-if="!editingTicket">{{ selectedTicket.title }}</h2>
           <h2 v-else>Edit Ticket</h2>
           <div class="header-buttons">
-            <button v-if="!editingTicket" class="btn-edit" @click="startEditTicket">Edit</button>
+            <button v-if="!editingTicket && selectedTicket.creator_handle === user.username" class="btn-edit" @click="startEditTicket">Edit</button>
             <button class="close-btn" @click="closeDetail">&times;</button>
           </div>
         </div>

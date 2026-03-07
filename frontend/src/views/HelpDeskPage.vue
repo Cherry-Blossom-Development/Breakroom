@@ -4,6 +4,7 @@ import { authFetch } from '../utilities/authFetch'
 import StatusBadge from '../components/StatusBadge.vue'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
 import RichTextEditor from '../components/RichTextEditor.vue'
+import { user } from '../stores/user'
 
 // Default to Cherry Blossom Development (company_id = 1)
 const companyId = ref(1)
@@ -286,7 +287,7 @@ onMounted(() => {
           <h2 v-if="!editingTicket">{{ selectedTicket.title }}</h2>
           <h2 v-else>Edit Ticket</h2>
           <div class="header-buttons">
-            <button v-if="!editingTicket" class="btn-edit" @click="startEditTicket">Edit</button>
+            <button v-if="!editingTicket && selectedTicket.creator_handle === user.username" class="btn-edit" @click="startEditTicket">Edit</button>
             <button class="close-btn" @click="closeDetail">&times;</button>
           </div>
         </div>
