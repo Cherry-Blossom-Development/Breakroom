@@ -264,21 +264,35 @@ router.put('/layout/:colCount', authenticateToken, async (req, res) => {
 });
 
 // Get breakroom updates (public endpoint)
+// Optional ?platform=android|ios — filters to 'all' + that platform. Omit for all updates (web).
 router.get('/updates', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 10, 50);
   const offset = parseInt(req.query.offset) || 0;
+  const platform = req.query.platform; // 'android', 'ios', or undefined
 
   const client = await getClient();
   try {
+    let whereClause = '';
+    const params = [limit, offset];
+
+    if (platform === 'android' || platform === 'ios') {
+      whereClause = `WHERE platform = 'all' OR platform = $3`;
+      params.push(platform);
+    }
+
     const updates = await client.query(
-      `SELECT id, summary, commit_hash, created_at
+      `SELECT id, summary, platform, commit_hash, created_at
        FROM breakroom_updates
+       ${whereClause}
        ORDER BY created_at DESC
        LIMIT $1 OFFSET $2`,
-      [limit, offset]
+      params
     );
 
-    const total = await client.query('SELECT COUNT(*) as count FROM breakroom_updates');
+    const total = await client.query(
+      `SELECT COUNT(*) as count FROM breakroom_updates ${whereClause}`,
+      params.slice(2)
+    );
 
     res.status(200).json({
       updates: updates.rows,
