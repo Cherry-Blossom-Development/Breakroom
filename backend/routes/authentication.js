@@ -396,6 +396,99 @@ router.get('/can/:permission', async (req, res) => {
   }
 });
 
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ message: 'Email is required' });
+  }
+
+  const client = await getClient();
+
+  const user = await client.query('SELECT id, email FROM users WHERE email = $1', [email]);
+
+  // Always return 200 to prevent email enumeration
+  if (user.rowCount === 0) {
+    client.release();
+    return res.status(200).json({ message: 'If that email is registered, a reset link has been sent.' });
+  }
+
+  const userData = user.rows[0];
+  const resetToken = uuidv4();
+  const expiresAt = new Date();
+  expiresAt.setHours(expiresAt.getHours() + 1);
+
+  await client.query(
+    'UPDATE users SET password_reset_token = $1, password_reset_expires_at = $2 WHERE id = $3',
+    [resetToken, expiresAt, userData.id]
+  );
+
+  const emailTemplate = await client.query(
+    'SELECT from_address, subject, html_content FROM system_emails WHERE email_key = $1 AND is_active = true',
+    ['password_reset']
+  );
+
+  if (emailTemplate.rowCount > 0) {
+    const { from_address, subject, html_content } = emailTemplate.rows[0];
+    const processedContent = html_content.replace(/\{\{reset_token\}\}/g, resetToken);
+
+    if (process.env.NODE_ENV === 'test') {
+      const testEmailDir = path.join(__dirname, '..', 'test-emails');
+      if (!fs.existsSync(testEmailDir)) {
+        fs.mkdirSync(testEmailDir, { recursive: true });
+      }
+      const emailData = {
+        to: userData.email,
+        from: from_address,
+        subject: subject,
+        html: processedContent,
+        resetToken: resetToken,
+        timestamp: new Date().toISOString()
+      };
+      fs.writeFileSync(
+        path.join(testEmailDir, `reset-${userData.email}.json`),
+        JSON.stringify(emailData, null, 2)
+      );
+    } else {
+      sendMail(userData.email, from_address, subject, processedContent);
+    }
+  }
+
+  client.release();
+  res.status(200).json({ message: 'If that email is registered, a reset link has been sent.' });
+});
+
+router.post('/reset-password', async (req, res) => {
+  const { token, password, salt, hash } = req.body;
+
+  if (!token || !password || !salt || !hash) {
+    return res.status(400).json({ message: 'Token, password, salt, and hash are required' });
+  }
+
+  const client = await getClient();
+  const now = new Date();
+
+  const user = await client.query(
+    'SELECT id FROM users WHERE password_reset_token = $1 AND password_reset_expires_at > $2',
+    [token, now]
+  );
+
+  if (user.rowCount === 0) {
+    client.release();
+    return res.status(400).json({ message: 'Invalid or expired reset token' });
+  }
+
+  const userId = user.rows[0].id;
+  const newHash = await hashPasswordWithSalt(password, salt);
+
+  await client.query(
+    'UPDATE users SET hash = $1, salt = $2, password_reset_token = NULL, password_reset_expires_at = NULL WHERE id = $3',
+    [newHash, salt, userId]
+  );
+
+  client.release();
+  res.status(200).json({ message: 'Password has been reset successfully' });
+});
+
 router.post('/logout', (req, res) => {
   const cookieOptions = {
     path: '/',

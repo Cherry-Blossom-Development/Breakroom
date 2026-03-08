@@ -3,63 +3,49 @@
     <div class="login-logo-wrap">
       <img src="/logo-192x192-no-text.png" alt="Prosaurus" class="login-logo" />
     </div>
-    <span>Log In</span>
+    <span>Forgot Password</span>
+    <p class="description">Enter your email address and we'll send you a link to reset your password.</p>
     <div>
-      <label>Login/Handle: </label>
-      <input type="text" required v-model="handle">
+      <label>Email Address: </label>
+      <input type="email" required v-model="email" :disabled="submitted">
     </div>
-    <div>
-      <label>Password: </label>
-      <input type="password" required v-model="password">
-      <div v-if="passwordError" class="error">{{ passwordError }}</div>
-    </div>
-    <button type="submit" :disabled="submitting">{{ submitting ? 'Logging in...' : 'Login' }}</button>
-    <p class="forgot-prompt">
-      <RouterLink to="/forgot-password">Forgot your password?</RouterLink>
-    </p>
-    <p class="signup-prompt">
-      Don't have an account? <RouterLink to="/signup">Sign up</RouterLink>
+    <div v-if="errorMessage" class="error">{{ errorMessage }}</div>
+    <div v-if="successMessage" class="success">{{ successMessage }}</div>
+    <button type="submit" :disabled="submitting || submitted">
+      {{ submitting ? 'Sending...' : 'Send Reset Link' }}
+    </button>
+    <p class="back-prompt">
+      <RouterLink to="/login">Back to Login</RouterLink>
     </p>
   </form>
 </template>
 
 <script>
 import axios from 'axios'
-import { useRouter } from 'vue-router'
-import { user } from '@/stores/user.js'
 
 export default {
   data() {
     return {
-      handle: '',
-      password: '',
-      passwordError: '',
-      submitting: false
+      email: '',
+      submitting: false,
+      submitted: false,
+      errorMessage: '',
+      successMessage: ''
     }
-  },
-  setup() {
-    const router = useRouter()
-    return { router }
   },
   methods: {
     async handleSubmit() {
       this.submitting = true
-      this.passwordError = ''
+      this.errorMessage = ''
+      this.successMessage = ''
       try {
-        await axios.post(`${import.meta.env.VITE_API_BASE_URL || ''}/api/auth/login`, {
-          handle: this.handle,
-          password: this.password
-        }, {
-          withCredentials: true
+        await axios.post(`${import.meta.env.VITE_API_BASE_URL || ''}/api/auth/forgot-password`, {
+          email: this.email
         })
-
-        await user.fetchUser() // Fetch the username after login
-
-        // If login succeeds, redirect to home
-        this.router.push('/')
+        this.successMessage = 'If that email is registered, a reset link has been sent. Please check your inbox.'
+        this.submitted = true
       } catch (err) {
-        // Handle login failure
-        this.passwordError = 'Invalid handle or password'
+        this.errorMessage = 'Something went wrong. Please try again.'
         console.error(err)
       } finally {
         this.submitting = false
@@ -87,6 +73,12 @@ export default {
     width: 64px;
     height: 64px;
     border-radius: 50%;
+  }
+  .description {
+    color: var(--color-text-light);
+    font-size: 0.9em;
+    margin-top: 10px;
+    margin-bottom: 0;
   }
   label {
     color: var(--color-text-light);
@@ -138,25 +130,19 @@ export default {
     font-size: 0.8em;
     font-weight: bold;
   }
-  .forgot-prompt {
-    margin-top: 12px;
-    text-align: center;
-    font-size: 0.85em;
+  .success {
+    color: var(--color-success, #28a745);
+    margin-top: 10px;
+    font-size: 0.9em;
+    font-weight: bold;
   }
-  .forgot-prompt a {
-    color: var(--color-text-light);
-    text-decoration: underline;
-  }
-  .forgot-prompt a:hover {
-    color: var(--color-accent);
-  }
-  .signup-prompt {
+  .back-prompt {
     margin-top: 20px;
     text-align: center;
     color: var(--color-text-light);
     font-size: 0.9em;
   }
-  .signup-prompt a {
+  .back-prompt a {
     display: inline-block;
     padding: 10px 20px;
     margin-top: 8px;
@@ -168,7 +154,7 @@ export default {
     font-weight: bold;
     transition: background-color 0.2s ease, color 0.2s ease;
   }
-  .signup-prompt a:hover {
+  .back-prompt a:hover {
     background: var(--color-accent);
     color: white;
   }

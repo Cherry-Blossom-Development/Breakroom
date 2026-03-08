@@ -91,6 +91,16 @@ const router = createRouter({
       component: () => import('../views/VerifyPage.vue'),
     },
     {
+      path: '/forgot-password',
+      name: 'forgotPassword',
+      component: () => import('../views/ForgotPasswordPage.vue'),
+    },
+    {
+      path: '/reset-password',
+      name: 'resetPassword',
+      component: () => import('../views/ResetPasswordPage.vue'),
+    },
+    {
       path: '/welcome',
       name: 'welcome',
       component: () => import('../views/WelcomePage.vue'),
