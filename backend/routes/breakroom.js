@@ -272,13 +272,10 @@ router.get('/updates', async (req, res) => {
 
   const client = await getClient();
   try {
-    let whereClause = '';
-    const params = [limit, offset];
-
-    if (platform === 'android' || platform === 'ios') {
-      whereClause = `WHERE platform = 'all' OR platform = $3`;
-      params.push(platform);
-    }
+    // Safe to inline since platform is validated against a whitelist
+    const whereClause = (platform === 'android' || platform === 'ios')
+      ? `WHERE platform = 'all' OR platform = '${platform}'`
+      : '';
 
     const updates = await client.query(
       `SELECT id, summary, platform, commit_hash, created_at
@@ -286,12 +283,11 @@ router.get('/updates', async (req, res) => {
        ${whereClause}
        ORDER BY created_at DESC
        LIMIT $1 OFFSET $2`,
-      params
+      [limit, offset]
     );
 
     const total = await client.query(
-      `SELECT COUNT(*) as count FROM breakroom_updates ${whereClause}`,
-      params.slice(2)
+      `SELECT COUNT(*) as count FROM breakroom_updates ${whereClause}`
     );
 
     res.status(200).json({
