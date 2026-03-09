@@ -277,6 +277,7 @@ function handleNavClick() {
           <RouterLink to="/admin/system-emails" class="admin-item" @click="handleNavClick">System Emails</RouterLink>
           <RouterLink to="/admin/billing" class="admin-item" @click="handleNavClick">Billing</RouterLink>
           <RouterLink to="/admin/test-results" class="admin-item" @click="handleNavClick">Test Results</RouterLink>
+          <RouterLink to="/admin/features" class="admin-item" @click="handleNavClick">Features</RouterLink>
         </div>
       </div>
 

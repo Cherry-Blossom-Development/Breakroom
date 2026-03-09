@@ -70,6 +70,7 @@ const shortcutsRoutes = require('./routes/shortcuts');
 const testResultsRoutes = require('./routes/test-results');
 const lyricsRoutes = require('./routes/lyrics');
 const galleryRoutes = require('./routes/gallery');
+const featuresRoutes = require('./routes/features');
 const { getS3Url } = require('./utilities/aws-s3');
 
 
@@ -104,6 +105,7 @@ app.use('/api/shortcuts', shortcutsRoutes);
 app.use('/api/test-results', testResultsRoutes);
 app.use('/api/lyrics', lyricsRoutes);
 app.use('/api/gallery', galleryRoutes);
+app.use('/api/features', featuresRoutes);
 
 // Redirect uploaded file requests to S3
 const handleS3Redirect = (req, res) => {
