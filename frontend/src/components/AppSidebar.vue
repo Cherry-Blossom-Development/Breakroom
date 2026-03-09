@@ -50,6 +50,7 @@ const filteredInviteUsers = computed(() => {
 })
 
 const isOnChatPage = computed(() => route.path === '/chat')
+const isOnAdminPage = computed(() => route.path.startsWith('/admin'))
 
 // Initialize chat when navigating to chat page
 watch(isOnChatPage, async (onChat) => {
@@ -261,6 +262,24 @@ function handleNavClick() {
     </div>
 
     <nav class="sidebar-nav">
+      <!-- Admin (top, only for admins) -->
+      <div v-if="isAdmin" class="nav-section">
+        <RouterLink to="/admin/users" class="nav-item" active-class="" :class="{ 'router-link-active': isOnAdminPage }" @click="handleNavClick">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Admin</span>
+        </RouterLink>
+        <!-- Admin sub-menu (shown when on any admin page) -->
+        <div v-if="isOnAdminPage" class="admin-section">
+          <RouterLink to="/admin/users" class="admin-item" @click="handleNavClick">Users</RouterLink>
+          <RouterLink to="/admin/groups" class="admin-item" @click="handleNavClick">Groups</RouterLink>
+          <RouterLink to="/admin/permissions" class="admin-item" @click="handleNavClick">Permissions</RouterLink>
+          <RouterLink to="/admin/notifications" class="admin-item" @click="handleNavClick">Notifications</RouterLink>
+          <RouterLink to="/admin/system-emails" class="admin-item" @click="handleNavClick">System Emails</RouterLink>
+          <RouterLink to="/admin/billing" class="admin-item" @click="handleNavClick">Billing</RouterLink>
+          <RouterLink to="/admin/test-results" class="admin-item" @click="handleNavClick">Test Results</RouterLink>
+        </div>
+      </div>
+
       <!-- Primary -->
       <div class="nav-section">
         <RouterLink to="/breakroom" class="nav-item" @click="handleNavClick">
@@ -385,10 +404,6 @@ function handleNavClick() {
       <RouterLink to="/profile" class="nav-item" @click="handleNavClick">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         <span>Profile</span>
-      </RouterLink>
-      <RouterLink v-if="isAdmin" to="/admin" class="nav-item" @click="handleNavClick">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-        <span>Admin</span>
       </RouterLink>
       <a href="#" class="nav-item logout-item" @click.prevent="handleLogout">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -772,6 +787,36 @@ function handleNavClick() {
   font-size: 0.8rem;
   color: rgba(255, 255, 255, 0.4);
   font-style: italic;
+}
+
+/* ============================================
+   ADMIN SUB-MENU
+   ============================================ */
+
+.admin-section {
+  padding: 2px 0 4px;
+  border-left: 2px solid rgba(255, 255, 255, 0.1);
+  margin-left: 26px;
+}
+
+.admin-item {
+  display: block;
+  padding: 7px 12px;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.7);
+  text-decoration: none;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.admin-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.admin-item.router-link-active {
+  color: var(--color-accent);
+  font-weight: 500;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 /* ============================================
