@@ -198,6 +198,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/sessions',
+      name: 'sessions',
+      component: () => import('../views/SessionsPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/kanban',
       name: 'kanban',
       component: () => import('../views/KanbanPage.vue'),

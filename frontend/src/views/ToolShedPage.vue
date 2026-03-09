@@ -1,11 +1,64 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { authFetch } from '@/utilities/authFetch'
+import { features } from '@/stores/features'
 
 const router = useRouter()
 const addingShortcut = ref(null)
 const shortcutAdded = ref({})
+
+// All possible tools, with optional featureKey to restrict visibility
+const allTools = {
+  musician: [
+    {
+      id: 'lyric-lab',
+      name: 'Lyric Lab',
+      description: 'Capture lyric ideas, organize them into songs, and collaborate with other songwriters.',
+      route: '/lyrics',
+      shortcutName: 'Lyric Lab'
+    },
+    {
+      id: 'sessions',
+      name: 'Sessions',
+      description: 'Track and manage your recording sessions, log progress, and keep notes on each session.',
+      route: '/sessions',
+      shortcutName: 'Sessions',
+      featureKey: 'sessions'
+    }
+  ],
+  artist: [
+    {
+      id: 'art-gallery',
+      name: 'Art Gallery',
+      description: 'Upload and display your artwork in a personal gallery with a shareable public URL.',
+      route: '/art-gallery',
+      shortcutName: 'Art Gallery'
+    }
+  ],
+  writer: [
+    {
+      id: 'blog',
+      name: 'Blog',
+      description: 'Create and publish blog posts to share your thoughts with the world.',
+      route: '/blog',
+      shortcutName: 'Blog'
+    }
+  ],
+  developer: [
+    {
+      id: 'kanban',
+      name: 'Kanban',
+      description: 'Organize your projects with a visual kanban board for tracking tasks and progress.',
+      route: '/kanban',
+      shortcutName: 'Kanban'
+    }
+  ]
+}
+
+function visibleTools(toolList) {
+  return toolList.filter(t => !t.featureKey || features.has(t.featureKey))
+}
 
 // Tool categories
 const categories = ref([
@@ -14,60 +67,28 @@ const categories = ref([
     name: 'Musician Tools',
     description: 'Tools for musicians, composers, and audio enthusiasts',
     icon: 'music',
-    tools: [
-      {
-        id: 'lyric-lab',
-        name: 'Lyric Lab',
-        description: 'Capture lyric ideas, organize them into songs, and collaborate with other songwriters.',
-        route: '/lyrics',
-        shortcutName: 'Lyric Lab'
-      }
-    ]
+    get tools() { return visibleTools(allTools.musician) }
   },
   {
     id: 'artist',
     name: 'Artist Tools',
     description: 'Creative tools for visual artists and designers',
     icon: 'palette',
-    tools: [
-      {
-        id: 'art-gallery',
-        name: 'Art Gallery',
-        description: 'Upload and display your artwork in a personal gallery with a shareable public URL.',
-        route: '/art-gallery',
-        shortcutName: 'Art Gallery'
-      }
-    ]
+    get tools() { return visibleTools(allTools.artist) }
   },
   {
     id: 'writer',
     name: 'Writer Tools',
     description: 'Utilities for writers, bloggers, and content creators',
     icon: 'pen',
-    tools: [
-      {
-        id: 'blog',
-        name: 'Blog',
-        description: 'Create and publish blog posts to share your thoughts with the world.',
-        route: '/blog',
-        shortcutName: 'Blog'
-      }
-    ]
+    get tools() { return visibleTools(allTools.writer) }
   },
   {
     id: 'developer',
     name: 'Developer Tools',
     description: 'Productivity tools for programmers and developers',
     icon: 'code',
-    tools: [
-      {
-        id: 'kanban',
-        name: 'Kanban',
-        description: 'Organize your projects with a visual kanban board for tracking tasks and progress.',
-        route: '/kanban',
-        shortcutName: 'Kanban'
-      }
-    ]
+    get tools() { return visibleTools(allTools.developer) }
   }
 ])
 
@@ -116,8 +137,10 @@ async function checkShortcuts() {
   }
 }
 
-// Check shortcuts on mount
-checkShortcuts()
+onMounted(async () => {
+  await features.load()
+  checkShortcuts()
+})
 </script>
 
 <template>
