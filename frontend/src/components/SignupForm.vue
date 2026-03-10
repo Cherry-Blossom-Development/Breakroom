@@ -30,7 +30,7 @@
     </div>
     <!-- Display error message if any -->
     <div v-if="errorMessage" class="error">{{ errorMessage }}</div>
-    <button type="submit" :disabled="submitting">{{ submitting ? 'Creating Account...' : 'Create User' }}</button>
+    <button type="submit" :disabled="submitting || !isFormValid">{{ submitting ? 'Creating Account...' : 'Create User' }}</button>
   </form>
 </template>
 
@@ -90,6 +90,18 @@ export default {
   setup() {
     const router = useRouter();
     return { router };
+  },
+  computed: {
+    isFormValid() {
+      return (
+        this.handle.trim().length > 0 &&
+        this.first_name.trim().length > 0 &&
+        this.last_name.trim().length > 0 &&
+        validateEmail(this.email) &&
+        this.password.length >= 5 &&
+        this.password === this.password2
+      );
+    }
   },
   methods: {
     async handleSubmit() {
