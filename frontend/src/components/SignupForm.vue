@@ -223,7 +223,8 @@ export default {
     transform: translateY(1px);
   }
   button:disabled {
-    opacity: 0.6;
+    background: var(--color-accent);
+    opacity: 0.4;
     cursor: not-allowed;
   }
   .error {
