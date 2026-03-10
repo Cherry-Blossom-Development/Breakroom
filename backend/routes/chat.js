@@ -90,8 +90,8 @@ router.get('/rooms', authenticateToken, async (req, res) => {
        LEFT JOIN users_rooms ur ON cr.id = ur.room_id AND ur.user_id = $1
        WHERE cr.is_active = true
          AND (
-           (cr.owner_id IS NULL AND (ur.user_id IS NULL OR ur.accepted = true))
-           OR (cr.owner_id IS NOT NULL AND ur.user_id IS NOT NULL AND ur.accepted = true)
+           ((cr.owner_id IS NULL OR cr.is_default = true) AND (ur.user_id IS NULL OR ur.accepted = true))
+           OR (cr.owner_id IS NOT NULL AND cr.is_default = false AND ur.user_id IS NOT NULL AND ur.accepted = true)
          )
        ORDER BY cr.name`,
       [req.user.id]

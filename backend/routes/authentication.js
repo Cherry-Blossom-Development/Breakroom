@@ -79,6 +79,17 @@ router.post('/signup', async (req, res) => {
       );
     }
 
+    // Add new user to all default chat rooms
+    const defaultRooms = await client.query(
+      'SELECT id FROM chat_rooms WHERE is_default = true AND is_active = true'
+    );
+    for (const room of defaultRooms.rows) {
+      await client.query(
+        'INSERT INTO users_rooms (user_id, room_id, accepted) VALUES ($1, $2, true)',
+        [newUserId, room.id]
+      );
+    }
+
     // Create default blog settings for new user
     await client.query(
       `INSERT INTO user_blog (user_id, blog_url, blog_name)
