@@ -55,14 +55,23 @@ router.post('/signup', async (req, res) => {
       await client.query('INSERT INTO user_groups (user_id, group_id) VALUES ($1, $2)', [newUserId, standardGroup.rows[0].id]);
     }
 
-    // Create default breakroom blocks for new user
-    // Find the General chat room
-    const generalRoom = await client.query('SELECT id FROM chat_rooms WHERE name = $1', ['General']);
-    const generalRoomId = generalRoom.rowCount > 0 ? generalRoom.rows[0].id : null;
+    // Add new user to all default chat rooms and create their breakroom blocks
+    const defaultRooms = await client.query(
+      'SELECT id, name FROM chat_rooms WHERE is_default = true AND is_active = true ORDER BY id'
+    );
+    for (const room of defaultRooms.rows) {
+      await client.query(
+        'INSERT INTO users_rooms (user_id, room_id, accepted) VALUES ($1, $2, true)',
+        [newUserId, room.id]
+      );
+    }
 
+    // Create default breakroom blocks for new user
+    // First default room goes in the top-left slot; extras are appended below row 2
+    const firstRoomId = defaultRooms.rows.length > 0 ? defaultRooms.rows[0].id : null;
     const defaultBlocks = [
       // Top row: Chat, Blog, Weather
-      { block_type: 'chat', content_id: generalRoomId, x: 0, y: 0, w: 2, h: 2, title: null },
+      { block_type: 'chat', content_id: firstRoomId, x: 0, y: 0, w: 2, h: 2, title: null },
       { block_type: 'blog', content_id: null, x: 2, y: 0, w: 2, h: 2, title: null },
       { block_type: 'weather', content_id: null, x: 4, y: 0, w: 1, h: 2, title: null },
       // Second row: Calendar, News, Updates
@@ -71,22 +80,16 @@ router.post('/signup', async (req, res) => {
       { block_type: 'updates', content_id: null, x: 3, y: 2, w: 2, h: 2, title: null }
     ];
 
+    // Any additional default rooms get chat blocks appended below
+    defaultRooms.rows.slice(1).forEach((room, i) => {
+      defaultBlocks.push({ block_type: 'chat', content_id: room.id, x: 0, y: 4 + (i * 2), w: 2, h: 2, title: null });
+    });
+
     for (const block of defaultBlocks) {
       await client.query(
         `INSERT INTO breakroom_blocks (user_id, block_type, content_id, x, y, w, h, title)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [newUserId, block.block_type, block.content_id, block.x, block.y, block.w, block.h, block.title]
-      );
-    }
-
-    // Add new user to all default chat rooms
-    const defaultRooms = await client.query(
-      'SELECT id FROM chat_rooms WHERE is_default = true AND is_active = true'
-    );
-    for (const room of defaultRooms.rows) {
-      await client.query(
-        'INSERT INTO users_rooms (user_id, room_id, accepted) VALUES ($1, $2, true)',
-        [newUserId, room.id]
       );
     }
 
