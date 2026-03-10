@@ -139,8 +139,8 @@ export default {
           // Fetch user to update nav with logged-in state
           await user.fetchUser();
 
-          // Redirect to welcome page on success
-          this.router.push('/welcome');
+          // Redirect to breakroom on success
+          this.router.push('/breakroom');
 
         } catch (error) {
           // Check if the error response is a 409 Conflict
