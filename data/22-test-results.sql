@@ -4,7 +4,7 @@
 -- Test runs - represents a single execution of the test suite
 CREATE TABLE test_runs (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  platform ENUM('web', 'android') NOT NULL,
+  platform ENUM('web', 'android', 'ios') NOT NULL,
   environment VARCHAR(32) DEFAULT 'local',
   branch VARCHAR(128),
   commit_hash VARCHAR(40),
