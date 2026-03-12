@@ -1,4 +1,6 @@
-require('dotenv').config();
+// Load environment variables - use custom path if specified
+const envPath = process.env.DOTENV_CONFIG_PATH || '.env';
+require('dotenv').config({ path: envPath });
 
 const express = require('express');
 const cors = require('cors');
@@ -12,7 +14,7 @@ const { createRedisClients } = require('./utilities/redis');
 
 const app = express();
 const server = http.createServer(app);
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 // Set up Socket.IO - allow multiple origins
 const allowedOrigins = [

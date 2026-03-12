@@ -57,8 +57,8 @@ router.post('/runs', apiKeyAuth, async (req, res) => {
   const client = await getClient();
 
   try {
-    if (!platform || !['web', 'android'].includes(platform)) {
-      return res.status(400).json({ message: 'Platform must be "web" or "android"' });
+    if (!platform || !['web', 'android', 'ios'].includes(platform)) {
+      return res.status(400).json({ message: 'Platform must be "web", "android", or "ios"' });
     }
 
     await client.query(
@@ -228,8 +228,8 @@ router.post('/runs/bulk', apiKeyAuth, async (req, res) => {
   const client = await getClient();
 
   try {
-    if (!platform || !['web', 'android'].includes(platform)) {
-      return res.status(400).json({ message: 'Platform must be "web" or "android"' });
+    if (!platform || !['web', 'android', 'ios'].includes(platform)) {
+      return res.status(400).json({ message: 'Platform must be "web", "android", or "ios"' });
     }
 
     if (!suites || !Array.isArray(suites)) {
