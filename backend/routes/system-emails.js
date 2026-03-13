@@ -90,7 +90,7 @@ router.get('/:id', authenticate, requireAdmin, async (req, res) => {
     const result = await client.query(
       `SELECT id, email_key, from_address, subject, html_content, description, is_active
        FROM system_emails
-       WHERE id = ?`,
+       WHERE id = $1`,
       [id]
     );
 
@@ -122,7 +122,7 @@ router.post('/', authenticate, requireAdmin, async (req, res) => {
   try {
     const result = await client.query(
       `INSERT INTO system_emails (email_key, from_address, subject, html_content, description)
-       VALUES (?, ?, ?, ?, ?)`,
+       VALUES ($1, $2, $3, $4, $5)`,
       [email_key, from_address, subject, html_content, description || null]
     );
 
@@ -157,8 +157,8 @@ router.put('/:id', authenticate, requireAdmin, async (req, res) => {
   try {
     const result = await client.query(
       `UPDATE system_emails
-       SET email_key = ?, from_address = ?, subject = ?, html_content = ?, description = ?
-       WHERE id = ?`,
+       SET email_key = $1, from_address = $2, subject = $3, html_content = $4, description = $5
+       WHERE id = $6`,
       [email_key, from_address, subject, html_content, description || null, id]
     );
 
@@ -255,7 +255,7 @@ router.post('/:id/send', authenticate, requireAdmin, async (req, res) => {
     const result = await client.query(
       `SELECT email_key, from_address, subject, html_content
        FROM system_emails
-       WHERE id = ? AND is_active = true`,
+       WHERE id = $1 AND is_active = true`,
       [id]
     );
 
