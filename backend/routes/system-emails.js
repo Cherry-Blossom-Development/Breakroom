@@ -41,7 +41,7 @@ const requireAdmin = async (req, res, next) => {
     const result = await client.query(
       `SELECT 1 FROM user_groups ug
        JOIN \`groups\` g ON ug.group_id = g.id
-       WHERE ug.user_id = ? AND g.name = 'Administrator'`,
+       WHERE ug.user_id = $1 AND g.name = 'Administrator'`,
       [req.user.id]
     );
 
