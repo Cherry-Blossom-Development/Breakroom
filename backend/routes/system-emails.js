@@ -39,15 +39,10 @@ const requireAdmin = async (req, res, next) => {
   const client = await getClient();
   try {
     const result = await client.query(
-      `SELECT 1 FROM user_permissions up
-       JOIN permissions p ON up.permission_id = p.id
-       WHERE up.user_id = ? AND p.name = 'admin_access'
-       UNION
-       SELECT 1 FROM user_groups ug
-       JOIN group_permissions gp ON ug.group_id = gp.group_id
-       JOIN permissions p ON gp.permission_id = p.id
-       WHERE ug.user_id = ? AND p.name = 'admin_access'`,
-      [req.user.id, req.user.id]
+      `SELECT 1 FROM user_groups ug
+       JOIN \`groups\` g ON ug.group_id = g.id
+       WHERE ug.user_id = ? AND g.name = 'Administrator'`,
+      [req.user.id]
     );
 
     if (result.rowCount === 0) {
