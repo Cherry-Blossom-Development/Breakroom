@@ -286,9 +286,11 @@ router.get('/my', authenticate, async (req, res) => {
   try {
     const result = await client.query(
       `SELECT n.id, n.status, n.created_at,
-              nt.name, nt.description, nt.display_type
+              nt.name, nt.description, nt.display_type,
+              et.type as event_type
        FROM notifications n
        JOIN notification_types nt ON n.notif_id = nt.id
+       LEFT JOIN event_types et ON nt.event_id = et.id
        WHERE n.user_id = $1 AND n.status != 'dismissed'
        ORDER BY n.created_at DESC`,
       [req.user.id]

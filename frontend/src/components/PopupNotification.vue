@@ -5,7 +5,15 @@
       <div class="popup-description" v-if="notification.description">
         {{ notification.description }}
       </div>
-      <button class="popup-button" @click="acknowledge">Acknowledge</button>
+      <RouterLink
+        v-if="notification.event_type === 'eula_required'"
+        to="/eula"
+        class="popup-button"
+        @click="markViewed"
+      >
+        Read &amp; Accept Terms
+      </RouterLink>
+      <button v-else class="popup-button" @click="acknowledge">Acknowledge</button>
     </div>
   </div>
 </template>
@@ -15,6 +23,12 @@ import { computed } from 'vue'
 import { notificationStore } from '@/stores/notification'
 
 const notification = computed(() => notificationStore.currentPopup)
+
+function markViewed() {
+  if (notification.value) {
+    notificationStore.markViewed(notification.value.id)
+  }
+}
 
 function acknowledge() {
   if (notification.value) {
@@ -59,6 +73,11 @@ function acknowledge() {
   line-height: 1.6;
   text-align: left;
   white-space: pre-wrap;
+}
+
+a.popup-button {
+  display: inline-block;
+  text-decoration: none;
 }
 
 .popup-button {
