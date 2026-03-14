@@ -18,7 +18,7 @@ const notification = computed(() => notificationStore.currentPopup)
 
 function acknowledge() {
   if (notification.value) {
-    notificationStore.dismissNotification(notification.value.id)
+    notificationStore.markViewed(notification.value.id)
   }
 }
 </script>

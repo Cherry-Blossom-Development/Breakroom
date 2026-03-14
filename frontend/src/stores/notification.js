@@ -113,6 +113,12 @@ export const notificationStore = reactive({
       if (notification) {
         notification.status = 'viewed'
       }
+
+      // If this was the current popup, show next
+      if (this.currentPopup && this.currentPopup.id === id) {
+        this.currentPopup = null
+        this.showNextPopup()
+      }
     } catch (err) {
       console.error('Failed to mark notification as viewed:', err)
     }

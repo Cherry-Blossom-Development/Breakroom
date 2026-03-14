@@ -298,6 +298,35 @@ router.post('/login', async (req, res) => {
         const payload = { username: req.body.handle };
         const token = jwt.sign(payload, SECRET_KEY, { expiresIn: '48h' });
 
+        // Ensure EULA notification exists for this user.
+        // If not yet accepted (dismissed), create or reset to 'unviewed' so the popup shows.
+        const userId = user.rows[0].id;
+        const eulaType = await client.query(
+          `SELECT nt.id FROM notification_types nt
+           JOIN event_types et ON nt.event_id = et.id
+           WHERE et.type = 'eula_required' AND nt.is_active = TRUE
+           LIMIT 1`
+        );
+        if (eulaType.rowCount > 0) {
+          const eulaTypeId = eulaType.rows[0].id;
+          const existing = await client.query(
+            'SELECT id, status FROM notifications WHERE notif_id = $1 AND user_id = $2',
+            [eulaTypeId, userId]
+          );
+          if (existing.rowCount === 0) {
+            await client.query(
+              'INSERT INTO notifications (notif_id, user_id, status) VALUES ($1, $2, $3)',
+              [eulaTypeId, userId, 'unviewed']
+            );
+          } else if (existing.rows[0].status !== 'dismissed') {
+            // Reset so popup re-appears on this session
+            await client.query(
+              'UPDATE notifications SET status = $1 WHERE id = $2',
+              ['unviewed', existing.rows[0].id]
+            );
+          }
+        }
+
         client.release();
 
         res.cookie('jwtToken', token, {

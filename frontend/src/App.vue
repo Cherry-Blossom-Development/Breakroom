@@ -109,7 +109,7 @@ function closeSidebar() {
 
 setInterval(() => {
   user.fetchUser()
-  const publicRoutes = ['/', '/login', '/signup', '/about', '/welcome', '/chat', '/privacy']
+  const publicRoutes = ['/', '/login', '/signup', '/about', '/welcome', '/chat', '/privacy', '/eula', '/child-safety']
 
   // Only redirect if on a protected route and not logged in
   if (!user.username && !publicRoutes.includes(route.path)) {

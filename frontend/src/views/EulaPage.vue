@@ -1,13 +1,26 @@
 <template>
   <section class="eula-page page-container">
+
+    <!-- Accept banner for logged-in users who haven't accepted yet -->
+    <div v-if="showAcceptBanner" class="accept-banner">
+      <div v-if="!accepted">
+        <p>You must accept these terms to use Prosaurus.</p>
+        <button class="accept-button" :disabled="accepting" @click="acceptTerms">
+          {{ accepting ? 'Saving…' : 'Accept These Terms' }}
+        </button>
+      </div>
+      <div v-else class="accepted-confirmation">
+        Terms accepted. Thank you.
+      </div>
+    </div>
     <h1>End User License Agreement</h1>
-    <p class="app-subtitle">Breakroom — Prosaurus Platform</p>
+    <p class="app-subtitle">Prosaurus — prosaurus.com</p>
     <p class="effective-date">Effective Date: March 14, 2026</p>
 
     <p class="intro">
       This End User License Agreement ("EULA" or "Agreement") is a legal agreement between you
       ("User," "you," or "your") and Cherry Blossom Development LLC ("Company," "we," "us," or "our"),
-      governing your use of the Breakroom application and associated services (collectively, the "Service").
+      governing your use of the Prosaurus platform and associated services (collectively, the "Service").
       By creating an account or using the Service in any way, you acknowledge that you have read,
       understood, and agree to be bound by this Agreement. If you do not agree, do not use the Service.
     </p>
@@ -152,7 +165,7 @@
         We take all reports seriously and investigate promptly. You can reach us at:
       </p>
       <address>
-        <a href="mailto:abuse@prosaurus.com">abuse@prosaurus.com</a>
+        <a href="mailto:abuse@cherryblossomdevelopment.com">abuse@cherryblossomdevelopment.com</a>
       </address>
       <p>
         Reports submitted in good faith will be treated confidentially. We do not tolerate retaliation
@@ -241,10 +254,90 @@
 </template>
 
 <script setup>
-// No additional logic needed
+import { ref, onMounted } from 'vue'
+import { user } from '@/stores/user.js'
+import { notificationStore } from '@/stores/notification.js'
+
+const showAcceptBanner = ref(false)
+const accepted = ref(false)
+const accepting = ref(false)
+const notificationId = ref(null)
+
+onMounted(async () => {
+  if (!user.username) return
+  try {
+    const res = await fetch('/api/eula/status', { credentials: 'include' })
+    if (!res.ok) return
+    const data = await res.json()
+    accepted.value = data.accepted
+    notificationId.value = data.notificationId
+    showAcceptBanner.value = true
+  } catch (err) {
+    console.error('Failed to fetch EULA status:', err)
+  }
+})
+
+async function acceptTerms() {
+  if (!notificationId.value) return
+  accepting.value = true
+  try {
+    await notificationStore.dismissNotification(notificationId.value)
+    accepted.value = true
+  } catch (err) {
+    console.error('Failed to accept EULA:', err)
+  } finally {
+    accepting.value = false
+  }
+}
 </script>
 
 <style scoped>
+.accept-banner {
+  background: var(--color-background-soft, rgba(0,0,0,0.04));
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.accept-banner p {
+  margin: 0;
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.accept-button {
+  background: var(--color-link);
+  color: #fff;
+  border: none;
+  padding: 0.6rem 1.5rem;
+  font-size: 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.2s;
+}
+
+.accept-button:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.accept-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.accepted-confirmation {
+  color: var(--color-link);
+  font-weight: 600;
+  font-size: 1rem;
+}
+
 .eula-page {
   max-width: 760px;
   margin: 50px auto;
