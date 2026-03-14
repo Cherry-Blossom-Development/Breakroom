@@ -45,6 +45,12 @@ const router = createRouter({
       // No requiresAuth - public page required for Play Store compliance
     },
     {
+      path: '/eula',
+      name: 'eula',
+      component: () => import('../views/EulaPage.vue'),
+      // No requiresAuth - public page
+    },
+    {
       path: '/breakroom',
       name: 'breakroom',
       component: () => import('../views/BreakroomPage.vue'),

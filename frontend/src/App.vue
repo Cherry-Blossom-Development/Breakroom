@@ -162,6 +162,7 @@ setInterval(() => {
         <nav class="public-nav">
           <RouterLink to="/">Home</RouterLink>
           <RouterLink to="/about">About</RouterLink>
+          <RouterLink to="/eula">EULA</RouterLink>
           <RouterLink to="/login">Login</RouterLink>
           <RouterLink to="/signup">Sign Up</RouterLink>
         </nav>
