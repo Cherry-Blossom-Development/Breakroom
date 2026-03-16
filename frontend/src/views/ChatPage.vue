@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { chat } from '@/stores/chat.js'
 import { user } from '@/stores/user.js'
+import FlagDialog from '@/components/FlagDialog.vue'
 
 const messageInput = ref('')
 const messagesContainer = ref(null)
@@ -133,6 +134,8 @@ const formatTime = (timestamp) => {
 const isOwnMessage = (handle) => {
   return handle === user.username
 }
+
+const flaggingMessageId = ref(null)
 
 // Get image URL
 const getImageUrl = (imagePath) => {
@@ -302,6 +305,19 @@ onUnmounted(() => {
               </video>
             </div>
             <div v-if="msg.message" class="message-content">{{ msg.message }}</div>
+            <button
+              v-if="!isOwnMessage(msg.handle)"
+              class="flag-msg-btn"
+              @click="flaggingMessageId = msg.id"
+              title="Report this message"
+            >Flag</button>
+            <FlagDialog
+              :visible="flaggingMessageId === msg.id"
+              content-type="chat_message"
+              :content-id="msg.id"
+              @close="flaggingMessageId = null"
+              @flagged="flaggingMessageId = null"
+            />
           </div>
         </div>
 

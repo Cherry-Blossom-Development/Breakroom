@@ -2,6 +2,9 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
+import FlagDialog from '../components/FlagDialog.vue'
+import { user } from '@/stores/user.js'
+import { moderationStore } from '@/stores/moderation.js'
 
 const route = useRoute()
 
@@ -84,6 +87,35 @@ watch(() => route.params.handle, () => {
 onMounted(() => {
   fetchProfile()
 })
+
+const showFlagProfile = ref(false)
+const isBlocking = ref(false)
+
+const isOwnProfile = computed(() => profile.value.handle === user.username)
+const isBlocked = computed(() => profile.value.id && moderationStore.isBlocked(profile.value.id))
+
+async function blockUser() {
+  if (!profile.value.id) return
+  isBlocking.value = true
+  try {
+    const res = await fetch(`/api/moderation/block/${profile.value.id}`, {
+      method: 'POST',
+      credentials: 'include'
+    })
+    if (res.ok) moderationStore.addBlock(profile.value.id)
+  } finally {
+    isBlocking.value = false
+  }
+}
+
+async function unblockUser() {
+  if (!profile.value.id) return
+  const res = await fetch(`/api/moderation/block/${profile.value.id}`, {
+    method: 'DELETE',
+    credentials: 'include'
+  })
+  if (res.ok) moderationStore.removeBlock(profile.value.id)
+}
 </script>
 
 <template>
@@ -115,8 +147,23 @@ onMounted(() => {
           <p class="handle">@{{ profile.handle }}</p>
           <p class="member-since">Member since {{ memberSince }}</p>
           <p class="friend-count">{{ profile.friendCount }} {{ profile.friendCount === 1 ? 'friend' : 'friends' }}</p>
+          <div v-if="user.username && !isOwnProfile" class="profile-moderation-actions">
+            <button v-if="!isBlocked" class="mod-btn block-btn" @click="blockUser" :disabled="isBlocking">
+              {{ isBlocking ? 'Blocking…' : 'Block User' }}
+            </button>
+            <button v-else class="mod-btn unblock-btn" @click="unblockUser">Unblock</button>
+            <button class="mod-btn flag-btn" @click="showFlagProfile = true">Flag Profile</button>
+          </div>
         </div>
       </div>
+
+      <FlagDialog
+        :visible="showFlagProfile"
+        content-type="user"
+        :content-id="profile.id"
+        @close="showFlagProfile = false"
+        @flagged="showFlagProfile = false"
+      />
 
       <div class="profile-card">
         <div class="bio-section">

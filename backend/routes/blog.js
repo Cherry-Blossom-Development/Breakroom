@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { checkAndFilterContent } = require('../utilities/contentFilter');
 const multer = require('multer');
 const path = require('path');
 const jwt = require('jsonwebtoken');
@@ -86,7 +87,7 @@ router.get('/public/:blogUrl', async (req, res) => {
     const postsResult = await client.query(
       `SELECT id, title, content, created_at, updated_at
        FROM blog_posts
-       WHERE user_id = $1 AND is_published = TRUE
+       WHERE user_id = $1 AND is_published = TRUE AND is_hidden = FALSE
        ORDER BY updated_at DESC`,
       [blog.user_id]
     );
@@ -128,7 +129,7 @@ router.get('/public/:blogUrl/:postId', async (req, res) => {
        FROM blog_posts bp
        JOIN users u ON bp.user_id = u.id
        JOIN user_blog ub ON ub.user_id = u.id
-       WHERE ub.blog_url = $1 AND bp.id = $2 AND bp.is_published = TRUE`,
+       WHERE ub.blog_url = $1 AND bp.id = $2 AND bp.is_published = TRUE AND bp.is_hidden = FALSE`,
       [blogUrl, postId]
     );
 
@@ -337,7 +338,7 @@ router.get('/feed', authenticate, async (req, res) => {
               u.last_name as author_last_name, u.photo_path as author_photo
        FROM blog_posts bp
        JOIN users u ON bp.user_id = u.id
-       WHERE bp.is_published = TRUE
+       WHERE bp.is_published = TRUE AND bp.is_hidden = FALSE
          AND (bp.user_id = $1
               OR bp.user_id IN (
                 SELECT CASE
@@ -374,7 +375,7 @@ router.get('/view/:id', authenticate, async (req, res) => {
               u.last_name as author_last_name, u.photo_path as author_photo, u.bio as author_bio
        FROM blog_posts bp
        JOIN users u ON bp.user_id = u.id
-       WHERE bp.id = $1 AND bp.is_published = TRUE`,
+       WHERE bp.id = $1 AND bp.is_published = TRUE AND bp.is_hidden = FALSE`,
       [id]
     );
 
@@ -492,7 +493,11 @@ router.post('/posts', authenticate, async (req, res) => {
       [req.user.id]
     );
 
-    res.status(201).json({ post: result.rows[0] });
+    const post = result.rows[0];
+    // Run keyword filter (async, non-blocking to response)
+    checkAndFilterContent('post', post.id, [title, content || ''], req.user.id).catch(() => {});
+
+    res.status(201).json({ post });
   } catch (err) {
     console.error('Error creating blog post:', err);
     res.status(500).json({ message: 'Failed to create post' });

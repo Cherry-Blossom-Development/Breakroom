@@ -3,6 +3,7 @@ import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { RouterLink, RouterView, useRouter, useRoute } from 'vue-router'
 import { user } from './stores/user.js'
 import { notificationStore } from './stores/notification.js'
+import { moderationStore } from './stores/moderation.js'
 import { initEventService, destroyEventService } from './utilities/eventService.js'
 import HeaderNotification from './components/HeaderNotification.vue'
 import PopupNotification from './components/PopupNotification.vue'
@@ -70,6 +71,7 @@ user.fetchUser().then(() => {
   checkAdminPermission()
   if (user.username) {
     notificationStore.fetchNotifications()
+    moderationStore.fetchBlockList()
     initEventService()
     setupNotificationSocket()
   }
@@ -79,6 +81,7 @@ watch(() => user.username, (newUsername) => {
   checkAdminPermission()
   if (newUsername) {
     notificationStore.fetchNotifications()
+    moderationStore.fetchBlockList()
     initEventService()
     setupNotificationSocket()
   } else {

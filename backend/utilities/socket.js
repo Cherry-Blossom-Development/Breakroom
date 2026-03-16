@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { getClient } = require('./db');
+const { checkAndFilterContent } = require('./contentFilter');
 
 require('dotenv').config();
 
@@ -149,6 +150,9 @@ const initializeSocket = (io) => {
         );
 
         const messageData = newMessage.rows[0];
+
+        // Run keyword filter (async, fire-and-forget)
+        checkAndFilterContent('chat_message', messageData.id, [message], socket.user.id).catch(() => {});
 
         // Broadcast message to everyone in the room (including sender)
         io.to(`room_${roomId}`).emit('new_message', {

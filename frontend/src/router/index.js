@@ -12,6 +12,7 @@ import AdminNotifications from '@/views/admin/AdminNotifications.vue'
 import AdminSystemEmails from '@/views/admin/AdminSystemEmails.vue'
 import AdminTestResults from '@/views/admin/AdminTestResults.vue'
 import AdminFeatures from '@/views/admin/AdminFeatures.vue'
+import AdminModeration from '@/views/admin/AdminModeration.vue'
 
 //Profile views
 import ProfileLayout from '@/views/profile/ProfileLayout.vue'
@@ -69,7 +70,8 @@ const router = createRouter({
         {path: 'billing', component: AdminBilling},
         {path: 'system-emails', component: AdminSystemEmails},
         {path: 'test-results', component: AdminTestResults},
-        {path: 'features', component: AdminFeatures}
+        {path: 'features', component: AdminFeatures},
+        {path: 'moderation', component: AdminModeration}
       ]
     },
     {

@@ -3,6 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { getIO } = require('../utilities/socket');
+const { checkAndFilterContent } = require('../utilities/contentFilter');
 
 require('dotenv').config();
 
@@ -103,7 +104,7 @@ router.get('/:postId', optionalAuth, async (req, res) => {
         u.last_name as author_last_name, u.photo_path as author_photo
        FROM blog_comments bc
        JOIN users u ON bc.user_id = u.id
-       WHERE bc.blog_post_id = $1 AND bc.is_deleted = FALSE
+       WHERE bc.blog_post_id = $1 AND bc.is_deleted = FALSE AND bc.is_hidden = FALSE
        ORDER BY bc.created_at ASC`,
       [postId]
     );
@@ -236,6 +237,9 @@ router.post('/:postId', authenticate, async (req, res) => {
       },
       replies: []
     };
+
+    // Run keyword filter (async, non-blocking to response)
+    checkAndFilterContent('comment', comment.id, [content], req.user.id).catch(() => {});
 
     // Emit real-time event
     emitToPost(postId, 'new_comment', { comment });

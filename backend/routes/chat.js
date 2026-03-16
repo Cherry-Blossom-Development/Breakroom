@@ -8,6 +8,7 @@ const { checkPermission } = require('../middleware/checkPermission');
 const { getIO } = require('../utilities/socket');
 const { uploadToS3 } = require('../utilities/aws-s3');
 const { extractToken } = require('../utilities/auth');
+const { checkAndFilterContent } = require('../utilities/contentFilter');
 
 require('dotenv').config();
 
@@ -217,7 +218,7 @@ router.get('/rooms/:roomId/messages', authenticateToken, async (req, res) => {
           u.id as user_id, u.handle
         FROM chat_messages m
         JOIN users u ON m.user_id = u.id
-        WHERE m.room_id = $1 AND m.created_at < $2
+        WHERE m.room_id = $1 AND m.created_at < $2 AND m.is_hidden = FALSE
         ORDER BY m.created_at DESC
         LIMIT $3
       `;
@@ -229,7 +230,7 @@ router.get('/rooms/:roomId/messages', authenticateToken, async (req, res) => {
           u.id as user_id, u.handle
         FROM chat_messages m
         JOIN users u ON m.user_id = u.id
-        WHERE m.room_id = $1
+        WHERE m.room_id = $1 AND m.is_hidden = FALSE
         ORDER BY m.created_at DESC
         LIMIT $2
       `;
@@ -299,6 +300,9 @@ router.post('/rooms/:roomId/messages', authenticateToken, async (req, res) => {
     );
 
     const messageData = newMessage.rows[0];
+
+    // Run keyword filter (async, non-blocking to response)
+    checkAndFilterContent('chat_message', messageData.id, [message], req.user.id).catch(() => {});
 
     // Broadcast message to everyone in the room via socket
     const io = getIO();

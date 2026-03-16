@@ -4,6 +4,7 @@ import { io } from 'socket.io-client'
 import { user } from '@/stores/user.js'
 import { comments } from '@/stores/comments.js'
 import LoadingSpinner from './LoadingSpinner.vue'
+import FlagDialog from './FlagDialog.vue'
 
 const props = defineProps({
   postId: {
@@ -184,6 +185,10 @@ function isOwnComment(comment) {
   return user.username && comment.author?.handle === user.username
 }
 
+const flaggingCommentId = ref(null)
+function openFlagDialog(commentId) { flaggingCommentId.value = commentId }
+function closeFlagDialog() { flaggingCommentId.value = null }
+
 // Lifecycle
 onMounted(async () => {
   loading.value = true
@@ -286,7 +291,15 @@ watch(() => props.postId, async (newId, oldId) => {
                 <button v-if="isAuthenticated" @click="startReply(comment.id)" class="action-btn">Reply</button>
                 <button v-if="isOwnComment(comment)" @click="startEdit(comment)" class="action-btn">Edit</button>
                 <button v-if="isOwnComment(comment)" @click="deleteComment(comment.id)" class="action-btn delete-btn">Delete</button>
+                <button v-if="isAuthenticated && !isOwnComment(comment)" @click="openFlagDialog(comment.id)" class="action-btn flag-btn">Flag</button>
               </div>
+              <FlagDialog
+                :visible="flaggingCommentId === comment.id"
+                content-type="comment"
+                :content-id="comment.id"
+                @close="closeFlagDialog"
+                @flagged="closeFlagDialog"
+              />
             </template>
 
             <!-- Reply form -->
@@ -344,7 +357,15 @@ watch(() => props.postId, async (newId, oldId) => {
                 <div class="comment-actions">
                   <button v-if="isOwnComment(reply)" @click="startEdit(reply)" class="action-btn">Edit</button>
                   <button v-if="isOwnComment(reply)" @click="deleteComment(reply.id)" class="action-btn delete-btn">Delete</button>
+                  <button v-if="isAuthenticated && !isOwnComment(reply)" @click="openFlagDialog(reply.id)" class="action-btn flag-btn">Flag</button>
                 </div>
+                <FlagDialog
+                  :visible="flaggingCommentId === reply.id"
+                  content-type="comment"
+                  :content-id="reply.id"
+                  @close="closeFlagDialog"
+                  @flagged="closeFlagDialog"
+                />
               </template>
             </div>
           </div>

@@ -4,6 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
 import BlogComments from '../components/BlogComments.vue'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
+import FlagDialog from '../components/FlagDialog.vue'
+import { user } from '@/stores/user.js'
+import { moderationStore } from '@/stores/moderation.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -67,6 +70,26 @@ function goBack() {
   router.back()
 }
 
+const showFlagDialog = ref(false)
+const isBlocking = ref(false)
+
+const isOwnPost = computed(() => post.value && post.value.author_handle === user.username)
+const isBlocked = computed(() => post.value && moderationStore.isBlocked(post.value.author_id))
+
+async function blockAuthor() {
+  if (!post.value?.author_id) return
+  isBlocking.value = true
+  try {
+    const res = await authFetch(`/api/moderation/block/${post.value.author_id}`, { method: 'POST' })
+    if (res.ok) {
+      moderationStore.addBlock(post.value.author_id)
+      router.back()
+    }
+  } finally {
+    isBlocking.value = false
+  }
+}
+
 onMounted(() => {
   fetchPost()
 })
@@ -100,7 +123,21 @@ onMounted(() => {
           <span class="author-handle">@{{ post.author_handle }}</span>
         </div>
         <span class="view-profile-link">View Profile</span>
+        <div v-if="!isOwnPost" class="post-moderation-actions" @click.stop>
+          <button class="mod-btn flag-btn" @click="showFlagDialog = true" title="Report this post">Flag</button>
+          <button class="mod-btn block-btn" @click="blockAuthor" :disabled="isBlocking || isBlocked" title="Block this user">
+            {{ isBlocked ? 'Blocked' : 'Block User' }}
+          </button>
+        </div>
       </div>
+
+      <FlagDialog
+        :visible="showFlagDialog"
+        content-type="post"
+        :content-id="post.id"
+        @close="showFlagDialog = false"
+        @flagged="goBack"
+      />
 
       <!-- Post content -->
       <article class="blog-post">
