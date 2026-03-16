@@ -9,7 +9,7 @@ const SECRET_KEY = process.env.SECRET_KEY;
 
 // Authentication middleware
 const authenticate = async (req, res, next) => {
-  const token = req.cookies.jwtToken;
+  const token = req.cookies.jwtToken || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.substring(7) : null);
   if (!token) {
     return res.status(401).json({ message: 'Not authenticated' });
   }
