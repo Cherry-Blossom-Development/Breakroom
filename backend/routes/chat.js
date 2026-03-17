@@ -876,4 +876,106 @@ router.delete('/rooms/:roomId/leave', authenticateToken, async (req, res) => {
   }
 });
 
+// Edit a message (author only, text content only)
+router.put('/rooms/:roomId/messages/:messageId', authenticateToken, async (req, res) => {
+  const { roomId, messageId } = req.params;
+  const { message } = req.body;
+
+  if (!message || message.trim().length === 0) {
+    return res.status(400).json({ message: 'Message cannot be empty' });
+  }
+
+  if (message.length > 1000) {
+    return res.status(400).json({ message: 'Message cannot exceed 1000 characters' });
+  }
+
+  const client = await getClient();
+  try {
+    const existing = await client.query(
+      'SELECT user_id FROM chat_messages WHERE id = $1 AND room_id = $2 AND is_hidden = FALSE',
+      [messageId, roomId]
+    );
+
+    if (existing.rowCount === 0) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    if (existing.rows[0].user_id !== req.user.id) {
+      return res.status(403).json({ message: 'You can only edit your own messages' });
+    }
+
+    await client.query(
+      'UPDATE chat_messages SET message = $1 WHERE id = $2',
+      [message.trim(), messageId]
+    );
+
+    const updated = await client.query(
+      `SELECT m.id, m.message, m.image_path, m.video_path, m.created_at,
+              u.id as user_id, u.handle
+       FROM chat_messages m
+       JOIN users u ON m.user_id = u.id
+       WHERE m.id = $1`,
+      [messageId]
+    );
+
+    const messageData = updated.rows[0];
+
+    const io = getIO();
+    if (io) {
+      io.to(`room_${roomId}`).emit('message_edited', {
+        roomId: parseInt(roomId),
+        message: messageData
+      });
+    }
+
+    res.status(200).json({ message: messageData });
+  } catch (err) {
+    console.error('Error editing message:', err);
+    res.status(500).json({ message: 'Failed to edit message' });
+  } finally {
+    client.release();
+  }
+});
+
+// Delete a message (author only, soft delete)
+router.delete('/rooms/:roomId/messages/:messageId', authenticateToken, async (req, res) => {
+  const { roomId, messageId } = req.params;
+
+  const client = await getClient();
+  try {
+    const existing = await client.query(
+      'SELECT user_id FROM chat_messages WHERE id = $1 AND room_id = $2 AND is_hidden = FALSE',
+      [messageId, roomId]
+    );
+
+    if (existing.rowCount === 0) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    if (existing.rows[0].user_id !== req.user.id) {
+      return res.status(403).json({ message: 'You can only delete your own messages' });
+    }
+
+    await client.query(
+      'UPDATE chat_messages SET is_hidden = TRUE WHERE id = $1',
+      [messageId]
+    );
+
+    const io = getIO();
+    if (io) {
+      io.to(`room_${roomId}`).emit('message_deleted', {
+        roomId: parseInt(roomId),
+        messageId: parseInt(messageId)
+      });
+    }
+
+    res.status(200).json({ message: 'Message deleted' });
+  } catch (err) {
+    console.error('Error deleting message:', err);
+    res.status(500).json({ message: 'Failed to delete message' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;

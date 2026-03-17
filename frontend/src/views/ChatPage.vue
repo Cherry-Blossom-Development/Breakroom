@@ -136,6 +136,40 @@ const isOwnMessage = (handle) => {
 }
 
 const flaggingMessageId = ref(null)
+const editingMessageId = ref(null)
+const editText = ref('')
+const deletingMessageId = ref(null)
+
+const startEdit = (msg) => {
+  editingMessageId.value = msg.id
+  editText.value = msg.message
+  deletingMessageId.value = null
+}
+
+const cancelEdit = () => {
+  editingMessageId.value = null
+  editText.value = ''
+}
+
+const saveEdit = async (messageId) => {
+  const text = editText.value.trim()
+  if (!text) return
+  try {
+    await chat.editMessage(messageId, text)
+    cancelEdit()
+  } catch {
+    // error shown via chat.error
+  }
+}
+
+const confirmDelete = async (messageId) => {
+  deletingMessageId.value = null
+  try {
+    await chat.deleteMessage(messageId)
+  } catch {
+    // error shown via chat.error
+  }
+}
 
 // Get image URL
 const getImageUrl = (imagePath) => {
@@ -293,12 +327,31 @@ onUnmounted(() => {
             <div class="message-header">
               <span class="message-author">{{ msg.handle }}</span>
               <span class="message-time">{{ formatTime(msg.created_at) }}</span>
+              <!-- Own message: edit / delete (with inline delete confirm) -->
+              <template v-if="isOwnMessage(msg.handle)">
+                <template v-if="deletingMessageId === msg.id">
+                  <span class="delete-confirm-text">Delete?</span>
+                  <button class="msg-action-btn confirm-yes" @click="confirmDelete(msg.id)">Yes</button>
+                  <button class="msg-action-btn confirm-no" @click="deletingMessageId = null">No</button>
+                </template>
+                <template v-else>
+                  <button v-if="msg.message" class="msg-action-btn" @click="startEdit(msg)" title="Edit message">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="10" height="10"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  </button>
+                  <button class="msg-action-btn msg-delete-btn" @click="deletingMessageId = msg.id" title="Delete message">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="10" height="10"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                  </button>
+                </template>
+              </template>
+              <!-- Other users' messages: flag -->
               <button
-                v-if="!isOwnMessage(msg.handle)"
+                v-else
                 class="flag-icon-btn"
                 @click="flaggingMessageId = msg.id"
                 title="Report this message"
-              >⚑</button>
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+              </button>
             </div>
             <div v-if="msg.image_path" class="message-image">
               <a :href="getImageUrl(msg.image_path)" target="_blank">
@@ -310,7 +363,23 @@ onUnmounted(() => {
                 Your browser does not support video playback.
               </video>
             </div>
-            <div v-if="msg.message" class="message-content">{{ msg.message }}</div>
+            <div v-if="msg.message" class="message-content">
+              <template v-if="editingMessageId === msg.id">
+                <input
+                  v-model="editText"
+                  @keyup.enter="saveEdit(msg.id)"
+                  @keyup.escape="cancelEdit"
+                  class="edit-input"
+                  maxlength="1000"
+                  autofocus
+                />
+                <div class="edit-actions">
+                  <button @click="saveEdit(msg.id)" class="edit-save-btn">Save</button>
+                  <button @click="cancelEdit" class="edit-cancel-btn">Cancel</button>
+                </div>
+              </template>
+              <template v-else>{{ msg.message }}</template>
+            </div>
             <FlagDialog
               :visible="flaggingMessageId === msg.id"
               content-type="chat_message"
@@ -517,14 +586,111 @@ onUnmounted(() => {
   border: none;
   padding: 0 0 0 6px;
   cursor: pointer;
-  font-size: 0.85em;
   color: var(--color-text-muted);
   opacity: 0.45;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
 }
 
 .flag-icon-btn:hover {
   opacity: 0.8;
+}
+
+.msg-action-btn {
+  background: none;
+  border: none;
+  padding: 0 0 0 4px;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.4;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+}
+
+.msg-action-btn:hover {
+  opacity: 0.85;
+}
+
+.msg-delete-btn:hover {
+  color: var(--color-error, #ff3b30);
+}
+
+.delete-confirm-text {
+  font-size: 0.8em;
+  margin-left: 4px;
+  color: var(--color-error, #ff3b30);
+  opacity: 0.9;
+}
+
+.confirm-yes {
+  font-size: 0.8em;
+  color: var(--color-error, #ff3b30);
+  opacity: 0.9;
+}
+
+.confirm-no {
+  font-size: 0.8em;
+  opacity: 0.7;
+}
+
+.edit-input {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--color-accent);
+  border-radius: 6px;
+  font-size: inherit;
+  background: var(--color-background-input);
+  color: var(--color-text);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.message.own .edit-input {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.6);
+  color: white;
+}
+
+.message.own .edit-input::placeholder {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.edit-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.edit-save-btn {
+  padding: 2px 10px;
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85em;
+}
+
+.message.own .edit-save-btn {
+  background: rgba(255, 255, 255, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.edit-cancel-btn {
+  padding: 2px 10px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85em;
+  color: var(--color-text);
+}
+
+.message.own .edit-cancel-btn {
+  border-color: rgba(255, 255, 255, 0.4);
+  color: white;
 }
 
 .message-content {

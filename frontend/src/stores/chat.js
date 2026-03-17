@@ -82,6 +82,21 @@ function getSocket() {
       state.typingUsers = state.typingUsers.filter(u => u !== data.user)
     })
 
+    state.socket.on('message_edited', (data) => {
+      if (data.roomId === state.currentRoom) {
+        const idx = state.messages.findIndex(m => m.id === data.message.id)
+        if (idx !== -1) {
+          state.messages[idx] = data.message
+        }
+      }
+    })
+
+    state.socket.on('message_deleted', (data) => {
+      if (data.roomId === state.currentRoom) {
+        state.messages = state.messages.filter(m => m.id !== data.messageId)
+      }
+    })
+
     state.socket.on('error', (data) => {
       console.error('Socket error:', data.message)
       state.error = data.message
@@ -526,6 +541,50 @@ export const chat = reactive({
       }
       const data = await res.json()
       return data
+    } catch (err) {
+      state.error = err.message
+      throw err
+    }
+  },
+
+  // Edit a message
+  async editMessage(messageId, newText) {
+    if (!state.currentRoom) return
+    try {
+      const res = await authFetch(`/api/chat/rooms/${state.currentRoom}/messages/${messageId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: newText })
+      })
+      if (!res.ok) {
+        const error = await res.json()
+        throw new Error(error.message || 'Failed to edit message')
+      }
+      const data = await res.json()
+      // Update locally in case socket event is slow
+      const idx = state.messages.findIndex(m => m.id === messageId)
+      if (idx !== -1) {
+        state.messages[idx] = data.message
+      }
+    } catch (err) {
+      state.error = err.message
+      throw err
+    }
+  },
+
+  // Delete a message
+  async deleteMessage(messageId) {
+    if (!state.currentRoom) return
+    try {
+      const res = await authFetch(`/api/chat/rooms/${state.currentRoom}/messages/${messageId}`, {
+        method: 'DELETE'
+      })
+      if (!res.ok) {
+        const error = await res.json()
+        throw new Error(error.message || 'Failed to delete message')
+      }
+      // Remove locally in case socket event is slow
+      state.messages = state.messages.filter(m => m.id !== messageId)
     } catch (err) {
       state.error = err.message
       throw err
