@@ -293,6 +293,12 @@ onUnmounted(() => {
             <div class="message-header">
               <span class="message-author">{{ msg.handle }}</span>
               <span class="message-time">{{ formatTime(msg.created_at) }}</span>
+              <button
+                v-if="!isOwnMessage(msg.handle)"
+                class="flag-icon-btn"
+                @click="flaggingMessageId = msg.id"
+                title="Report this message"
+              >⚑</button>
             </div>
             <div v-if="msg.image_path" class="message-image">
               <a :href="getImageUrl(msg.image_path)" target="_blank">
@@ -305,12 +311,6 @@ onUnmounted(() => {
               </video>
             </div>
             <div v-if="msg.message" class="message-content">{{ msg.message }}</div>
-            <button
-              v-if="!isOwnMessage(msg.handle)"
-              class="flag-msg-btn"
-              @click="flaggingMessageId = msg.id"
-              title="Report this message"
-            >Flag</button>
             <FlagDialog
               :visible="flaggingMessageId === msg.id"
               content-type="chat_message"
@@ -510,6 +510,21 @@ onUnmounted(() => {
 
 .message-time {
   margin-left: 10px;
+}
+
+.flag-icon-btn {
+  background: none;
+  border: none;
+  padding: 0 0 0 6px;
+  cursor: pointer;
+  font-size: 0.85em;
+  color: var(--color-text-muted);
+  opacity: 0.45;
+  line-height: 1;
+}
+
+.flag-icon-btn:hover {
+  opacity: 0.8;
 }
 
 .message-content {
