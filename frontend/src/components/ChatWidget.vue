@@ -2,6 +2,8 @@
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { io } from 'socket.io-client'
 import LoadingSpinner from './LoadingSpinner.vue'
+import FlagDialog from './FlagDialog.vue'
+import { user } from '@/stores/user.js'
 
 const props = defineProps({
   roomId: {
@@ -26,6 +28,10 @@ const hasOlderMessages = ref(false)
 const isLoadingOlderMessages = ref(false)
 const oldestMessageDate = ref(null)
 const isPrepending = ref(false)
+
+const flaggingMessageId = ref(null)
+
+const isOwnMessage = (handle) => handle === user.username
 
 const attachBtnRef = ref(null)
 const attachMenuStyle = ref({})
@@ -437,7 +443,17 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
         >
           <div class="message-header">
             <span class="username">{{ msg.handle }}</span>
-            <span class="time">{{ formatTime(msg.created_at) }}</span>
+            <div class="msg-header-right">
+              <span class="time">{{ formatTime(msg.created_at) }}</span>
+              <button
+                v-if="!isOwnMessage(msg.handle)"
+                class="flag-icon-btn"
+                @click="flaggingMessageId = msg.id"
+                title="Report this message"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
+              </button>
+            </div>
           </div>
           <div v-if="msg.image_path" class="message-image">
             <a :href="getImageUrl(msg.image_path)" target="_blank">
@@ -450,6 +466,13 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
             </video>
           </div>
           <div v-if="msg.message" class="message-content">{{ msg.message }}</div>
+          <FlagDialog
+            :visible="flaggingMessageId === msg.id"
+            content-type="chat_message"
+            :content-id="msg.id"
+            @close="flaggingMessageId = null"
+            @flagged="flaggingMessageId = null"
+          />
         </div>
       </div>
 
@@ -580,6 +603,12 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   margin-bottom: 4px;
 }
 
+.msg-header-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .username {
   font-weight: 600;
   font-size: 0.8rem;
@@ -589,6 +618,27 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
 .time {
   font-size: 0.7rem;
   color: var(--color-text-light);
+}
+
+.flag-icon-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  opacity: 0;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  transition: opacity 0.15s;
+}
+
+.message:hover .flag-icon-btn {
+  opacity: 0.45;
+}
+
+.flag-icon-btn:hover {
+  opacity: 0.85 !important;
 }
 
 .message-content {
