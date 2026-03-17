@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { RouterLink, useRouter, useRoute } from 'vue-router'
 import { user } from '@/stores/user.js'
 import { chat } from '@/stores/chat.js'
@@ -29,6 +29,23 @@ const newRoomName = ref('')
 const newRoomDescription = ref('')
 const editingRoom = ref(null)
 const formError = ref('')
+
+// Room context menu
+const openRoomMenuId = ref(null)
+
+function toggleRoomMenu(roomId) {
+  openRoomMenuId.value = openRoomMenuId.value === roomId ? null : roomId
+}
+
+function closeRoomMenu() {
+  openRoomMenuId.value = null
+}
+
+function handleOutsideClick(e) {
+  if (!e.target.closest('.room-menu-wrapper')) {
+    closeRoomMenu()
+  }
+}
 
 // Invite on create state
 const inviteSearch = ref('')
@@ -63,6 +80,11 @@ onMounted(async () => {
   if (isOnChatPage.value) {
     await initChat()
   }
+  document.addEventListener('click', handleOutsideClick)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleOutsideClick)
 })
 
 async function initChat() {
@@ -322,13 +344,27 @@ function handleNavClick() {
             @click="selectRoom(room)"
           >
             <span class="room-name"># {{ room.name }}</span>
-            <div class="room-actions" @click.stop>
-              <template v-if="chat.isRoomOwner(room)">
-                <button @click="openInviteModal(room)" class="room-action-btn" title="Invite">Inv</button>
-                <button @click="openEditModal(room)" class="room-action-btn" title="Edit">Ed</button>
-                <button @click="deleteRoom(room)" class="room-action-btn delete" title="Delete">Del</button>
-              </template>
-              <button @click="leaveRoom(room)" class="room-action-btn leave" title="Leave">Leave</button>
+            <div class="room-menu-wrapper" @click.stop>
+              <button
+                class="room-menu-btn"
+                :class="{ open: openRoomMenuId === room.id }"
+                @click="toggleRoomMenu(room.id)"
+                title="Options"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                  <circle cx="12" cy="5" r="1.5"/>
+                  <circle cx="12" cy="12" r="1.5"/>
+                  <circle cx="12" cy="19" r="1.5"/>
+                </svg>
+              </button>
+              <div v-if="openRoomMenuId === room.id" class="room-dropdown">
+                <template v-if="chat.isRoomOwner(room)">
+                  <button @click="openInviteModal(room); closeRoomMenu()" class="room-dropdown-item">Invite</button>
+                  <button @click="openEditModal(room); closeRoomMenu()" class="room-dropdown-item">Edit</button>
+                  <button @click="deleteRoom(room); closeRoomMenu()" class="room-dropdown-item danger">Delete</button>
+                </template>
+                <button @click="leaveRoom(room); closeRoomMenu()" class="room-dropdown-item warn">Leave</button>
+              </div>
             </div>
           </div>
 
@@ -717,36 +753,68 @@ function handleNavClick() {
   text-overflow: ellipsis;
 }
 
-.room-actions {
-  display: none;
-  gap: 3px;
+.room-menu-wrapper {
+  position: relative;
   flex-shrink: 0;
 }
 
-.room-item:hover .room-actions {
-  display: flex;
-}
-
-.room-action-btn {
-  background: rgba(255, 255, 255, 0.1);
+.room-menu-btn {
+  display: none;
+  background: none;
   border: none;
-  color: white;
+  color: rgba(255, 255, 255, 0.5);
   cursor: pointer;
-  padding: 2px 6px;
-  font-size: 0.65rem;
+  padding: 2px 3px;
   border-radius: 3px;
+  line-height: 1;
 }
 
-.room-action-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
+.room-item:hover .room-menu-btn,
+.room-menu-btn.open {
+  display: flex;
+  align-items: center;
 }
 
-.room-action-btn.delete:hover {
-  background: var(--color-error);
+.room-menu-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
 }
 
-.room-action-btn.leave:hover {
-  background: rgba(255, 180, 0, 0.5);
+.room-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 2px);
+  background: var(--color-background-card);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  min-width: 110px;
+  z-index: 100;
+  overflow: hidden;
+}
+
+.room-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 8px 14px;
+  background: none;
+  border: none;
+  color: var(--color-text);
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.room-dropdown-item:hover {
+  background: var(--color-background-hover);
+}
+
+.room-dropdown-item.danger {
+  color: var(--color-error, #ff3b30);
+}
+
+.room-dropdown-item.warn {
+  color: var(--color-warning, #f0a500);
 }
 
 .create-room-btn {
