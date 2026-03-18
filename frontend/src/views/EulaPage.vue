@@ -293,7 +293,6 @@ import { notificationStore } from '@/stores/notification.js'
 const showAcceptBanner = ref(false)
 const accepted = ref(false)
 const accepting = ref(false)
-const notificationId = ref(null)
 
 onMounted(async () => {
   if (!user.username) return
@@ -302,7 +301,6 @@ onMounted(async () => {
     if (!res.ok) return
     const data = await res.json()
     accepted.value = data.accepted
-    notificationId.value = data.notificationId
     showAcceptBanner.value = true
   } catch (err) {
     console.error('Failed to fetch EULA status:', err)
@@ -310,11 +308,20 @@ onMounted(async () => {
 })
 
 async function acceptTerms() {
-  if (!notificationId.value) return
   accepting.value = true
   try {
-    await notificationStore.dismissNotification(notificationId.value)
-    accepted.value = true
+    const res = await fetch('/api/eula/accept', {
+      method: 'POST',
+      credentials: 'include'
+    })
+    if (res.ok) {
+      accepted.value = true
+      // Dismiss the popup if it's currently showing
+      if (notificationStore.currentPopup?.event_type === 'eula_required') {
+        notificationStore.currentPopup = null
+        notificationStore.showNextPopup()
+      }
+    }
   } catch (err) {
     console.error('Failed to accept EULA:', err)
   } finally {
