@@ -33,6 +33,17 @@ const flaggingMessageId = ref(null)
 const editingMessageId = ref(null)
 const editText = ref('')
 const deletingMessageId = ref(null)
+const openMenuId = ref(null)
+
+const toggleMsgMenu = (id) => {
+  openMenuId.value = openMenuId.value === id ? null : id
+}
+
+const handleMsgMenuOutsideClick = (e) => {
+  if (!e.target.closest('.msg-menu-wrapper')) {
+    openMenuId.value = null
+  }
+}
 
 const isOwnMessage = (handle) => handle === user.username
 
@@ -442,9 +453,11 @@ onMounted(async () => {
   setupSocket()
   await nextTick()
   messagesContainer.value?.addEventListener('scroll', handleScroll)
+  document.addEventListener('click', handleMsgMenuOutsideClick)
 })
 
 onUnmounted(() => {
+  document.removeEventListener('click', handleMsgMenuOutsideClick)
   messagesContainer.value?.removeEventListener('scroll', handleScroll)
   cleanupSocket()
 })
@@ -502,30 +515,24 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
             <span class="username">{{ msg.handle }}</span>
             <div class="msg-header-right">
               <span class="time">{{ formatTime(msg.created_at) }}</span>
-              <template v-if="isOwnMessage(msg.handle)">
-                <template v-if="deletingMessageId === msg.id">
-                  <span class="delete-confirm-text">Delete?</span>
-                  <button class="msg-action-btn confirm-yes" @click="confirmDelete(msg.id)">Yes</button>
-                  <button class="msg-action-btn confirm-no" @click="deletingMessageId = null">No</button>
-                </template>
-                <template v-else>
-                  <button v-if="msg.message" class="msg-action-btn" @click="startEdit(msg)" title="Edit message">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                  </button>
-                  <button class="msg-action-btn msg-delete-btn" @click="deletingMessageId = msg.id" title="Delete message">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-                  </button>
-                </template>
-              </template>
-              <button
-                v-else
-                class="flag-icon-btn"
-                @click="flaggingMessageId = msg.id"
-                title="Report this message"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
-              </button>
+              <div class="msg-menu-wrapper" @click.stop>
+                <button class="msg-menu-btn" @click="toggleMsgMenu(msg.id)" title="Message options">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+                </button>
+                <div v-if="openMenuId === msg.id" class="msg-dropdown">
+                  <template v-if="isOwnMessage(msg.handle)">
+                    <button v-if="msg.message" class="msg-dropdown-item" @click="startEdit(msg); openMenuId = null">Edit</button>
+                    <button class="msg-dropdown-item danger" @click="deletingMessageId = msg.id; openMenuId = null">Delete</button>
+                  </template>
+                  <button v-else class="msg-dropdown-item danger" @click="flaggingMessageId = msg.id; openMenuId = null">Report</button>
+                </div>
+              </div>
             </div>
+          </div>
+          <div v-if="deletingMessageId === msg.id" class="delete-confirm-bar">
+            Delete this message?
+            <button @click="confirmDelete(msg.id)" class="delete-confirm-yes">Yes, delete</button>
+            <button @click="deletingMessageId = null" class="delete-confirm-no">Cancel</button>
           </div>
           <div v-if="msg.image_path" class="message-image">
             <a :href="getImageUrl(msg.image_path)" target="_blank">
@@ -708,67 +715,107 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   color: var(--color-text-light);
 }
 
-.flag-icon-btn {
+.msg-menu-wrapper {
+  position: relative;
+}
+
+.msg-menu-btn {
   background: none;
   border: none;
-  padding: 0;
+  padding: 1px 2px;
   cursor: pointer;
   color: var(--color-text-muted);
   opacity: 0;
   line-height: 1;
   display: inline-flex;
   align-items: center;
+  border-radius: 3px;
   transition: opacity 0.15s;
 }
 
-.message:hover .flag-icon-btn {
+.message:hover .msg-menu-btn {
   opacity: 0.45;
 }
 
-.flag-icon-btn:hover {
-  opacity: 0.85 !important;
+.msg-menu-btn:hover {
+  opacity: 1 !important;
+  background: var(--color-background-hover);
 }
 
-.msg-action-btn {
+.msg-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 2px);
+  background: var(--color-background-card);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  min-width: 110px;
+  z-index: 100;
+  overflow: hidden;
+}
+
+.msg-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 7px 12px;
   background: none;
   border: none;
-  padding: 0 0 0 4px;
+  text-align: left;
+  font-size: 0.82em;
+  color: var(--color-text);
   cursor: pointer;
-  color: var(--color-text-muted);
-  opacity: 0;
-  line-height: 1;
-  display: inline-flex;
+  white-space: nowrap;
+}
+
+.msg-dropdown-item:hover {
+  background: var(--color-background-hover);
+}
+
+.msg-dropdown-item.danger {
+  color: var(--color-error, #ff3b30);
+}
+
+.msg-dropdown-item.danger:hover {
+  background: var(--color-error-bg, rgba(255, 59, 48, 0.08));
+}
+
+.delete-confirm-bar {
+  display: flex;
   align-items: center;
-}
-
-.message:hover .msg-action-btn {
-  opacity: 0.4;
-}
-
-.msg-action-btn:hover {
-  opacity: 0.85 !important;
-}
-
-.msg-delete-btn:hover {
+  gap: 6px;
+  font-size: 0.75em;
   color: var(--color-error, #ff3b30);
+  margin-bottom: 4px;
+  flex-wrap: wrap;
 }
 
-.delete-confirm-text {
-  font-size: 0.8em;
-  margin-left: 4px;
-  color: var(--color-error, #ff3b30);
-  opacity: 0.9;
+.delete-confirm-yes {
+  padding: 1px 8px;
+  background: var(--color-error, #ff3b30);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
 }
 
-.confirm-yes {
-  font-size: 0.8em;
-  color: var(--color-error, #ff3b30);
-  opacity: 0.9 !important;
+.delete-confirm-yes:hover {
+  opacity: 0.85;
 }
 
-.confirm-no {
-  font-size: 0.8em;
-  opacity: 0.7 !important;
+.delete-confirm-no {
+  padding: 1px 8px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+  color: var(--color-text);
+}
+
+.delete-confirm-no:hover {
+  background: var(--color-background-hover);
 }
 
 .edit-input {
