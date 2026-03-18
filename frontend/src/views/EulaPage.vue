@@ -15,7 +15,7 @@
     </div>
     <h1>End User License Agreement</h1>
     <p class="app-subtitle">Prosaurus — prosaurus.com</p>
-    <p class="effective-date">Effective Date: March 14, 2026</p>
+    <p class="effective-date">Effective Date: March 18, 2026</p>
 
     <p class="intro">
       This End User License Agreement ("EULA" or "Agreement") is a legal agreement between you
@@ -174,7 +174,39 @@
     </div>
 
     <div class="section">
-      <h2>7. Enforcement and Account Termination</h2>
+      <h2>7. Automated Content Moderation</h2>
+      <p>
+        To help maintain a safe environment, the Service uses automated tools to review user-submitted
+        content for violations of this Agreement. These tools include:
+      </p>
+      <ul>
+        <li>
+          <strong>Keyword filtering</strong> — content is scanned against a list of prohibited terms
+          maintained by Cherry Blossom Development LLC.
+        </li>
+        <li>
+          <strong>OpenAI Moderation API</strong> — content is submitted to OpenAI's moderation
+          service, which analyzes text for hate speech, harassment, sexual content, violence, and
+          related categories. This processing is performed by OpenAI, L.L.C., a third-party service
+          provider, and is subject to
+          <a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noopener">OpenAI's Privacy Policy</a>.
+        </li>
+      </ul>
+      <p>
+        Content flagged by either system may be automatically hidden and queued for human review.
+        Automated moderation is not perfect — false positives can occur. If you believe your content
+        was incorrectly removed, you may contact us at
+        <a href="mailto:abuse@cherryblossomdevelopment.com">abuse@cherryblossomdevelopment.com</a>
+        to request a review.
+      </p>
+      <p>
+        By using the Service, you consent to your user-submitted content being processed by these
+        automated systems as described above.
+      </p>
+    </div>
+
+    <div class="section">
+      <h2>8. Enforcement and Account Termination</h2>
       <p>
         Cherry Blossom Development LLC reserves the right to suspend or permanently terminate any account,
         at any time and without prior notice, for any violation of this Agreement or for any conduct we
@@ -196,7 +228,7 @@
     </div>
 
     <div class="section">
-      <h2>8. Disclaimer of Warranties</h2>
+      <h2>9. Disclaimer of Warranties</h2>
       <p>
         The Service is provided "as is" and "as available," without warranties of any kind, express or
         implied. To the fullest extent permitted by law, Cherry Blossom Development LLC disclaims all
@@ -207,7 +239,7 @@
     </div>
 
     <div class="section">
-      <h2>9. Limitation of Liability</h2>
+      <h2>10. Limitation of Liability</h2>
       <p>
         To the maximum extent permitted by applicable law, Cherry Blossom Development LLC and its
         officers, directors, employees, and agents shall not be liable for any indirect, incidental,
@@ -219,7 +251,7 @@
     </div>
 
     <div class="section">
-      <h2>10. Governing Law</h2>
+      <h2>11. Governing Law</h2>
       <p>
         This Agreement is governed by and construed in accordance with the laws of the State of
         Washington, United States, without regard to its conflict-of-law provisions. Any disputes
@@ -229,7 +261,7 @@
     </div>
 
     <div class="section">
-      <h2>11. Changes to This Agreement</h2>
+      <h2>12. Changes to This Agreement</h2>
       <p>
         We may update this EULA at any time. When we make material changes, we will update the
         effective date at the top of this page. Your continued use of the Service after any changes
@@ -239,7 +271,7 @@
     </div>
 
     <div class="section">
-      <h2>12. Contact Us</h2>
+      <h2>13. Contact Us</h2>
       <p>
         If you have questions or concerns about this Agreement, please contact us:
       </p>
