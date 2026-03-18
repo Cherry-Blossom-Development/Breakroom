@@ -268,16 +268,14 @@ const formatTime = (timestamp) => {
                   date.getMonth() === today.getMonth() &&
                   date.getDate() === today.getDate()
 
-  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 
   if (isToday) {
     return time
   }
 
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const year = date.getFullYear()
-  return `${month}/${day}/${year} - ${time}`
+  const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  return `${dateStr}, ${time}`
 }
 
 // Get image URL
@@ -695,6 +693,7 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   margin-bottom: 4px;
 }
 
@@ -702,17 +701,24 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .username {
   font-weight: 600;
   font-size: 0.8rem;
   color: var(--color-link);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .time {
   font-size: 0.7rem;
   color: var(--color-text-light);
+  white-space: nowrap;
 }
 
 .msg-menu-wrapper {

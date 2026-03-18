@@ -118,16 +118,14 @@ const formatTime = (timestamp) => {
                   date.getMonth() === today.getMonth() &&
                   date.getDate() === today.getDate()
 
-  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 
   if (isToday) {
     return time
   }
 
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  const year = date.getFullYear()
-  return `${month}/${day}/${year} - ${time}`
+  const dateStr = date.toLocaleDateString([], { month: 'short', day: 'numeric' })
+  return `${dateStr}, ${time}`
 }
 
 // Check if message is from current user
@@ -575,6 +573,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   margin-bottom: 5px;
   font-size: 0.75em;
   opacity: 0.8;
@@ -582,16 +581,22 @@ onUnmounted(() => {
 
 .message-author {
   font-weight: bold;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .msg-header-right {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .message-time {
-  margin-left: 0;
+  white-space: nowrap;
 }
 
 .msg-menu-wrapper {
