@@ -11,6 +11,9 @@
         <RouterLink to="/profile/settings" class="nav-tab" :class="{ active: $route.path === '/profile/settings' }">
           Settings
         </RouterLink>
+        <RouterLink to="/profile/legal" class="nav-tab" :class="{ active: $route.path === '/profile/legal' }">
+          Legal
+        </RouterLink>
       </nav>
 
       <main class="main-content">

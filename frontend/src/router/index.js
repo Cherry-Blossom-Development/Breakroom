@@ -19,6 +19,7 @@ import ProfileLayout from '@/views/profile/ProfileLayout.vue'
 import ProfilePage from '@/views/profile/ProfilePage.vue'
 import BillingPage from '@/views/profile/ProfileBilling.vue'
 import SettingsPage from '@/views/profile/ProfileSettings.vue'
+import LegalPage from '@/views/profile/ProfileLegal.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -82,7 +83,8 @@ const router = createRouter({
       children: [
         { path: '', component: ProfilePage },
         { path: 'billing', component: BillingPage },
-        { path: 'settings', component: SettingsPage }
+        { path: 'settings', component: SettingsPage },
+        { path: 'legal', component: LegalPage }
       ]
     },
     {

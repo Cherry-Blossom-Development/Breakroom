@@ -35,7 +35,7 @@ router.get('/status', authenticate, async (req, res) => {
   const client = await getClient();
   try {
     const result = await client.query(
-      `SELECT n.id, n.status
+      `SELECT n.id, n.status, n.updated_at
        FROM notifications n
        JOIN notification_types nt ON n.notif_id = nt.id
        JOIN event_types et ON nt.event_id = et.id
@@ -45,13 +45,15 @@ router.get('/status', authenticate, async (req, res) => {
     );
 
     if (result.rowCount === 0) {
-      return res.json({ accepted: false, notificationId: null });
+      return res.json({ accepted: false, notificationId: null, acceptedAt: null });
     }
 
     const notif = result.rows[0];
+    const accepted = notif.status === 'dismissed';
     res.json({
-      accepted: notif.status === 'dismissed',
-      notificationId: notif.id
+      accepted,
+      notificationId: notif.id,
+      acceptedAt: accepted ? notif.updated_at : null
     });
   } catch (err) {
     console.error('Error fetching EULA status:', err);
