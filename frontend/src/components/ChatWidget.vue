@@ -4,6 +4,7 @@ import { io } from 'socket.io-client'
 import LoadingSpinner from './LoadingSpinner.vue'
 import FlagDialog from './FlagDialog.vue'
 import { user } from '@/stores/user.js'
+import { moderationStore } from '@/stores/moderation.js'
 
 const props = defineProps({
   roomId: {
@@ -85,6 +86,17 @@ const confirmDelete = async (messageId) => {
     if (!res.ok) throw new Error('Failed to delete message')
   } catch (err) {
     error.value = err.message
+  }
+}
+
+const blockUser = async (msg) => {
+  if (!msg.user_id) return
+  if (moderationStore.isBlocked(msg.user_id)) {
+    const res = await fetch(`/api/moderation/block/${msg.user_id}`, { method: 'DELETE', credentials: 'include' })
+    if (res.ok) moderationStore.removeBlock(msg.user_id)
+  } else {
+    const res = await fetch(`/api/moderation/block/${msg.user_id}`, { method: 'POST', credentials: 'include' })
+    if (res.ok) moderationStore.addBlock(msg.user_id)
   }
 }
 
@@ -522,7 +534,10 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
                     <button v-if="msg.message" class="msg-dropdown-item" @click="startEdit(msg); openMenuId = null">Edit</button>
                     <button class="msg-dropdown-item danger" @click="deletingMessageId = msg.id; openMenuId = null">Delete</button>
                   </template>
-                  <button v-else class="msg-dropdown-item danger" @click="flaggingMessageId = msg.id; openMenuId = null">Report</button>
+                  <template v-else>
+                    <button class="msg-dropdown-item danger" @click="flaggingMessageId = msg.id; openMenuId = null">Report</button>
+                    <button class="msg-dropdown-item danger" @click="blockUser(msg); openMenuId = null">{{ moderationStore.isBlocked(msg.user_id) ? 'Unblock User' : 'Block User' }}</button>
+                  </template>
                 </div>
               </div>
             </div>
