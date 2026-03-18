@@ -336,7 +336,7 @@ onUnmounted(() => {
             :class="{ own: isOwnMessage(msg.handle) }"
           >
             <div class="message-header">
-              <span class="message-author">{{ msg.handle }}</span>
+              <RouterLink :to="`/user/${msg.handle}`" class="message-author">{{ msg.handle }}</RouterLink>
               <div class="msg-header-right">
                 <span class="message-time">{{ formatTime(msg.created_at) }}</span>
                 <div class="msg-menu-wrapper" @click.stop>
@@ -586,6 +586,12 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: inherit;
+  text-decoration: none;
+}
+
+.message-author:hover {
+  text-decoration: underline;
 }
 
 .msg-header-right {

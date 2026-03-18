@@ -510,7 +510,7 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
           class="message"
         >
           <div class="message-header">
-            <span class="username">{{ msg.handle }}</span>
+            <RouterLink :to="`/user/${msg.handle}`" class="username">{{ msg.handle }}</RouterLink>
             <div class="msg-header-right">
               <span class="time">{{ formatTime(msg.created_at) }}</span>
               <div class="msg-menu-wrapper" @click.stop>
@@ -713,6 +713,11 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-decoration: none;
+}
+
+.username:hover {
+  text-decoration: underline;
 }
 
 .time {
