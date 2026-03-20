@@ -5,8 +5,8 @@
 CREATE TABLE breakroom_blocks (
   id INT AUTO_INCREMENT PRIMARY KEY,
   user_id INT NOT NULL,
-  block_type VARCHAR(32) NOT NULL,    -- 'chat', 'placeholder', future: 'notes', 'blog', etc.
-  content_id INT NULL,                 -- e.g., chat_room id (null for placeholder)
+  block_type VARCHAR(32) NOT NULL,    -- 'chat', 'updates', 'calendar', 'weather', 'news', 'blog'
+  content_id INT NULL,                 -- e.g., chat_room id
   x INT NOT NULL DEFAULT 0,            -- grid column position
   y INT NOT NULL DEFAULT 0,            -- grid row position
   w INT NOT NULL DEFAULT 1,            -- width in grid units
