@@ -161,12 +161,18 @@
     <div class="section">
       <h2>6. Reporting Violations</h2>
       <p>
-        If you encounter content or behavior that violates this Agreement, please report it immediately.
-        We take all reports seriously and investigate promptly. You can reach us at:
+        If you encounter content or behavior that violates this Agreement, please report it immediately
+        using the in-app reporting tools or by contacting us at:
       </p>
       <address>
         <a href="mailto:abuse@cherryblossomdevelopment.com">abuse@cherryblossomdevelopment.com</a>
       </address>
+      <p>
+        <strong>When content is reported or detected by our automated systems, it is immediately hidden
+        from all users pending review.</strong> Users never see reported content while awaiting moderation.
+        Our team reviews flagged content to confirm removal and take action against repeat offenders,
+        including permanent account termination.
+      </p>
       <p>
         Reports submitted in good faith will be treated confidentially. We do not tolerate retaliation
         against users who report violations.
