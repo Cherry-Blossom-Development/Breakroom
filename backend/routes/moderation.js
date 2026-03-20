@@ -23,8 +23,19 @@ const VALID_CONTENT_TYPES = ['post', 'comment', 'chat_message', 'artwork', 'lyri
 // Auth middleware
 // =====================================
 
+// Helper to extract JWT from cookie or Authorization header (for mobile support)
+function extractToken(req) {
+  // First check Authorization header (mobile clients)
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.substring(7);
+  }
+  // Fall back to cookie (web clients)
+  return req.cookies.jwtToken;
+}
+
 const authenticate = async (req, res, next) => {
-  const token = req.cookies.jwtToken;
+  const token = extractToken(req);
   if (!token) return res.status(401).json({ message: 'Not authenticated' });
   try {
     const payload = jwt.verify(token, SECRET_KEY);
