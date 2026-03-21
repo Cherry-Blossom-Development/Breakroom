@@ -75,6 +75,7 @@ const galleryRoutes = require('./routes/gallery');
 const featuresRoutes = require('./routes/features');
 const eulaRoutes = require('./routes/eula');
 const moderationRoutes = require('./routes/moderation');
+const sessionsRoutes = require('./routes/sessions');
 const { getS3Url } = require('./utilities/aws-s3');
 
 
@@ -112,6 +113,7 @@ app.use('/api/gallery', galleryRoutes);
 app.use('/api/features', featuresRoutes);
 app.use('/api/eula', eulaRoutes);
 app.use('/api/moderation', moderationRoutes);
+app.use('/api/sessions', sessionsRoutes);
 
 // Redirect uploaded file requests to S3
 const handleS3Redirect = (req, res) => {
