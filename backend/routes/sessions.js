@@ -11,7 +11,16 @@ require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
 
-const FIELDS = 'id, name, s3_key, file_size, mime_type, uploaded_at, recorded_at, rating';
+// Base SELECT used in GET / and after POST
+const sessionSelect = (userId) => ({
+  sql: `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at,
+          ROUND(AVG(sr.rating), 1) AS avg_rating,
+          COUNT(sr.rating) AS rating_count,
+          MAX(CASE WHEN sr.user_id = $2 THEN sr.rating END) AS my_rating
+        FROM sessions s
+        LEFT JOIN session_ratings sr ON sr.session_id = s.id`,
+  // caller appends WHERE + GROUP BY
+});
 
 const audioUpload = multer({
   storage: multer.memoryStorage(),
@@ -44,13 +53,21 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
-// GET /api/sessions — list the current user's sessions
+// GET /api/sessions — list the current user's sessions with avg rating
 router.get('/', authenticateToken, async (req, res) => {
   const client = await getClient();
   try {
     const result = await client.query(
-      `SELECT ${FIELDS} FROM sessions WHERE user_id = $1 ORDER BY recorded_at DESC, uploaded_at DESC`,
-      [req.user.id]
+      `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at,
+         ROUND(AVG(sr.rating), 1) AS avg_rating,
+         COUNT(sr.rating) AS rating_count,
+         MAX(CASE WHEN sr.user_id = $2 THEN sr.rating END) AS my_rating
+       FROM sessions s
+       LEFT JOIN session_ratings sr ON sr.session_id = s.id
+       WHERE s.user_id = $1
+       GROUP BY s.id
+       ORDER BY s.recorded_at DESC, s.uploaded_at DESC`,
+      [req.user.id, req.user.id]
     );
     res.json({ sessions: result.rows });
   } catch (err) {
@@ -61,7 +78,7 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/sessions/:id/stream — redirect to S3 URL for audio playback
+// GET /api/sessions/:id/stream — ownership-checked redirect to S3
 router.get('/:id/stream', authenticateToken, async (req, res) => {
   const client = await getClient();
   try {
@@ -99,7 +116,9 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
       [req.user.id, name || 'Untitled Session', s3Key, req.file.size, req.file.mimetype, recorded_at || null]
     );
     const session = await client.query(
-      `SELECT ${FIELDS} FROM sessions WHERE id = $1`,
+      `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at,
+         NULL AS avg_rating, 0 AS rating_count, NULL AS my_rating
+       FROM sessions s WHERE s.id = $1`,
       [insertResult.insertId]
     );
     res.status(201).json({ session: session.rows[0] });
@@ -112,9 +131,50 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
   }
 });
 
-// PATCH /api/sessions/:id — update name, recorded_at, and/or rating
+// POST /api/sessions/:id/rate — upsert the current user's rating (null to clear)
+router.post('/:id/rate', authenticateToken, async (req, res) => {
+  const { rating } = req.body;
+  const client = await getClient();
+  try {
+    // For now, only the session owner can rate; expand when sharing is added
+    const existing = await client.query(
+      'SELECT id FROM sessions WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (existing.rowCount === 0) return res.status(404).json({ message: 'Session not found' });
+
+    if (rating === null || rating === undefined) {
+      await client.query(
+        'DELETE FROM session_ratings WHERE session_id = $1 AND user_id = $2',
+        [req.params.id, req.user.id]
+      );
+    } else {
+      const r = parseInt(rating, 10);
+      if (r < 1 || r > 10) return res.status(400).json({ message: 'Rating must be 1–10' });
+      await client.query(
+        'INSERT INTO session_ratings (session_id, user_id, rating) VALUES ($1, $2, $3) ON DUPLICATE KEY UPDATE rating = $3',
+        [req.params.id, req.user.id, r]
+      );
+    }
+
+    const updated = await client.query(
+      `SELECT ROUND(AVG(rating), 1) AS avg_rating, COUNT(rating) AS rating_count,
+              MAX(CASE WHEN user_id = $2 THEN rating END) AS my_rating
+       FROM session_ratings WHERE session_id = $1`,
+      [req.params.id, req.user.id]
+    );
+    res.json(updated.rows[0]);
+  } catch (err) {
+    console.error('Error saving rating:', err);
+    res.status(500).json({ message: 'Failed to save rating' });
+  } finally {
+    client.release();
+  }
+});
+
+// PATCH /api/sessions/:id — update name and/or recorded_at
 router.patch('/:id', authenticateToken, async (req, res) => {
-  const { name, recorded_at, rating } = req.body;
+  const { name, recorded_at } = req.body;
   const client = await getClient();
   try {
     const existing = await client.query(
@@ -128,18 +188,22 @@ router.patch('/:id', authenticateToken, async (req, res) => {
     let idx = 1;
     if (name !== undefined) { fields.push(`name = $${idx++}`); values.push(name); }
     if (recorded_at !== undefined) { fields.push(`recorded_at = $${idx++}`); values.push(recorded_at || null); }
-    if (rating !== undefined) {
-      const r = rating === null ? null : parseInt(rating, 10);
-      if (r !== null && (r < 1 || r > 10)) return res.status(400).json({ message: 'Rating must be 1–10' });
-      fields.push(`rating = $${idx++}`);
-      values.push(r);
-    }
     if (fields.length === 0) return res.status(400).json({ message: 'Nothing to update' });
 
     values.push(req.params.id);
     await client.query(`UPDATE sessions SET ${fields.join(', ')} WHERE id = $${idx}`, values);
 
-    const updated = await client.query(`SELECT ${FIELDS} FROM sessions WHERE id = $1`, [req.params.id]);
+    const updated = await client.query(
+      `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at,
+         ROUND(AVG(sr.rating), 1) AS avg_rating,
+         COUNT(sr.rating) AS rating_count,
+         MAX(CASE WHEN sr.user_id = $2 THEN sr.rating END) AS my_rating
+       FROM sessions s
+       LEFT JOIN session_ratings sr ON sr.session_id = s.id
+       WHERE s.id = $1
+       GROUP BY s.id`,
+      [req.params.id, req.user.id]
+    );
     res.json({ session: updated.rows[0] });
   } catch (err) {
     console.error('Error updating session:', err);
@@ -149,7 +213,7 @@ router.patch('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// DELETE /api/sessions/:id — delete session and remove from S3
+// DELETE /api/sessions/:id
 router.delete('/:id', authenticateToken, async (req, res) => {
   const client = await getClient();
   try {

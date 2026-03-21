@@ -60,6 +60,21 @@ export const sessions = {
     if (idx !== -1) state.sessions[idx] = data.session
   },
 
+  async rate(id, rating) {
+    const res = await fetch(`/api/sessions/${id}/rate`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rating })
+    })
+    if (!res.ok) throw new Error('Rating failed')
+    const data = await res.json()
+    const idx = state.sessions.findIndex(s => s.id === id)
+    if (idx !== -1) {
+      state.sessions[idx] = { ...state.sessions[idx], ...data }
+    }
+  },
+
   async remove(id) {
     const res = await fetch(`/api/sessions/${id}`, {
       method: 'DELETE',
