@@ -4,12 +4,14 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const { getClient } = require('../utilities/db');
-const { uploadToS3, deleteFromS3 } = require('../utilities/aws-s3');
+const { uploadToS3, deleteFromS3, getS3Url } = require('../utilities/aws-s3');
 const { extractToken } = require('../utilities/auth');
 
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
+
+const FIELDS = 'id, name, s3_key, file_size, mime_type, uploaded_at, recorded_at, rating';
 
 const audioUpload = multer({
   storage: multer.memoryStorage(),
@@ -47,13 +49,31 @@ router.get('/', authenticateToken, async (req, res) => {
   const client = await getClient();
   try {
     const result = await client.query(
-      'SELECT id, name, s3_key, file_size, mime_type, uploaded_at, recorded_at FROM sessions WHERE user_id = $1 ORDER BY uploaded_at DESC',
+      `SELECT ${FIELDS} FROM sessions WHERE user_id = $1 ORDER BY recorded_at DESC, uploaded_at DESC`,
       [req.user.id]
     );
     res.json({ sessions: result.rows });
   } catch (err) {
     console.error('Error fetching sessions:', err);
     res.status(500).json({ message: 'Failed to fetch sessions' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/sessions/:id/stream — redirect to S3 URL for audio playback
+router.get('/:id/stream', authenticateToken, async (req, res) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      'SELECT s3_key FROM sessions WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Session not found' });
+    res.redirect(302, getS3Url(result.rows[0].s3_key));
+  } catch (err) {
+    console.error('Error streaming session:', err);
+    res.status(500).json({ message: 'Failed to stream session' });
   } finally {
     client.release();
   }
@@ -79,7 +99,7 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
       [req.user.id, name || 'Untitled Session', s3Key, req.file.size, req.file.mimetype, recorded_at || null]
     );
     const session = await client.query(
-      'SELECT id, name, s3_key, file_size, mime_type, uploaded_at, recorded_at FROM sessions WHERE id = $1',
+      `SELECT ${FIELDS} FROM sessions WHERE id = $1`,
       [insertResult.insertId]
     );
     res.status(201).json({ session: session.rows[0] });
@@ -92,9 +112,9 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
   }
 });
 
-// PATCH /api/sessions/:id — update name and/or recorded_at
+// PATCH /api/sessions/:id — update name, recorded_at, and/or rating
 router.patch('/:id', authenticateToken, async (req, res) => {
-  const { name, recorded_at } = req.body;
+  const { name, recorded_at, rating } = req.body;
   const client = await getClient();
   try {
     const existing = await client.query(
@@ -108,15 +128,18 @@ router.patch('/:id', authenticateToken, async (req, res) => {
     let idx = 1;
     if (name !== undefined) { fields.push(`name = $${idx++}`); values.push(name); }
     if (recorded_at !== undefined) { fields.push(`recorded_at = $${idx++}`); values.push(recorded_at || null); }
+    if (rating !== undefined) {
+      const r = rating === null ? null : parseInt(rating, 10);
+      if (r !== null && (r < 1 || r > 10)) return res.status(400).json({ message: 'Rating must be 1–10' });
+      fields.push(`rating = $${idx++}`);
+      values.push(r);
+    }
     if (fields.length === 0) return res.status(400).json({ message: 'Nothing to update' });
 
     values.push(req.params.id);
     await client.query(`UPDATE sessions SET ${fields.join(', ')} WHERE id = $${idx}`, values);
 
-    const updated = await client.query(
-      'SELECT id, name, s3_key, file_size, mime_type, uploaded_at, recorded_at FROM sessions WHERE id = $1',
-      [req.params.id]
-    );
+    const updated = await client.query(`SELECT ${FIELDS} FROM sessions WHERE id = $1`, [req.params.id]);
     res.json({ session: updated.rows[0] });
   } catch (err) {
     console.error('Error updating session:', err);
