@@ -1,13 +1,13 @@
-# Docker Compose for EC2 production with host nginx
-# Only runs the backend - nginx is managed by the host
+# Docker Compose for dev.prosaurus.com on EC2
+# Mirrors docker-compose.ec2.yml but on port 3001 with breakroom_dev database
 
 services:
   backend:
-    image: dallascaley/breakroom-backend:release-1.0.0
+    image: dallascaley/breakroom-backend:latest
     working_dir: /app
     ports:
-      # Expose to localhost only (host nginx proxies to this)
-      - "127.0.0.1:3000:3000"
+      # Expose to localhost only on port 3001 (production uses 3000)
+      - "127.0.0.1:3001:3000"
     environment:
       NODE_ENV: production
       DB_HOST: ${DB_HOST}
@@ -29,7 +29,7 @@ services:
       S3_BUCKET_NAME: ${S3_BUCKET_NAME}
       S3_BUCKET_REGION: ${S3_BUCKET_REGION}
     volumes:
-      # Mount frontend dist so backend can read index.html for OG tag injection
-      - /var/www/prosaurus.com:/app/dist:ro
+      # Mount dev frontend dist so backend can read index.html for OG tag injection
+      - /var/www/dev.prosaurus.com:/app/dist:ro
     restart: unless-stopped
     command: sh -c "npm run start"
