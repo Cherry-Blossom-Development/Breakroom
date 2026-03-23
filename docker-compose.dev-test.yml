@@ -1,0 +1,37 @@
+# Docker Compose for test.dev.prosaurus.com on EC2
+# Runs dev application code against breakroom_test database.
+# Use this for automated E2E tests targeting the dev environment.
+#
+# EC2 SETUP - First time only:
+#   1. docker compose -f docker-compose.dev-test.yml --env-file .env up -d
+#   (uses same .env as other deployments - DB_NAME is overridden below)
+#
+# Ports used:  3000=production  3001=dev  3002=dev-test  3003=prod-test
+
+services:
+  backend:
+    image: dallascaley/breakroom-backend:latest
+    working_dir: /app
+    ports:
+      - "127.0.0.1:3002:3000"
+    environment:
+      NODE_ENV: production
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_USER: ${DB_USER}
+      DB_PASS: ${DB_PASS}
+      DB_NAME: breakroom_test
+      CORS_ORIGIN: https://test.dev.prosaurus.com
+      SECRET_KEY: ${SECRET_KEY}
+      AWS_REGION: ${AWS_REGION}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+      S3_BUCKET_REGION: ${S3_BUCKET_REGION}
+    volumes:
+      - /var/www/test.dev.prosaurus.com:/app/dist:ro
+    restart: unless-stopped
+    command: sh -c "npm run start"
