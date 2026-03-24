@@ -9,7 +9,7 @@
         v-if="notification.event_type === 'eula_required'"
         to="/eula"
         class="popup-button"
-        @click="markViewed"
+        @click="acceptEula"
       >
         Read &amp; Accept Terms
       </RouterLink>
@@ -24,9 +24,9 @@ import { notificationStore } from '@/stores/notification'
 
 const notification = computed(() => notificationStore.currentPopup)
 
-function markViewed() {
+function acceptEula() {
   if (notification.value) {
-    notificationStore.markViewed(notification.value.id)
+    notificationStore.dismissNotification(notification.value.id)
   }
 }
 
