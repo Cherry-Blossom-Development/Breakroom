@@ -550,4 +550,39 @@ router.post('/logout', (req, res) => {
   res.json({ message: 'Logged out successfully' });
 });
 
+// ─── Test-only email endpoints ───────────────────────────────────────────────
+// These endpoints are only active when NODE_ENV=test.
+// They let the E2E test runner read emails that the backend writes to disk
+// instead of sending via SES (so tests can grab verification/reset tokens).
+
+const TEST_EMAIL_DIR_PATH = path.join(__dirname, '..', 'test-emails');
+
+router.get('/test-emails/:email', (req, res) => {
+  if (process.env.NODE_ENV !== 'test') return res.status(404).json({ message: 'Not found' });
+  const filePath = path.join(TEST_EMAIL_DIR_PATH, `${req.params.email}.json`);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ message: 'Email not found' });
+  res.json(JSON.parse(fs.readFileSync(filePath, 'utf8')));
+});
+
+router.delete('/test-emails/:email', (req, res) => {
+  if (process.env.NODE_ENV !== 'test') return res.status(404).json({ message: 'Not found' });
+  const filePath = path.join(TEST_EMAIL_DIR_PATH, `${req.params.email}.json`);
+  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  res.json({ message: 'Cleared' });
+});
+
+router.get('/test-emails/reset/:email', (req, res) => {
+  if (process.env.NODE_ENV !== 'test') return res.status(404).json({ message: 'Not found' });
+  const filePath = path.join(TEST_EMAIL_DIR_PATH, `reset-${req.params.email}.json`);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ message: 'Email not found' });
+  res.json(JSON.parse(fs.readFileSync(filePath, 'utf8')));
+});
+
+router.delete('/test-emails/reset/:email', (req, res) => {
+  if (process.env.NODE_ENV !== 'test') return res.status(404).json({ message: 'Not found' });
+  const filePath = path.join(TEST_EMAIL_DIR_PATH, `reset-${req.params.email}.json`);
+  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  res.json({ message: 'Cleared' });
+});
+
 module.exports = router;
