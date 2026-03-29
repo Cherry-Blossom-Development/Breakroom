@@ -58,5 +58,5 @@ jobs:
       - name: Restart production backend
         run: |
           ssh -i ~/.ssh/id_rsa ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} \
-            "docker compose -f ~/docker-compose.ec2.yml --env-file ~/.env pull && \
-             docker compose -f ~/docker-compose.ec2.yml --env-file ~/.env up -d --force-recreate"
+            "docker compose -p production -f ~/docker-compose.ec2.yml --env-file ~/.env pull && \
+             docker compose -p production -f ~/docker-compose.ec2.yml --env-file ~/.env up -d --force-recreate"
