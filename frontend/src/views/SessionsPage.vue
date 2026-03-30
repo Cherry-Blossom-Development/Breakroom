@@ -54,10 +54,12 @@ const availableYears = computed(() => {
 })
 
 // --- Grouped sessions ---
+const bandSessions = computed(() => sessions.list.filter(s => !s.session_type || s.session_type === 'band'))
+
 const yearGroups = computed(() => {
-  const list = selectedYear.value
-    ? sessions.list.filter(s => sessionYear(s) === selectedYear.value)
-    : sessions.list
+  const list = (selectedYear.value
+    ? bandSessions.value.filter(s => sessionYear(s) === selectedYear.value)
+    : bandSessions.value)
 
   const byYear = {}
   for (const s of list) {
@@ -217,7 +219,7 @@ onMounted(async () => {
     <!-- Sessions Card -->
     <div class="card sessions-card">
       <div class="sessions-header">
-        <h2 class="card-title">Your Sessions <span class="count">({{ sessions.list.length }})</span></h2>
+        <h2 class="card-title">Your Sessions <span class="count">({{ bandSessions.length }})</span></h2>
         <div v-if="availableYears.length > 0" class="year-tabs">
           <button class="year-tab" :class="{ active: selectedYear === null }" @click="selectedYear = null">All</button>
           <button v-for="year in availableYears" :key="year"
@@ -226,7 +228,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div v-if="sessions.list.length === 0" class="empty-state">
+      <div v-if="bandSessions.length === 0" class="empty-state">
         No sessions yet. Upload a recording above.
       </div>
 

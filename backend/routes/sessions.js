@@ -58,7 +58,7 @@ router.get('/', authenticateToken, async (req, res) => {
   const client = await getClient();
   try {
     const result = await client.query(
-      `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at,
+      `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,
          ROUND(AVG(sr.rating), 1) AS avg_rating,
          COUNT(sr.rating) AS rating_count,
          MAX(CASE WHEN sr.user_id = $2 THEN sr.rating END) AS my_rating
