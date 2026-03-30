@@ -1,9 +1,181 @@
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { sessions } from '@/stores/sessions'
+import { authFetch } from '@/utilities/authFetch'
 
 // --- Section tabs ---
 const activeTab = ref('band')
+
+// --- Bands state ---
+const bands = ref([])
+const bandsLoading = ref(false)
+const bandsError = ref(null)
+
+// Create band form
+const showCreateBand = ref(false)
+const newBandName = ref('')
+const newBandDescription = ref('')
+const createBandError = ref(null)
+const creatingBand = ref(false)
+
+// Band detail view
+const activeBand = ref(null)         // full band object with members
+const activeBandLoading = ref(false)
+const inviteHandle = ref('')
+const inviteError = ref(null)
+const inviteSuccess = ref(null)
+const inviting = ref(false)
+
+// Edit band name inline
+const editingBandName = ref(false)
+const editBandNameValue = ref('')
+
+async function loadBands() {
+  bandsLoading.value = true
+  bandsError.value = null
+  try {
+    const res = await authFetch('/api/bands')
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message)
+    bands.value = data.bands
+  } catch (err) {
+    bandsError.value = err.message
+  } finally {
+    bandsLoading.value = false
+  }
+}
+
+async function loadBandDetail(id) {
+  activeBandLoading.value = true
+  try {
+    const res = await authFetch(`/api/bands/${id}`)
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message)
+    activeBand.value = data.band
+  } catch (err) {
+    bandsError.value = err.message
+  } finally {
+    activeBandLoading.value = false
+  }
+}
+
+async function createBand() {
+  if (!newBandName.value.trim()) return
+  creatingBand.value = true
+  createBandError.value = null
+  try {
+    const res = await authFetch('/api/bands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newBandName.value.trim(), description: newBandDescription.value.trim() || undefined })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message)
+    bands.value.push({ ...data.band, role: 'owner', status: 'active', member_count: 1 })
+    newBandName.value = ''
+    newBandDescription.value = ''
+    showCreateBand.value = false
+    activeBand.value = { ...data.band, my_role: 'owner', members: [] }
+  } catch (err) {
+    createBandError.value = err.message
+  } finally {
+    creatingBand.value = false
+  }
+}
+
+async function deleteBand(id) {
+  if (!confirm('Delete this band? This cannot be undone.')) return
+  try {
+    const res = await authFetch(`/api/bands/${id}`, { method: 'DELETE' })
+    if (!res.ok) { const d = await res.json(); throw new Error(d.message) }
+    bands.value = bands.value.filter(b => b.id !== id)
+    if (activeBand.value?.id === id) activeBand.value = null
+  } catch (err) {
+    bandsError.value = err.message
+  }
+}
+
+async function inviteMember() {
+  if (!inviteHandle.value.trim()) return
+  inviting.value = true
+  inviteError.value = null
+  inviteSuccess.value = null
+  try {
+    const res = await authFetch(`/api/bands/${activeBand.value.id}/invites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ handle: inviteHandle.value.trim() })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message)
+    inviteSuccess.value = data.message
+    inviteHandle.value = ''
+  } catch (err) {
+    inviteError.value = err.message
+  } finally {
+    inviting.value = false
+  }
+}
+
+async function removeMember(userId) {
+  if (!confirm('Remove this member from the band?')) return
+  try {
+    const res = await authFetch(`/api/bands/${activeBand.value.id}/members/${userId}`, { method: 'DELETE' })
+    if (!res.ok) { const d = await res.json(); throw new Error(d.message) }
+    activeBand.value.members = activeBand.value.members.filter(m => m.id !== userId)
+    // update list count
+    const b = bands.value.find(b => b.id === activeBand.value.id)
+    if (b) b.member_count = Math.max(0, b.member_count - 1)
+  } catch (err) {
+    bandsError.value = err.message
+  }
+}
+
+async function respondToInvite(bandId, action) {
+  try {
+    const res = await authFetch(`/api/bands/${bandId}/members/me`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action })
+    })
+    if (!res.ok) { const d = await res.json(); throw new Error(d.message) }
+    if (action === 'accept') {
+      const b = bands.value.find(b => b.id === bandId)
+      if (b) { b.status = 'active'; b.member_count++ }
+    } else {
+      bands.value = bands.value.filter(b => b.id !== bandId)
+    }
+  } catch (err) {
+    bandsError.value = err.message
+  }
+}
+
+async function saveBandName() {
+  if (!editBandNameValue.value.trim() || editBandNameValue.value.trim() === activeBand.value.name) {
+    editingBandName.value = false
+    return
+  }
+  try {
+    const res = await authFetch(`/api/bands/${activeBand.value.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: editBandNameValue.value.trim() })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message)
+    activeBand.value.name = data.band.name
+    const b = bands.value.find(b => b.id === activeBand.value.id)
+    if (b) b.name = data.band.name
+    editingBandName.value = false
+  } catch (err) {
+    bandsError.value = err.message
+  }
+}
+
+function startEditBandName() {
+  editBandNameValue.value = activeBand.value.name
+  editingBandName.value = true
+}
 
 // --- Upload state ---
 const uploading = ref(false)
@@ -165,6 +337,7 @@ onMounted(async () => {
   await sessions.load()
   if (availableYears.value.length > 0) selectedYear.value = availableYears.value[0]
   document.addEventListener('click', closeRatingPopup)
+  await loadBands()
 })
 </script>
 
@@ -179,11 +352,131 @@ onMounted(async () => {
     <div class="section-tabs">
       <button class="section-tab" :class="{ active: activeTab === 'band' }" @click="activeTab = 'band'">Band Practice</button>
       <button class="section-tab" :class="{ active: activeTab === 'individual' }" @click="activeTab = 'individual'">Individual</button>
+      <button class="section-tab" :class="{ active: activeTab === 'bands' }" @click="activeTab = 'bands'">Bands</button>
     </div>
 
     <!-- Individual tab -->
     <div v-if="activeTab === 'individual'" class="card individual-card">
       <p class="individual-msg">This area is for individual musicians to record parts that they want to share with their fellow band mates</p>
+    </div>
+
+    <!-- Bands tab -->
+    <div v-if="activeTab === 'bands'" class="bands-area">
+      <div v-if="bandsError" class="error-msg">{{ bandsError }}</div>
+
+      <!-- Two-column layout: band list + detail pane -->
+      <div class="bands-layout">
+
+        <!-- Left: band list -->
+        <div class="bands-list-col">
+          <div class="bands-list-header">
+            <h2 class="card-title">Your Bands</h2>
+            <button class="btn-primary btn-sm" @click="showCreateBand = !showCreateBand; createBandError = null">
+              {{ showCreateBand ? 'Cancel' : '+ New Band' }}
+            </button>
+          </div>
+
+          <!-- Create band form -->
+          <div v-if="showCreateBand" class="card create-band-card">
+            <h3 class="form-section-title">Create a Band</h3>
+            <div v-if="createBandError" class="error-msg">{{ createBandError }}</div>
+            <label class="field-label">Band Name <span class="required">*</span></label>
+            <input v-model="newBandName" class="text-input" placeholder="e.g. The Midnight Riffs" maxlength="100" @keyup.enter="createBand" />
+            <label class="field-label">Description <span class="optional">(optional)</span></label>
+            <textarea v-model="newBandDescription" class="text-input textarea" placeholder="What's this band about?" rows="3" maxlength="500" />
+            <button class="btn-primary" :disabled="creatingBand || !newBandName.trim()" @click="createBand">
+              {{ creatingBand ? 'Creating…' : 'Create Band' }}
+            </button>
+          </div>
+
+          <!-- Pending invites -->
+          <template v-if="bands.filter(b => b.status === 'invited').length > 0">
+            <p class="list-section-label">Pending Invites</p>
+            <div v-for="b in bands.filter(b => b.status === 'invited')" :key="b.id" class="band-invite-card card">
+              <div class="band-invite-name">{{ b.name }}</div>
+              <div class="band-invite-actions">
+                <button class="btn-primary btn-sm" @click="respondToInvite(b.id, 'accept')">Accept</button>
+                <button class="btn-ghost btn-sm" @click="respondToInvite(b.id, 'decline')">Decline</button>
+              </div>
+            </div>
+          </template>
+
+          <!-- Active bands -->
+          <p class="list-section-label">{{ bands.filter(b => b.status === 'active').length > 0 ? 'My Bands' : '' }}</p>
+          <div v-if="bandsLoading" class="empty-state">Loading…</div>
+          <div v-else-if="bands.filter(b => b.status === 'active').length === 0 && !showCreateBand" class="empty-state">
+            You are not in any bands yet.<br>Create one or wait for an invite.
+          </div>
+          <div
+            v-for="b in bands.filter(b => b.status === 'active')"
+            :key="b.id"
+            class="band-list-item"
+            :class="{ selected: activeBand?.id === b.id }"
+            @click="loadBandDetail(b.id)"
+          >
+            <div class="band-list-name">{{ b.name }}</div>
+            <div class="band-list-meta">{{ b.member_count }} member{{ b.member_count !== 1 ? 's' : '' }} &middot; {{ b.role }}</div>
+          </div>
+        </div>
+
+        <!-- Right: band detail -->
+        <div class="bands-detail-col">
+          <div v-if="activeBandLoading" class="empty-state">Loading…</div>
+
+          <div v-else-if="activeBand" class="card band-detail-card">
+            <!-- Band name (editable for owners) -->
+            <div class="band-detail-header">
+              <div v-if="editingBandName" class="band-name-edit">
+                <input v-model="editBandNameValue" class="text-input" @keyup.enter="saveBandName" @keyup.escape="editingBandName = false" />
+                <button class="btn-primary btn-sm" @click="saveBandName">Save</button>
+                <button class="btn-ghost btn-sm" @click="editingBandName = false">Cancel</button>
+              </div>
+              <div v-else class="band-name-row">
+                <h2 class="band-detail-name">{{ activeBand.name }}</h2>
+                <button v-if="activeBand.my_role === 'owner'" class="btn-ghost btn-sm" @click="startEditBandName">Edit</button>
+                <button v-if="activeBand.my_role === 'owner'" class="btn-danger btn-sm" @click="deleteBand(activeBand.id)">Delete Band</button>
+              </div>
+              <p v-if="activeBand.description" class="band-description">{{ activeBand.description }}</p>
+            </div>
+
+            <!-- Members -->
+            <h3 class="form-section-title">Members</h3>
+            <div class="members-list">
+              <div v-for="m in activeBand.members" :key="m.id" class="member-row">
+                <div class="member-info">
+                  <span class="member-handle">@{{ m.handle }}</span>
+                  <span v-if="m.first_name" class="member-name">{{ m.first_name }} {{ m.last_name }}</span>
+                  <span class="member-role-badge" :class="m.role">{{ m.role }}</span>
+                  <span v-if="m.status === 'invited'" class="member-role-badge invited">invited</span>
+                </div>
+                <button
+                  v-if="activeBand.my_role === 'owner' && m.role !== 'owner'"
+                  class="btn-ghost btn-sm btn-remove"
+                  @click="removeMember(m.id)"
+                >Remove</button>
+              </div>
+              <div v-if="activeBand.members.length === 0" class="empty-state-sm">No members yet.</div>
+            </div>
+
+            <!-- Invite form (owners only) -->
+            <div v-if="activeBand.my_role === 'owner'" class="invite-section">
+              <h3 class="form-section-title">Invite a Member</h3>
+              <div v-if="inviteError" class="error-msg">{{ inviteError }}</div>
+              <div v-if="inviteSuccess" class="success-msg">{{ inviteSuccess }}</div>
+              <div class="invite-row">
+                <input v-model="inviteHandle" class="text-input" placeholder="@handle" @keyup.enter="inviteMember" />
+                <button class="btn-primary" :disabled="inviting || !inviteHandle.trim()" @click="inviteMember">
+                  {{ inviting ? 'Inviting…' : 'Send Invite' }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="empty-state bands-empty-detail">
+            Select a band to view details.
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Upload Card (Band Practice) -->
@@ -450,4 +743,57 @@ onMounted(async () => {
 /* Individual tab */
 .individual-card { padding: 40px 24px; }
 .individual-msg { color: var(--color-text-muted); font-size: 1rem; margin: 0; text-align: center; }
+
+/* Bands tab */
+.bands-area { display: flex; flex-direction: column; gap: 16px; }
+.bands-layout { display: grid; grid-template-columns: 280px 1fr; gap: 16px; align-items: start; }
+@media (max-width: 768px) { .bands-layout { grid-template-columns: 1fr; } }
+
+.bands-list-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.bands-list-header .card-title { margin: 0; }
+
+.list-section-label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); margin: 16px 0 6px; }
+
+.band-invite-card { padding: 12px 16px; margin-bottom: 8px; }
+.band-invite-name { font-weight: 600; margin-bottom: 8px; }
+.band-invite-actions { display: flex; gap: 8px; }
+
+.band-list-item { padding: 12px 16px; border-radius: 8px; cursor: pointer; border: 1px solid var(--color-border); margin-bottom: 6px; transition: background 0.15s, border-color 0.15s; }
+.band-list-item:hover { background: var(--color-background-card); }
+.band-list-item.selected { border-color: var(--color-accent); background: var(--color-background-card); }
+.band-list-name { font-weight: 600; }
+.band-list-meta { font-size: 0.8rem; color: var(--color-text-muted); margin-top: 2px; }
+
+.band-detail-card { padding: 24px; }
+.band-detail-header { margin-bottom: 20px; }
+.band-name-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.band-detail-name { margin: 0; font-size: 1.4rem; }
+.band-name-edit { display: flex; align-items: center; gap: 8px; }
+.band-description { color: var(--color-text-muted); margin: 8px 0 0; }
+
+.members-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+.member-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 6px; background: var(--color-background); }
+.member-info { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.member-handle { font-weight: 600; }
+.member-name { color: var(--color-text-muted); font-size: 0.9rem; }
+.member-role-badge { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; padding: 2px 7px; border-radius: 99px; background: var(--color-border); color: var(--color-text-muted); }
+.member-role-badge.owner { background: var(--color-accent); color: #fff; }
+.member-role-badge.invited { background: transparent; border: 1px solid var(--color-text-muted); }
+.empty-state-sm { color: var(--color-text-muted); font-size: 0.9rem; padding: 8px 0; }
+
+.invite-section { border-top: 1px solid var(--color-border); padding-top: 20px; }
+.invite-row { display: flex; gap: 10px; align-items: center; }
+.invite-row .text-input { flex: 1; }
+
+.create-band-card { padding: 20px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 10px; }
+.form-section-title { font-size: 0.9rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted); margin: 0 0 4px; }
+.textarea { resize: vertical; font-family: inherit; }
+.required { color: var(--color-accent); }
+.optional { color: var(--color-text-muted); font-weight: 400; font-size: 0.85em; }
+
+.bands-empty-detail { padding: 60px 24px; text-align: center; }
+.success-msg { color: #4caf50; font-size: 0.9rem; padding: 8px 12px; background: rgba(76,175,80,0.1); border-radius: 6px; }
+.btn-danger { background: transparent; border: 1px solid #e53935; color: #e53935; }
+.btn-danger:hover { background: rgba(229,57,53,0.1); }
+.btn-remove { color: #e53935; border-color: #e53935; }
 </style>
