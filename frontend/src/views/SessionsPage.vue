@@ -2,6 +2,9 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { sessions } from '@/stores/sessions'
 
+// --- Section tabs ---
+const activeTab = ref('band')
+
 // --- Upload state ---
 const uploading = ref(false)
 const uploadError = ref(null)
@@ -170,7 +173,19 @@ onMounted(async () => {
       <p class="subtitle">Track and manage your recording sessions</p>
     </header>
 
-    <!-- Upload Card -->
+    <!-- Section tabs -->
+    <div class="section-tabs">
+      <button class="section-tab" :class="{ active: activeTab === 'band' }" @click="activeTab = 'band'">Band Practice</button>
+      <button class="section-tab" :class="{ active: activeTab === 'individual' }" @click="activeTab = 'individual'">Individual</button>
+    </div>
+
+    <!-- Individual tab -->
+    <div v-if="activeTab === 'individual'" class="card individual-card">
+      <p class="individual-msg">This area is for individual musicians to record parts that they want to share with their fellow band mates</p>
+    </div>
+
+    <!-- Upload Card (Band Practice) -->
+    <template v-if="activeTab === 'band'">
     <div class="card upload-card">
       <h2 class="card-title">Upload Recording</h2>
       <div class="upload-form">
@@ -309,6 +324,7 @@ onMounted(async () => {
       </div>
       <button class="now-playing-close" @click="() => { audioEl.pause(); playingId = null }">✕</button>
     </div>
+    </template>
   </div>
 </template>
 
@@ -422,4 +438,14 @@ onMounted(async () => {
 .now-playing-name { font-size: 0.88rem; color: var(--color-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .now-playing-close { background: none; border: none; color: var(--color-text-muted); cursor: pointer; font-size: 1rem; padding: 4px 8px; border-radius: 4px; }
 .now-playing-close:hover { color: var(--color-text); }
+
+/* Section tabs */
+.section-tabs { display: flex; gap: 0; margin-bottom: 24px; border-bottom: 2px solid var(--color-border, #444); }
+.section-tab { background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; padding: 10px 24px; font-size: 0.95rem; font-weight: 600; color: var(--color-text-muted); cursor: pointer; transition: color 0.15s, border-color 0.15s; }
+.section-tab:hover { color: var(--color-text); }
+.section-tab.active { color: var(--color-accent); border-bottom-color: var(--color-accent); }
+
+/* Individual tab */
+.individual-card { padding: 40px 24px; }
+.individual-msg { color: var(--color-text-muted); font-size: 1rem; margin: 0; text-align: center; }
 </style>
