@@ -192,7 +192,7 @@ const uploading = ref(false)
 const uploadError = ref(null)
 const selectedFile = ref(null)
 const sessionName = ref('')
-const recordedAt = ref('')
+const recordedAt = ref(new Date().toISOString().split('T')[0])
 const uploadBandId = ref('')
 const fileInput = ref(null)
 
@@ -201,7 +201,7 @@ const indivUploading = ref(false)
 const indivUploadError = ref(null)
 const indivFile = ref(null)
 const indivName = ref('')
-const indivRecordedAt = ref('')
+const indivRecordedAt = ref(new Date().toISOString().split('T')[0])
 const indivInstrumentId = ref('')
 const indivUploadBandId = ref('')
 const fileInputIndiv = ref(null)
@@ -405,6 +405,14 @@ async function togglePlay(session) {
 function onAudioPlay() { isPlaying.value = true }
 function onAudioPause() { isPlaying.value = false }
 function onAudioEnded() { isPlaying.value = false }
+function onAudioMetadata(e) {
+  // MediaRecorder WebM files don't include duration; browser reports Infinity.
+  // Seeking to a huge time forces the browser to scan and discover the real duration.
+  if (e.target.duration === Infinity || isNaN(e.target.duration)) {
+    e.target.currentTime = 1e101
+    e.target.addEventListener('timeupdate', () => { e.target.currentTime = 0 }, { once: true })
+  }
+}
 
 // --- Upload ---
 function onFileSelect(e) {
@@ -419,7 +427,7 @@ async function handleUpload() {
   uploadError.value = null
   try {
     await sessions.upload(selectedFile.value, sessionName.value || defaultName(), recordedAt.value || null, uploadBandId.value || null)
-    selectedFile.value = null; sessionName.value = ''; recordedAt.value = ''; uploadBandId.value = ''
+    selectedFile.value = null; sessionName.value = ''; recordedAt.value = new Date().toISOString().split('T')[0]; uploadBandId.value = ''
     if (fileInput.value) fileInput.value.value = ''
   } catch (err) { uploadError.value = err.message }
   finally { uploading.value = false }
@@ -438,7 +446,7 @@ async function handleIndivUpload() {
   indivUploadError.value = null
   try {
     await sessions.upload(indivFile.value, indivName.value || defaultName(), indivRecordedAt.value || null, indivUploadBandId.value || null, 'individual', indivInstrumentId.value || null)
-    indivFile.value = null; indivName.value = ''; indivRecordedAt.value = ''; indivInstrumentId.value = ''; indivUploadBandId.value = ''
+    indivFile.value = null; indivName.value = ''; indivRecordedAt.value = new Date().toISOString().split('T')[0]; indivInstrumentId.value = ''; indivUploadBandId.value = ''
     if (fileInputIndiv.value) fileInputIndiv.value.value = ''
   } catch (err) { indivUploadError.value = err.message }
   finally { indivUploading.value = false }
@@ -603,7 +611,7 @@ onMounted(async () => {
           </div>
           <div v-if="recordingPreviewUrl && !recordingFor" class="recording-preview">
             <span class="preview-label">Preview recording:</span>
-            <audio controls :src="recordingPreviewUrl" style="height:32px;"></audio>
+            <audio controls :src="recordingPreviewUrl" @loadedmetadata="onAudioMetadata" style="height:32px;"></audio>
           </div>
           <p v-if="indivUploadError" class="error-msg">{{ indivUploadError }}</p>
           <button class="upload-btn" @click="handleIndivUpload" :disabled="!indivFile || indivUploading">
@@ -1011,6 +1019,7 @@ onMounted(async () => {
     <div v-if="playingId !== null" class="now-playing-bar">
       <audio ref="audioEl" :src="`/api/sessions/${playingId}/stream`"
              @play="onAudioPlay" @pause="onAudioPause" @ended="onAudioEnded"
+             @loadedmetadata="onAudioMetadata"
              controls preload="metadata"></audio>
       <div class="now-playing-info">
         <span class="now-playing-label">Now Playing</span>
