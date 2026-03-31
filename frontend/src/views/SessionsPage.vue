@@ -203,7 +203,55 @@ const indivFile = ref(null)
 const indivName = ref('')
 const indivRecordedAt = ref('')
 const indivInstrumentId = ref('')
+const indivUploadBandId = ref('')
 const fileInputIndiv = ref(null)
+
+// --- Live recording ---
+const recordingFor = ref(null) // 'band' | 'individual' | null
+const recordingSeconds = ref(0)
+let _mediaRecorder = null
+let _recordingChunks = []
+let _recordingInterval = null
+
+function formatRecordingTime(secs) {
+  const m = Math.floor(secs / 60).toString().padStart(2, '0')
+  const s = (secs % 60).toString().padStart(2, '0')
+  return `${m}:${s}`
+}
+async function startRecording(context) {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    _recordingChunks = []
+    _mediaRecorder = new MediaRecorder(stream)
+    _mediaRecorder.ondataavailable = e => { if (e.data.size > 0) _recordingChunks.push(e.data) }
+    _mediaRecorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop())
+      const mimeType = _mediaRecorder.mimeType || 'audio/webm'
+      const ext = mimeType.includes('ogg') ? 'ogg' : 'webm'
+      const blob = new Blob(_recordingChunks, { type: mimeType })
+      const file = new File([blob], `recording-${Date.now()}.${ext}`, { type: mimeType })
+      if (context === 'band') {
+        selectedFile.value = file
+        if (!sessionName.value) sessionName.value = defaultName()
+      } else {
+        indivFile.value = file
+        if (!indivName.value) indivName.value = defaultName()
+      }
+      recordingFor.value = null
+      recordingSeconds.value = 0
+      clearInterval(_recordingInterval)
+    }
+    _mediaRecorder.start()
+    recordingFor.value = context
+    recordingSeconds.value = 0
+    _recordingInterval = setInterval(() => recordingSeconds.value++, 1000)
+  } catch {
+    alert('Microphone access denied or unavailable.')
+  }
+}
+function stopRecording() {
+  if (_mediaRecorder && _mediaRecorder.state !== 'inactive') _mediaRecorder.stop()
+}
 
 // --- Playback state ---
 const playingId = ref(null)
@@ -331,8 +379,8 @@ async function handleIndivUpload() {
   indivUploading.value = true
   indivUploadError.value = null
   try {
-    await sessions.upload(indivFile.value, indivName.value || defaultName(), indivRecordedAt.value || null, null, 'individual', indivInstrumentId.value || null)
-    indivFile.value = null; indivName.value = ''; indivRecordedAt.value = ''; indivInstrumentId.value = ''
+    await sessions.upload(indivFile.value, indivName.value || defaultName(), indivRecordedAt.value || null, indivUploadBandId.value || null, 'individual', indivInstrumentId.value || null)
+    indivFile.value = null; indivName.value = ''; indivRecordedAt.value = ''; indivInstrumentId.value = ''; indivUploadBandId.value = ''
     if (fileInputIndiv.value) fileInputIndiv.value.value = ''
   } catch (err) { indivUploadError.value = err.message }
   finally { indivUploading.value = false }
@@ -449,10 +497,18 @@ onMounted(async () => {
         <div class="upload-form">
           <div class="file-row">
             <input ref="fileInputIndiv" type="file" accept="audio/*" @change="onIndivFileSelect"
-                   class="file-input" id="indiv-audio-file" :disabled="indivUploading" />
-            <label for="indiv-audio-file" class="file-label" :class="{ 'has-file': indivFile }">
+                   class="file-input" id="indiv-audio-file" :disabled="indivUploading || recordingFor !== null" />
+            <label for="indiv-audio-file" class="file-label" :class="{ 'has-file': indivFile, 'disabled': recordingFor !== null }">
               {{ indivFile ? indivFile.name : 'Choose audio file…' }}
             </label>
+            <template v-if="recordingFor === 'individual'">
+              <span class="rec-indicator">● {{ formatRecordingTime(recordingSeconds) }}</span>
+              <button class="rec-stop-btn" @click="stopRecording">Stop</button>
+            </template>
+            <button v-else class="rec-btn" :disabled="recordingFor !== null || indivUploading"
+                    @click="startRecording('individual')" title="Record from microphone">
+              🎙 Record
+            </button>
           </div>
           <div class="fields-row">
             <div class="field">
@@ -469,6 +525,13 @@ onMounted(async () => {
               <select v-model="indivInstrumentId" class="text-input" :disabled="indivUploading">
                 <option value="">— select instrument —</option>
                 <option v-for="inst in instruments" :key="inst.id" :value="inst.id">{{ inst.name }}</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="field-label">Band <span class="optional">(optional)</span></label>
+              <select v-model="indivUploadBandId" class="text-input" :disabled="indivUploading">
+                <option value="">— no band —</option>
+                <option v-for="b in activeBands" :key="b.id" :value="b.id">{{ b.name }}</option>
               </select>
             </div>
           </div>
@@ -718,10 +781,18 @@ onMounted(async () => {
       <div class="upload-form">
         <div class="file-row">
           <input ref="fileInput" type="file" accept="audio/*" @change="onFileSelect"
-                 class="file-input" id="audio-file" :disabled="uploading" />
-          <label for="audio-file" class="file-label" :class="{ 'has-file': selectedFile }">
+                 class="file-input" id="audio-file" :disabled="uploading || recordingFor !== null" />
+          <label for="audio-file" class="file-label" :class="{ 'has-file': selectedFile, 'disabled': recordingFor !== null }">
             {{ selectedFile ? selectedFile.name : 'Choose audio file…' }}
           </label>
+          <template v-if="recordingFor === 'band'">
+            <span class="rec-indicator">● {{ formatRecordingTime(recordingSeconds) }}</span>
+            <button class="rec-stop-btn" @click="stopRecording">Stop</button>
+          </template>
+          <button v-else class="rec-btn" :disabled="recordingFor !== null || uploading"
+                  @click="startRecording('band')" title="Record from microphone">
+            🎙 Record
+          </button>
         </div>
         <div class="fields-row">
           <div class="field">
@@ -896,6 +967,17 @@ onMounted(async () => {
 .upload-btn { align-self: flex-start; background: var(--color-accent); color: #fff; border: none; border-radius: 6px; padding: 10px 24px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
 .upload-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .upload-btn:not(:disabled):hover { opacity: 0.85; }
+
+/* Recording controls */
+.file-row { align-items: center; gap: 10px; }
+.file-label.disabled { opacity: 0.4; pointer-events: none; }
+.rec-btn { background: none; border: 1px solid var(--color-border, #555); border-radius: 6px; padding: 9px 14px; font-size: 0.9rem; color: var(--color-text-muted); cursor: pointer; white-space: nowrap; transition: all 0.15s; flex-shrink: 0; }
+.rec-btn:not(:disabled):hover { border-color: #e05555; color: #e05555; }
+.rec-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.rec-indicator { color: #e05555; font-weight: 700; font-size: 0.9rem; white-space: nowrap; flex-shrink: 0; animation: rec-pulse 1s ease-in-out infinite; }
+@keyframes rec-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.rec-stop-btn { background: #e05555; color: #fff; border: none; border-radius: 6px; padding: 9px 14px; font-size: 0.9rem; font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; transition: opacity 0.15s; }
+.rec-stop-btn:hover { opacity: 0.85; }
 
 /* Sessions header */
 .sessions-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
