@@ -210,11 +210,21 @@ const fileInputIndiv = ref(null)
 const recordingFor = ref(null) // 'band' | 'individual' | null
 const recordingSeconds = ref(0)
 const audioLevel = ref(0) // 0–100, drives level meter
+const micDevices = ref([])       // available audio input devices
+const selectedMicId = ref('')    // '' = browser default
+const recordingPreviewUrl = ref(null) // blob URL for post-recording preview
 let _mediaRecorder = null
 let _recordingChunks = []
 let _recordingInterval = null
 let _audioContext = null
 let _levelAnimFrame = null
+
+async function refreshMicDevices() {
+  try {
+    const all = await navigator.mediaDevices.enumerateDevices()
+    micDevices.value = all.filter(d => d.kind === 'audioinput')
+  } catch { /* ignore */ }
+}
 
 function _startLevelMeter(stream) {
   _audioContext = new AudioContext()
@@ -244,7 +254,15 @@ function formatRecordingTime(secs) {
 }
 async function startRecording(context) {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+    if (recordingPreviewUrl.value) { URL.revokeObjectURL(recordingPreviewUrl.value); recordingPreviewUrl.value = null }
+    const audioConstraints = selectedMicId.value
+      ? { deviceId: { exact: selectedMicId.value }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      : { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+
+    // Permission just granted — populate device list with labels
+    await refreshMicDevices()
+
     _recordingChunks = []
 
     // Pick the best supported MIME type explicitly
@@ -266,7 +284,9 @@ async function startRecording(context) {
       const finalMime = _mediaRecorder.mimeType || mimeType || 'audio/webm'
       const ext = finalMime.includes('ogg') ? 'ogg' : finalMime.includes('mp4') ? 'mp4' : 'webm'
       const blob = new Blob(_recordingChunks, { type: finalMime })
+      console.log('[Recording] chunks:', _recordingChunks.length, '| blob size:', blob.size, '| mime:', finalMime)
       const file = new File([blob], `recording-${Date.now()}.${ext}`, { type: finalMime })
+      recordingPreviewUrl.value = URL.createObjectURL(blob)
       if (context === 'band') {
         selectedFile.value = file
         if (!sessionName.value) sessionName.value = defaultName()
@@ -506,6 +526,7 @@ onMounted(async () => {
   if (availableYears.value.length > 0) selectedYear.value = availableYears.value[0]
   document.addEventListener('click', closeRatingPopup)
   await Promise.all([loadBands(), loadInstruments()])
+  await refreshMicDevices()
 })
 </script>
 
@@ -544,10 +565,16 @@ onMounted(async () => {
               <div class="level-meter" title="Input level"><div class="level-fill" :style="{ width: audioLevel + '%' }"></div></div>
               <button class="rec-stop-btn" @click="stopRecording">Stop</button>
             </template>
-            <button v-else class="rec-btn" :disabled="recordingFor !== null || indivUploading"
-                    @click="startRecording('individual')" title="Record from microphone">
-              🎙 Record
-            </button>
+            <template v-else>
+              <select v-if="micDevices.length > 0" v-model="selectedMicId" class="mic-select" :disabled="indivUploading" title="Select microphone">
+                <option value="">Default mic</option>
+                <option v-for="d in micDevices" :key="d.deviceId" :value="d.deviceId">{{ d.label || `Mic ${d.deviceId.slice(0,6)}…` }}</option>
+              </select>
+              <button class="rec-btn" :disabled="recordingFor !== null || indivUploading"
+                      @click="startRecording('individual')" title="Record from microphone">
+                🎙 Record
+              </button>
+            </template>
           </div>
           <div class="fields-row">
             <div class="field">
@@ -573,6 +600,10 @@ onMounted(async () => {
                 <option v-for="b in activeBands" :key="b.id" :value="b.id">{{ b.name }}</option>
               </select>
             </div>
+          </div>
+          <div v-if="recordingPreviewUrl && !recordingFor" class="recording-preview">
+            <span class="preview-label">Preview recording:</span>
+            <audio controls :src="recordingPreviewUrl" style="height:32px;"></audio>
           </div>
           <p v-if="indivUploadError" class="error-msg">{{ indivUploadError }}</p>
           <button class="upload-btn" @click="handleIndivUpload" :disabled="!indivFile || indivUploading">
@@ -829,10 +860,16 @@ onMounted(async () => {
             <div class="level-meter" title="Input level"><div class="level-fill" :style="{ width: audioLevel + '%' }"></div></div>
             <button class="rec-stop-btn" @click="stopRecording">Stop</button>
           </template>
-          <button v-else class="rec-btn" :disabled="recordingFor !== null || uploading"
-                  @click="startRecording('band')" title="Record from microphone">
-            🎙 Record
-          </button>
+          <template v-else>
+            <select v-if="micDevices.length > 0" v-model="selectedMicId" class="mic-select" :disabled="uploading" title="Select microphone">
+              <option value="">Default mic</option>
+              <option v-for="d in micDevices" :key="d.deviceId" :value="d.deviceId">{{ d.label || `Mic ${d.deviceId.slice(0,6)}…` }}</option>
+            </select>
+            <button class="rec-btn" :disabled="recordingFor !== null || uploading"
+                    @click="startRecording('band')" title="Record from microphone">
+              🎙 Record
+            </button>
+          </template>
         </div>
         <div class="fields-row">
           <div class="field">
@@ -851,6 +888,10 @@ onMounted(async () => {
               <option v-for="b in activeBands" :key="b.id" :value="b.id">{{ b.name }}</option>
             </select>
           </div>
+        </div>
+        <div v-if="recordingPreviewUrl && !recordingFor" class="recording-preview">
+          <span class="preview-label">Preview recording:</span>
+          <audio controls :src="recordingPreviewUrl" style="height:32px;"></audio>
         </div>
         <p v-if="uploadError" class="error-msg">{{ uploadError }}</p>
         <button class="upload-btn" @click="handleUpload" :disabled="!selectedFile || uploading">
@@ -964,7 +1005,9 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Now Playing bar -->
+    </template>
+
+    <!-- Now Playing bar — outside all tab conditionals so it works from any tab -->
     <div v-if="playingId !== null" class="now-playing-bar">
       <audio ref="audioEl" :src="`/api/sessions/${playingId}/stream`"
              @play="onAudioPlay" @pause="onAudioPause" @ended="onAudioEnded"
@@ -975,7 +1018,6 @@ onMounted(async () => {
       </div>
       <button class="now-playing-close" @click="() => { audioEl.pause(); playingId = null }">✕</button>
     </div>
-    </template>
   </div>
 </template>
 
@@ -1011,6 +1053,9 @@ onMounted(async () => {
 /* Recording controls */
 .file-row { align-items: center; gap: 10px; }
 .file-label.disabled { opacity: 0.4; pointer-events: none; }
+.mic-select { background: var(--color-bg-input, #2a2a2a); border: 1px solid var(--color-border, #555); border-radius: 6px; padding: 8px 10px; font-size: 0.85rem; color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; max-width: 180px; }
+.recording-preview { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.preview-label { font-size: 0.85rem; color: var(--color-text-muted); white-space: nowrap; }
 .rec-btn { background: none; border: 1px solid var(--color-border, #555); border-radius: 6px; padding: 9px 14px; font-size: 0.9rem; color: var(--color-text-muted); cursor: pointer; white-space: nowrap; transition: all 0.15s; flex-shrink: 0; }
 .rec-btn:not(:disabled):hover { border-color: #e05555; color: #e05555; }
 .rec-btn:disabled { opacity: 0.4; cursor: not-allowed; }

@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const { getClient } = require('../utilities/db');
-const { uploadToS3, deleteFromS3, getS3Url } = require('../utilities/aws-s3');
+const { uploadToS3, deleteFromS3, getS3Url, streamFromS3 } = require('../utilities/aws-s3');
 const { extractToken } = require('../utilities/auth');
 
 require('dotenv').config();
@@ -82,7 +82,7 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/sessions/:id/stream — ownership-checked redirect to S3
+// GET /api/sessions/:id/stream — ownership-checked proxy from S3 (supports range requests)
 router.get('/:id/stream', authenticateToken, async (req, res) => {
   const client = await getClient();
   try {
@@ -91,10 +91,10 @@ router.get('/:id/stream', authenticateToken, async (req, res) => {
       [req.params.id, req.user.id]
     );
     if (result.rowCount === 0) return res.status(404).json({ message: 'Session not found' });
-    res.redirect(302, getS3Url(result.rows[0].s3_key));
+    await streamFromS3(result.rows[0].s3_key, req, res);
   } catch (err) {
     console.error('Error streaming session:', err);
-    res.status(500).json({ message: 'Failed to stream session' });
+    if (!res.headersSent) res.status(500).json({ message: 'Failed to stream session' });
   } finally {
     client.release();
   }

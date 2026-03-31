@@ -1,4 +1,4 @@
-const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
 
 const BUCKET_NAME = process.env.S3_BUCKET_NAME || 'breakroom-uploads';
 const BUCKET_REGION = process.env.S3_BUCKET_REGION || process.env.AWS_REGION || 'us-west-2';
@@ -73,9 +73,53 @@ const getS3Url = (key) => {
   return `https://${BUCKET_NAME}.s3.${BUCKET_REGION}.amazonaws.com/${key}`;
 };
 
+/**
+ * Stream an S3 object through an Express response, supporting range requests.
+ * @param {string} key - S3 object key
+ * @param {object} req - Express request (reads req.headers.range)
+ * @param {object} res - Express response
+ */
+const streamFromS3 = async (key, req, res) => {
+  const rangeHeader = req.headers.range;
+
+  if (rangeHeader) {
+    // HEAD first to get total size
+    const head = await s3Client.send(new HeadObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+    const totalSize = head.ContentLength;
+    const contentType = head.ContentType || 'application/octet-stream';
+
+    const [startStr, endStr] = rangeHeader.replace(/bytes=/, '').split('-');
+    const start = parseInt(startStr, 10);
+    const end = endStr ? parseInt(endStr, 10) : totalSize - 1;
+    const chunkSize = end - start + 1;
+
+    const command = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key, Range: `bytes=${start}-${end}` });
+    const s3Res = await s3Client.send(command);
+
+    res.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${totalSize}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunkSize,
+      'Content-Type': contentType,
+    });
+    s3Res.Body.pipe(res);
+  } else {
+    const command = new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key });
+    const s3Res = await s3Client.send(command);
+
+    res.writeHead(200, {
+      'Accept-Ranges': 'bytes',
+      'Content-Length': s3Res.ContentLength,
+      'Content-Type': s3Res.ContentType || 'application/octet-stream',
+    });
+    s3Res.Body.pipe(res);
+  }
+};
+
 module.exports = {
   uploadToS3,
   deleteFromS3,
   getS3Url,
+  streamFromS3,
   BUCKET_NAME
 };
