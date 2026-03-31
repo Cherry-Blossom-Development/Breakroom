@@ -209,9 +209,33 @@ const fileInputIndiv = ref(null)
 // --- Live recording ---
 const recordingFor = ref(null) // 'band' | 'individual' | null
 const recordingSeconds = ref(0)
+const audioLevel = ref(0) // 0–100, drives level meter
 let _mediaRecorder = null
 let _recordingChunks = []
 let _recordingInterval = null
+let _audioContext = null
+let _levelAnimFrame = null
+
+function _startLevelMeter(stream) {
+  _audioContext = new AudioContext()
+  const source = _audioContext.createMediaStreamSource(stream)
+  const analyser = _audioContext.createAnalyser()
+  analyser.fftSize = 256
+  source.connect(analyser)
+  const data = new Uint8Array(analyser.frequencyBinCount)
+  function tick() {
+    analyser.getByteFrequencyData(data)
+    const avg = data.reduce((a, b) => a + b, 0) / data.length
+    audioLevel.value = Math.round((avg / 255) * 100)
+    _levelAnimFrame = requestAnimationFrame(tick)
+  }
+  tick()
+}
+function _stopLevelMeter() {
+  if (_levelAnimFrame) cancelAnimationFrame(_levelAnimFrame)
+  if (_audioContext) { _audioContext.close(); _audioContext = null }
+  audioLevel.value = 0
+}
 
 function formatRecordingTime(secs) {
   const m = Math.floor(secs / 60).toString().padStart(2, '0')
@@ -237,6 +261,7 @@ async function startRecording(context) {
     // Use a 200ms timeslice so data is flushed regularly
     _mediaRecorder.ondataavailable = e => { if (e.data.size > 0) _recordingChunks.push(e.data) }
     _mediaRecorder.onstop = () => {
+      _stopLevelMeter()
       stream.getTracks().forEach(t => t.stop())
       const finalMime = _mediaRecorder.mimeType || mimeType || 'audio/webm'
       const ext = finalMime.includes('ogg') ? 'ogg' : finalMime.includes('mp4') ? 'mp4' : 'webm'
@@ -253,6 +278,7 @@ async function startRecording(context) {
       recordingSeconds.value = 0
       clearInterval(_recordingInterval)
     }
+    _startLevelMeter(stream)
     _mediaRecorder.start(200)
     recordingFor.value = context
     recordingSeconds.value = 0
@@ -515,6 +541,7 @@ onMounted(async () => {
             </label>
             <template v-if="recordingFor === 'individual'">
               <span class="rec-indicator">● {{ formatRecordingTime(recordingSeconds) }}</span>
+              <div class="level-meter" title="Input level"><div class="level-fill" :style="{ width: audioLevel + '%' }"></div></div>
               <button class="rec-stop-btn" @click="stopRecording">Stop</button>
             </template>
             <button v-else class="rec-btn" :disabled="recordingFor !== null || indivUploading"
@@ -799,6 +826,7 @@ onMounted(async () => {
           </label>
           <template v-if="recordingFor === 'band'">
             <span class="rec-indicator">● {{ formatRecordingTime(recordingSeconds) }}</span>
+            <div class="level-meter" title="Input level"><div class="level-fill" :style="{ width: audioLevel + '%' }"></div></div>
             <button class="rec-stop-btn" @click="stopRecording">Stop</button>
           </template>
           <button v-else class="rec-btn" :disabled="recordingFor !== null || uploading"
@@ -990,6 +1018,8 @@ onMounted(async () => {
 @keyframes rec-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 .rec-stop-btn { background: #e05555; color: #fff; border: none; border-radius: 6px; padding: 9px 14px; font-size: 0.9rem; font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; transition: opacity 0.15s; }
 .rec-stop-btn:hover { opacity: 0.85; }
+.level-meter { width: 80px; height: 10px; background: var(--color-border, #444); border-radius: 5px; overflow: hidden; flex-shrink: 0; }
+.level-fill { height: 100%; background: #4caf50; border-radius: 5px; transition: width 0.05s linear; }
 
 /* Sessions header */
 .sessions-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
