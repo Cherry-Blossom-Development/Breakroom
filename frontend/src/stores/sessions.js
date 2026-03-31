@@ -23,11 +23,12 @@ export const sessions = {
     }
   },
 
-  async upload(file, name, recordedAt) {
+  async upload(file, name, recordedAt, bandId) {
     const formData = new FormData()
     formData.append('audio', file)
     formData.append('name', name)
     if (recordedAt) formData.append('recorded_at', recordedAt)
+    if (bandId) formData.append('band_id', bandId)
 
     const res = await fetch('/api/sessions', {
       method: 'POST',

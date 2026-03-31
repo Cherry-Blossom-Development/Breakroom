@@ -183,6 +183,7 @@ const uploadError = ref(null)
 const selectedFile = ref(null)
 const sessionName = ref('')
 const recordedAt = ref('')
+const uploadBandId = ref('')
 const fileInput = ref(null)
 
 // --- Playback state ---
@@ -292,8 +293,8 @@ async function handleUpload() {
   uploading.value = true
   uploadError.value = null
   try {
-    await sessions.upload(selectedFile.value, sessionName.value || defaultName(), recordedAt.value || null)
-    selectedFile.value = null; sessionName.value = ''; recordedAt.value = ''
+    await sessions.upload(selectedFile.value, sessionName.value || defaultName(), recordedAt.value || null, uploadBandId.value || null)
+    selectedFile.value = null; sessionName.value = ''; recordedAt.value = ''; uploadBandId.value = ''
     if (fileInput.value) fileInput.value.value = ''
   } catch (err) { uploadError.value = err.message }
   finally { uploading.value = false }
@@ -309,6 +310,12 @@ async function saveRecordedAt(session, value) {
   try { await sessions.update(session.id, { recorded_at: value || null }) }
   catch (err) { console.error('Failed to update date:', err) }
 }
+async function saveBand(session, value) {
+  try { await sessions.update(session.id, { band_id: value ? parseInt(value, 10) : null }) }
+  catch (err) { console.error('Failed to update band:', err) }
+}
+
+const activeBands = computed(() => bands.value.filter(b => b.status === 'active'))
 
 // --- Rating popup ---
 function openRatingPopup(sessionId, event) {
@@ -501,6 +508,13 @@ onMounted(async () => {
             <label class="field-label">Original recording date <span class="optional">(optional)</span></label>
             <input v-model="recordedAt" type="date" class="text-input" :disabled="uploading" />
           </div>
+          <div class="field">
+            <label class="field-label">Band <span class="optional">(optional)</span></label>
+            <select v-model="uploadBandId" class="text-input" :disabled="uploading">
+              <option value="">— no band —</option>
+              <option v-for="b in activeBands" :key="b.id" :value="b.id">{{ b.name }}</option>
+            </select>
+          </div>
         </div>
         <p v-if="uploadError" class="error-msg">{{ uploadError }}</p>
         <button class="upload-btn" @click="handleUpload" :disabled="!selectedFile || uploading">
@@ -557,10 +571,16 @@ onMounted(async () => {
                         {{ playingId === session.id && isPlaying ? '⏸' : '▶' }}
                       </button>
                     </td>
-                    <td>
+                    <td class="col-name">
                       <input type="text" class="inline-edit" :value="session.name"
                              @blur="e => saveName(session, e.target.value)"
                              @keydown.enter="e => e.target.blur()" />
+                      <select class="inline-edit band-select"
+                              :value="session.band_id || ''"
+                              @change="e => saveBand(session, e.target.value)">
+                        <option value="">— no band —</option>
+                        <option v-for="b in activeBands" :key="b.id" :value="b.id">{{ b.name }}</option>
+                      </select>
                     </td>
                     <td>
                       <input type="date" class="inline-edit date-edit"
@@ -732,6 +752,13 @@ onMounted(async () => {
 .now-playing-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-accent); font-weight: 600; }
 .now-playing-name { font-size: 0.88rem; color: var(--color-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .now-playing-close { background: none; border: none; color: var(--color-text-muted); cursor: pointer; font-size: 1rem; padding: 4px 8px; border-radius: 4px; }
+/* Two-layer name cell */
+.col-name { min-width: 200px; }
+.col-name .inline-edit { display: block; width: 100%; }
+.band-select { margin-top: 4px; font-size: 0.8rem; color: var(--color-text-muted); background: transparent; border: none; border-bottom: 1px dashed var(--color-border); padding: 2px 0; width: 100%; cursor: pointer; }
+.band-select:focus { outline: none; border-bottom-color: var(--color-accent); }
+.band-select option { background: var(--color-background-card); color: var(--color-text); }
+
 .now-playing-close:hover { color: var(--color-text); }
 
 /* Section tabs */
