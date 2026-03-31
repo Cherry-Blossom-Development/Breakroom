@@ -177,7 +177,17 @@ function startEditBandName() {
   editingBandName.value = true
 }
 
-// --- Upload state ---
+// --- Instruments ---
+const instruments = ref([])
+async function loadInstruments() {
+  try {
+    const res = await authFetch('/api/instruments')
+    const data = await res.json()
+    if (res.ok) instruments.value = data.instruments
+  } catch { /* non-critical */ }
+}
+
+// --- Band Practice upload state ---
 const uploading = ref(false)
 const uploadError = ref(null)
 const selectedFile = ref(null)
@@ -185,6 +195,15 @@ const sessionName = ref('')
 const recordedAt = ref('')
 const uploadBandId = ref('')
 const fileInput = ref(null)
+
+// --- Individual upload state ---
+const indivUploading = ref(false)
+const indivUploadError = ref(null)
+const indivFile = ref(null)
+const indivName = ref('')
+const indivRecordedAt = ref('')
+const indivInstrumentId = ref('')
+const fileInputIndiv = ref(null)
 
 // --- Playback state ---
 const playingId = ref(null)
@@ -300,6 +319,58 @@ async function handleUpload() {
   finally { uploading.value = false }
 }
 
+// --- Individual upload ---
+function onIndivFileSelect(e) {
+  const file = e.target.files[0]
+  if (!file) return
+  indivFile.value = file
+  if (!indivName.value) indivName.value = defaultName()
+}
+async function handleIndivUpload() {
+  if (!indivFile.value) return
+  indivUploading.value = true
+  indivUploadError.value = null
+  try {
+    await sessions.upload(indivFile.value, indivName.value || defaultName(), indivRecordedAt.value || null, null, 'individual', indivInstrumentId.value || null)
+    indivFile.value = null; indivName.value = ''; indivRecordedAt.value = ''; indivInstrumentId.value = ''
+    if (fileInputIndiv.value) fileInputIndiv.value.value = ''
+  } catch (err) { indivUploadError.value = err.message }
+  finally { indivUploading.value = false }
+}
+
+// --- Individual sessions ---
+const indivSessions = computed(() => sessions.list.filter(s => s.session_type === 'individual'))
+const indivSelectedYear = ref(null)
+const indivAvailableYears = computed(() => {
+  const years = new Set()
+  for (const s of indivSessions.value) { const y = sessionYear(s); if (y) years.add(y) }
+  return Array.from(years).sort((a, b) => b - a)
+})
+const indivYearGroups = computed(() => {
+  const list = indivSelectedYear.value
+    ? indivSessions.value.filter(s => sessionYear(s) === indivSelectedYear.value)
+    : indivSessions.value
+  const byYear = {}
+  for (const s of list) {
+    const y = sessionYear(s) ?? 'Unknown'
+    const m = sessionMonth(s) ?? 'Unknown'
+    if (!byYear[y]) byYear[y] = {}
+    if (!byYear[y][m]) byYear[y][m] = []
+    byYear[y][m].push(s)
+  }
+  return Object.entries(byYear)
+    .sort(([a], [b]) => (b === 'Unknown' ? -1 : a === 'Unknown' ? 1 : b - a))
+    .map(([year, months]) => ({
+      year,
+      months: Object.entries(months)
+        .sort(([a], [b]) => (b === 'Unknown' ? -1 : a === 'Unknown' ? 1 : b - a))
+        .map(([month, items]) => ({
+          month, label: month === 'Unknown' ? 'Unknown Date' : MONTH_NAMES[month],
+          key: `indiv-${year}-${month}`, items
+        }))
+    }))
+})
+
 // --- Inline edits ---
 async function saveName(session, newName) {
   if (!newName.trim() || newName.trim() === session.name) return
@@ -313,6 +384,10 @@ async function saveRecordedAt(session, value) {
 async function saveBand(session, value) {
   try { await sessions.update(session.id, { band_id: value ? parseInt(value, 10) : null }) }
   catch (err) { console.error('Failed to update band:', err) }
+}
+async function saveInstrument(session, value) {
+  try { await sessions.update(session.id, { instrument_id: value ? parseInt(value, 10) : null }) }
+  catch (err) { console.error('Failed to update instrument:', err) }
 }
 
 const activeBands = computed(() => bands.value.filter(b => b.status === 'active'))
@@ -344,7 +419,7 @@ onMounted(async () => {
   await sessions.load()
   if (availableYears.value.length > 0) selectedYear.value = availableYears.value[0]
   document.addEventListener('click', closeRatingPopup)
-  await loadBands()
+  await Promise.all([loadBands(), loadInstruments()])
 })
 </script>
 
@@ -363,9 +438,159 @@ onMounted(async () => {
     </div>
 
     <!-- Individual tab -->
-    <div v-if="activeTab === 'individual'" class="card individual-card">
-      <p class="individual-msg">This area is for individual musicians to record parts that they want to share with their fellow band mates</p>
-    </div>
+    <template v-if="activeTab === 'individual'">
+
+      <!-- My Recordings -->
+      <div class="indiv-section-heading">My Recordings</div>
+
+      <!-- Upload card -->
+      <div class="card">
+        <h2 class="card-title">Upload Recording</h2>
+        <div class="upload-form">
+          <div class="file-row">
+            <input ref="fileInputIndiv" type="file" accept="audio/*" @change="onIndivFileSelect"
+                   class="file-input" id="indiv-audio-file" :disabled="indivUploading" />
+            <label for="indiv-audio-file" class="file-label" :class="{ 'has-file': indivFile }">
+              {{ indivFile ? indivFile.name : 'Choose audio file…' }}
+            </label>
+          </div>
+          <div class="fields-row">
+            <div class="field">
+              <label class="field-label">Name</label>
+              <input v-model="indivName" type="text" class="text-input"
+                     placeholder="Recording name" :disabled="indivUploading" />
+            </div>
+            <div class="field">
+              <label class="field-label">Original recording date <span class="optional">(optional)</span></label>
+              <input v-model="indivRecordedAt" type="date" class="text-input" :disabled="indivUploading" />
+            </div>
+            <div class="field">
+              <label class="field-label">Instrument <span class="optional">(optional)</span></label>
+              <select v-model="indivInstrumentId" class="text-input" :disabled="indivUploading">
+                <option value="">— select instrument —</option>
+                <option v-for="inst in instruments" :key="inst.id" :value="inst.id">{{ inst.name }}</option>
+              </select>
+            </div>
+          </div>
+          <p v-if="indivUploadError" class="error-msg">{{ indivUploadError }}</p>
+          <button class="upload-btn" @click="handleIndivUpload" :disabled="!indivFile || indivUploading">
+            {{ indivUploading ? 'Uploading…' : 'Upload' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Your Previous Recordings -->
+      <div class="card sessions-card">
+        <div class="sessions-header">
+          <h2 class="card-title">Your Previous Recordings <span class="count">({{ indivSessions.length }})</span></h2>
+          <div v-if="indivAvailableYears.length > 0" class="year-tabs">
+            <button class="year-tab" :class="{ active: indivSelectedYear === null }" @click="indivSelectedYear = null">All</button>
+            <button v-for="year in indivAvailableYears" :key="year"
+                    class="year-tab" :class="{ active: indivSelectedYear === year }"
+                    @click="indivSelectedYear = year">{{ year }}</button>
+          </div>
+        </div>
+
+        <div v-if="indivSessions.length === 0" class="empty-state">
+          No recordings yet. Upload one above.
+        </div>
+
+        <div v-else>
+          <div v-for="group in indivYearGroups" :key="group.year" class="year-group">
+            <div v-if="indivSelectedYear === null" class="year-heading">{{ group.year }}</div>
+            <div v-for="mgroup in group.months" :key="mgroup.key" class="month-group">
+              <button class="month-heading" @click="toggleMonth(mgroup.key)">
+                <span class="month-chevron">{{ collapsedMonths.has(mgroup.key) ? '▶' : '▼' }}</span>
+                {{ mgroup.label }}
+                <span class="month-count">{{ mgroup.items.length }}</span>
+              </button>
+              <div v-if="!collapsedMonths.has(mgroup.key)" class="table-wrapper">
+                <table class="sessions-table">
+                  <thead>
+                    <tr>
+                      <th class="col-play"></th>
+                      <th>Name</th>
+                      <th>Recorded</th>
+                      <th>Size</th>
+                      <th>Rating</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="session in mgroup.items" :key="session.id"
+                        :class="{ playing: playingId === session.id }">
+                      <td class="col-play">
+                        <button class="play-btn" @click="togglePlay(session)"
+                                :title="playingId === session.id && isPlaying ? 'Pause' : 'Play'">
+                          {{ playingId === session.id && isPlaying ? '⏸' : '▶' }}
+                        </button>
+                      </td>
+                      <td class="col-name">
+                        <input type="text" class="inline-edit" :value="session.name"
+                               @blur="e => saveName(session, e.target.value)"
+                               @keydown.enter="e => e.target.blur()" />
+                        <select class="inline-edit band-select"
+                                :value="session.instrument_id || ''"
+                                @change="e => saveInstrument(session, e.target.value)">
+                          <option value="">— no instrument —</option>
+                          <option v-for="inst in instruments" :key="inst.id" :value="inst.id">{{ inst.name }}</option>
+                        </select>
+                      </td>
+                      <td>
+                        <input type="date" class="inline-edit date-edit"
+                               :value="session.recorded_at ? session.recorded_at.slice(0, 10) : ''"
+                               @change="e => saveRecordedAt(session, e.target.value)" />
+                      </td>
+                      <td class="muted">{{ formatBytes(session.file_size) }}</td>
+                      <td class="col-rating">
+                        <div class="rating-cell" @click.stop>
+                          <span class="avg-rating" :class="{ unrated: !session.avg_rating }">
+                            {{ session.avg_rating ? `★ ${session.avg_rating}` : '★ —' }}
+                            <span v-if="session.rating_count > 0" class="rating-count">({{ session.rating_count }})</span>
+                          </span>
+                          <button class="rate-btn" :class="{ rated: session.my_rating }"
+                                  @click="openRatingPopup(session.id, $event)"
+                                  :title="session.my_rating ? `Your rating: ${session.my_rating}/10` : 'Rate this recording'">
+                            {{ session.my_rating ? session.my_rating : 'Rate' }}
+                          </button>
+                          <div v-if="ratingPopupId === session.id" class="rating-popup" @click.stop>
+                            <div class="popup-label">Your rating</div>
+                            <div class="popup-numbers">
+                              <button v-for="n in 10" :key="n" class="popup-num"
+                                      :class="{ selected: session.my_rating === n }"
+                                      @click="submitRating(session, n)">{{ n }}</button>
+                            </div>
+                            <button v-if="session.my_rating" class="popup-clear" @click="submitRating(session, null)">
+                              Clear rating
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <button class="delete-btn" @click="deleteSession(session.id)" title="Delete">✕</button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Band Members (placeholder) -->
+      <div class="indiv-section-heading">Band Members</div>
+      <div class="card indiv-placeholder-card">
+        <p class="indiv-placeholder-msg">Coming soon — share recordings with your band members.</p>
+      </div>
+
+      <!-- Mashups (placeholder) -->
+      <div class="indiv-section-heading">Mashups</div>
+      <div class="card indiv-placeholder-card">
+        <p class="indiv-placeholder-msg">Coming soon — combine individual parts into a mashup.</p>
+      </div>
+
+    </template>
 
     <!-- Bands tab -->
     <div v-if="activeTab === 'bands'" class="bands-area">
@@ -768,8 +993,9 @@ onMounted(async () => {
 .section-tab.active { color: var(--color-accent); border-bottom-color: var(--color-accent); }
 
 /* Individual tab */
-.individual-card { padding: 40px 24px; }
-.individual-msg { color: var(--color-text-muted); font-size: 1rem; margin: 0; text-align: center; }
+.indiv-section-heading { font-size: 1.1rem; font-weight: 700; color: var(--color-text); margin: 8px 0 12px; padding-left: 2px; border-left: 3px solid var(--color-accent); padding-left: 10px; }
+.indiv-placeholder-card { padding: 32px 24px; }
+.indiv-placeholder-msg { color: var(--color-text-muted); font-size: 0.95rem; margin: 0; }
 
 /* Bands tab */
 .bands-area { display: flex; flex-direction: column; gap: 16px; }

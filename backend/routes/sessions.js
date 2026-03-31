@@ -60,11 +60,13 @@ router.get('/', authenticateToken, async (req, res) => {
     const result = await client.query(
       `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,
          s.band_id, b.name AS band_name,
+         s.instrument_id, i.name AS instrument_name,
          ROUND(AVG(sr.rating), 1) AS avg_rating,
          COUNT(sr.rating) AS rating_count,
          MAX(CASE WHEN sr.user_id = $2 THEN sr.rating END) AS my_rating
        FROM sessions s
        LEFT JOIN bands b ON b.id = s.band_id
+       LEFT JOIN instruments i ON i.id = s.instrument_id
        LEFT JOIN session_ratings sr ON sr.session_id = s.id
        WHERE s.user_id = $1
        GROUP BY s.id
@@ -102,8 +104,10 @@ router.get('/:id/stream', authenticateToken, async (req, res) => {
 router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'No audio file uploaded' });
 
-  const { name, recorded_at, band_id } = req.body;
+  const { name, recorded_at, band_id, session_type, instrument_id } = req.body;
   const bandIdVal = band_id ? parseInt(band_id, 10) : null;
+  const instrumentIdVal = instrument_id ? parseInt(instrument_id, 10) : null;
+  const sessionTypeVal = session_type === 'individual' ? 'individual' : 'band';
   const ext = path.extname(req.file.originalname).toLowerCase() || '.audio';
   const s3Key = `sessions/${req.user.id}/${Date.now()}${ext}`;
 
@@ -115,14 +119,17 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
   const client = await getClient();
   try {
     const insertResult = await client.query(
-      'INSERT INTO sessions (user_id, name, s3_key, file_size, mime_type, recorded_at, band_id) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-      [req.user.id, name || 'Untitled Session', s3Key, req.file.size, req.file.mimetype, recorded_at || null, bandIdVal]
+      'INSERT INTO sessions (user_id, name, s3_key, file_size, mime_type, recorded_at, band_id, session_type, instrument_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
+      [req.user.id, name || 'Untitled Session', s3Key, req.file.size, req.file.mimetype, recorded_at || null, bandIdVal, sessionTypeVal, instrumentIdVal]
     );
     const session = await client.query(
       `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,
-         s.band_id, b.name AS band_name,
+         s.band_id, b.name AS band_name, s.instrument_id, i.name AS instrument_name,
          NULL AS avg_rating, 0 AS rating_count, NULL AS my_rating
-       FROM sessions s LEFT JOIN bands b ON b.id = s.band_id WHERE s.id = $1`,
+       FROM sessions s
+       LEFT JOIN bands b ON b.id = s.band_id
+       LEFT JOIN instruments i ON i.id = s.instrument_id
+       WHERE s.id = $1`,
       [insertResult.insertId]
     );
     res.status(201).json({ session: session.rows[0] });
@@ -176,9 +183,9 @@ router.post('/:id/rate', authenticateToken, async (req, res) => {
   }
 });
 
-// PATCH /api/sessions/:id — update name, recorded_at, and/or band_id
+// PATCH /api/sessions/:id — update name, recorded_at, band_id, and/or instrument_id
 router.patch('/:id', authenticateToken, async (req, res) => {
-  const { name, recorded_at, band_id } = req.body;
+  const { name, recorded_at, band_id, instrument_id } = req.body;
   const client = await getClient();
   try {
     const existing = await client.query(
@@ -193,6 +200,7 @@ router.patch('/:id', authenticateToken, async (req, res) => {
     if (name !== undefined) { fields.push(`name = $${idx++}`); values.push(name); }
     if (recorded_at !== undefined) { fields.push(`recorded_at = $${idx++}`); values.push(recorded_at || null); }
     if (band_id !== undefined) { fields.push(`band_id = $${idx++}`); values.push(band_id || null); }
+    if (instrument_id !== undefined) { fields.push(`instrument_id = $${idx++}`); values.push(instrument_id || null); }
     if (fields.length === 0) return res.status(400).json({ message: 'Nothing to update' });
 
     values.push(req.params.id);
@@ -201,11 +209,13 @@ router.patch('/:id', authenticateToken, async (req, res) => {
     const updated = await client.query(
       `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,
          s.band_id, b.name AS band_name,
+         s.instrument_id, i.name AS instrument_name,
          ROUND(AVG(sr.rating), 1) AS avg_rating,
          COUNT(sr.rating) AS rating_count,
          MAX(CASE WHEN sr.user_id = $2 THEN sr.rating END) AS my_rating
        FROM sessions s
        LEFT JOIN bands b ON b.id = s.band_id
+       LEFT JOIN instruments i ON i.id = s.instrument_id
        LEFT JOIN session_ratings sr ON sr.session_id = s.id
        WHERE s.id = $1
        GROUP BY s.id`,
