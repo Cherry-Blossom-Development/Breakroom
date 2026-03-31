@@ -658,8 +658,8 @@ onMounted(async () => {
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="session in mgroup.items" :key="session.id"
-                        :class="{ playing: playingId === session.id }">
+                    <template v-for="session in mgroup.items" :key="session.id">
+                    <tr :class="{ playing: playingId === session.id }">
                       <td class="col-play">
                         <button class="play-btn" @click="togglePlay(session)"
                                 :title="playingId === session.id && isPlaying ? 'Pause' : 'Play'">
@@ -711,6 +711,15 @@ onMounted(async () => {
                         <button class="delete-btn" @click="deleteSession(session.id)" title="Delete">✕</button>
                       </td>
                     </tr>
+                    <tr v-if="playingId === session.id" class="player-row">
+                      <td colspan="6">
+                        <audio ref="audioEl" :src="`/api/sessions/${playingId}/stream`"
+                               @play="onAudioPlay" @pause="onAudioPause" @ended="onAudioEnded"
+                               @loadedmetadata="onAudioMetadata"
+                               controls preload="metadata"></audio>
+                      </td>
+                    </tr>
+                    </template>
                   </tbody>
                 </table>
               </div>
@@ -948,8 +957,8 @@ onMounted(async () => {
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="session in mgroup.items" :key="session.id"
-                      :class="{ playing: playingId === session.id }">
+                  <template v-for="session in mgroup.items" :key="session.id">
+                  <tr :class="{ playing: playingId === session.id }">
                     <td class="col-play">
                       <button class="play-btn" @click="togglePlay(session)"
                               :title="playingId === session.id && isPlaying ? 'Pause' : 'Play'">
@@ -1005,6 +1014,15 @@ onMounted(async () => {
                       <button class="delete-btn" @click="deleteSession(session.id)" title="Delete">✕</button>
                     </td>
                   </tr>
+                  <tr v-if="playingId === session.id" class="player-row">
+                    <td colspan="6">
+                      <audio ref="audioEl" :src="`/api/sessions/${playingId}/stream`"
+                             @play="onAudioPlay" @pause="onAudioPause" @ended="onAudioEnded"
+                             @loadedmetadata="onAudioMetadata"
+                             controls preload="metadata"></audio>
+                    </td>
+                  </tr>
+                  </template>
                 </tbody>
               </table>
             </div>
@@ -1015,18 +1033,6 @@ onMounted(async () => {
 
     </template>
 
-    <!-- Now Playing bar — outside all tab conditionals so it works from any tab -->
-    <div v-if="playingId !== null" class="now-playing-bar">
-      <audio ref="audioEl" :src="`/api/sessions/${playingId}/stream`"
-             @play="onAudioPlay" @pause="onAudioPause" @ended="onAudioEnded"
-             @loadedmetadata="onAudioMetadata"
-             controls preload="metadata"></audio>
-      <div class="now-playing-info">
-        <span class="now-playing-label">Now Playing</span>
-        <span class="now-playing-name">{{ playingSession()?.name }}</span>
-      </div>
-      <button class="now-playing-close" @click="() => { audioEl.pause(); playingId = null }">✕</button>
-    </div>
   </div>
 </template>
 
@@ -1148,13 +1154,9 @@ onMounted(async () => {
 
 .empty-state { color: var(--color-text-muted); text-align: center; padding: 40px 0; font-size: 0.95rem; }
 
-/* Now Playing bar */
-.now-playing-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--color-background-card); border-top: 1px solid var(--color-border, #444); padding: 10px 24px; display: flex; align-items: center; gap: 16px; z-index: 100; box-shadow: 0 -2px 12px rgba(0,0,0,0.2); }
-.now-playing-bar audio { flex: 1; min-width: 0; height: 36px; }
-.now-playing-info { display: flex; flex-direction: column; min-width: 140px; max-width: 220px; }
-.now-playing-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-accent); font-weight: 600; }
-.now-playing-name { font-size: 0.88rem; color: var(--color-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.now-playing-close { background: none; border: none; color: var(--color-text-muted); cursor: pointer; font-size: 1rem; padding: 4px 8px; border-radius: 4px; }
+/* Inline player row */
+.player-row td { padding: 6px 8px; background: var(--color-background-soft, #1e1e1e); border-top: none; }
+.player-row audio { width: 100%; height: 36px; display: block; }
 /* Two-layer name cell */
 .col-name { min-width: 200px; }
 .col-name .inline-edit { display: block; width: 100%; }
@@ -1162,7 +1164,6 @@ onMounted(async () => {
 .band-select:focus { outline: none; border-bottom-color: var(--color-accent); }
 .band-select option { background: var(--color-background-card); color: var(--color-text); }
 
-.now-playing-close:hover { color: var(--color-text); }
 
 /* Section tabs */
 .section-tabs { display: flex; gap: 0; margin-bottom: 24px; border-bottom: 2px solid var(--color-border, #444); }
