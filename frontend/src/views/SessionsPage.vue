@@ -222,14 +222,26 @@ async function startRecording(context) {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     _recordingChunks = []
-    _mediaRecorder = new MediaRecorder(stream)
+
+    // Pick the best supported MIME type explicitly
+    const preferredTypes = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+      'audio/ogg',
+      'audio/mp4',
+    ]
+    const mimeType = preferredTypes.find(t => MediaRecorder.isTypeSupported(t)) || ''
+    _mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {})
+
+    // Use a 200ms timeslice so data is flushed regularly
     _mediaRecorder.ondataavailable = e => { if (e.data.size > 0) _recordingChunks.push(e.data) }
     _mediaRecorder.onstop = () => {
       stream.getTracks().forEach(t => t.stop())
-      const mimeType = _mediaRecorder.mimeType || 'audio/webm'
-      const ext = mimeType.includes('ogg') ? 'ogg' : 'webm'
-      const blob = new Blob(_recordingChunks, { type: mimeType })
-      const file = new File([blob], `recording-${Date.now()}.${ext}`, { type: mimeType })
+      const finalMime = _mediaRecorder.mimeType || mimeType || 'audio/webm'
+      const ext = finalMime.includes('ogg') ? 'ogg' : finalMime.includes('mp4') ? 'mp4' : 'webm'
+      const blob = new Blob(_recordingChunks, { type: finalMime })
+      const file = new File([blob], `recording-${Date.now()}.${ext}`, { type: finalMime })
       if (context === 'band') {
         selectedFile.value = file
         if (!sessionName.value) sessionName.value = defaultName()
@@ -241,7 +253,7 @@ async function startRecording(context) {
       recordingSeconds.value = 0
       clearInterval(_recordingInterval)
     }
-    _mediaRecorder.start()
+    _mediaRecorder.start(200)
     recordingFor.value = context
     recordingSeconds.value = 0
     _recordingInterval = setInterval(() => recordingSeconds.value++, 1000)
