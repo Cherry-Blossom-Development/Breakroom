@@ -1011,10 +1011,14 @@ onMounted(async () => {
             <div class="members-list">
               <div v-for="m in activeBand.members" :key="m.id" class="member-row">
                 <div class="member-info">
-                  <span class="member-handle">@{{ m.handle }}</span>
-                  <span v-if="m.first_name" class="member-name">{{ m.first_name }} {{ m.last_name }}</span>
-                  <span class="member-role-badge" :class="m.role">{{ m.role }}</span>
-                  <span v-if="m.status === 'invited'" class="member-role-badge invited">invited</span>
+                  <div class="member-name-line">
+                    <span class="member-handle">@{{ m.handle }}</span>
+                    <span v-if="m.first_name" class="member-name">{{ m.first_name }} {{ m.last_name }}</span>
+                  </div>
+                  <div class="member-badges">
+                    <span class="member-role-badge" :class="m.role">{{ m.role }}</span>
+                    <span v-if="m.status === 'invited'" class="member-role-badge invited">invited</span>
+                  </div>
                 </div>
                 <button
                   v-if="activeBand.my_role === 'owner' && m.role !== 'owner'"
@@ -1394,7 +1398,9 @@ onMounted(async () => {
 
 .members-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
 .member-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 6px; background: var(--color-background); }
-.member-info { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.member-info { display: flex; flex-direction: column; gap: 3px; }
+.member-name-line { display: flex; align-items: center; gap: 8px; }
+.member-badges { display: flex; gap: 6px; }
 .member-handle { font-weight: 600; }
 .member-name { color: var(--color-text-muted); font-size: 0.9rem; }
 .member-role-badge { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; padding: 2px 7px; border-radius: 99px; background: var(--color-border); color: var(--color-text-muted); }
