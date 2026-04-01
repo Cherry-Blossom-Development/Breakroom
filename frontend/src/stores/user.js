@@ -1,4 +1,5 @@
 import { reactive } from 'vue'
+import { sessions } from './sessions'
 
 const state = reactive({
   username: null,
@@ -33,6 +34,7 @@ export const user = reactive({
       });
 
       state.username = null;
+      sessions.reset();
     } catch (err) {
       console.error('Logout failed:', err);
     }
