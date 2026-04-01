@@ -485,6 +485,94 @@ const indivYearGroups = computed(() => {
     }))
 })
 
+// --- Band Members sessions ---
+const bandMemberSessions = ref([])
+const bandMemberLoaded = ref(false)
+const bandMemberBandFilter = ref('')
+const bandMemberSelectedYear = ref(null)
+const bmRatingPopupId = ref(null)
+
+async function loadBandMemberSessions() {
+  if (bandMemberLoaded.value) return
+  try {
+    const res = await fetch('/api/sessions/band-members', { credentials: 'include' })
+    if (res.ok) {
+      const data = await res.json()
+      bandMemberSessions.value = data.sessions
+    }
+  } catch (err) { console.error('Failed to load band member sessions:', err) }
+  finally { bandMemberLoaded.value = true }
+}
+
+const filteredBandMemberSessions = computed(() => {
+  if (!bandMemberBandFilter.value) return bandMemberSessions.value
+  return bandMemberSessions.value.filter(s => String(s.band_id) === String(bandMemberBandFilter.value))
+})
+
+const bandMemberBands = computed(() => {
+  const seen = new Set()
+  const result = []
+  for (const s of bandMemberSessions.value) {
+    if (s.band_id && !seen.has(s.band_id)) {
+      seen.add(s.band_id)
+      result.push({ id: s.band_id, name: s.band_name })
+    }
+  }
+  return result.sort((a, b) => a.name.localeCompare(b.name))
+})
+
+const bandMemberAvailableYears = computed(() => {
+  const years = new Set()
+  for (const s of filteredBandMemberSessions.value) { const y = sessionYear(s); if (y) years.add(y) }
+  return Array.from(years).sort((a, b) => b - a)
+})
+
+const bandMemberYearGroups = computed(() => {
+  const list = bandMemberSelectedYear.value
+    ? filteredBandMemberSessions.value.filter(s => sessionYear(s) === bandMemberSelectedYear.value)
+    : filteredBandMemberSessions.value
+  const byYear = {}
+  for (const s of list) {
+    const y = sessionYear(s) ?? 'Unknown'
+    const m = sessionMonth(s) ?? 'Unknown'
+    if (!byYear[y]) byYear[y] = {}
+    if (!byYear[y][m]) byYear[y][m] = []
+    byYear[y][m].push(s)
+  }
+  return Object.entries(byYear)
+    .sort(([a], [b]) => (b === 'Unknown' ? -1 : a === 'Unknown' ? 1 : b - a))
+    .map(([year, months]) => ({
+      year,
+      months: Object.entries(months)
+        .sort(([a], [b]) => (b === 'Unknown' ? -1 : a === 'Unknown' ? 1 : b - a))
+        .map(([month, items]) => ({
+          month, label: month === 'Unknown' ? 'Unknown Date' : MONTH_NAMES[month],
+          key: `bm-${year}-${month}`, items
+        }))
+    }))
+})
+
+function openBmRatingPopup(sessionId, event) {
+  event.stopPropagation()
+  bmRatingPopupId.value = bmRatingPopupId.value === sessionId ? null : sessionId
+}
+
+async function submitBandMemberRating(session, value) {
+  const newRating = session.my_rating === value ? null : value
+  try {
+    const res = await fetch(`/api/sessions/${session.id}/rate`, {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rating: newRating })
+    })
+    if (!res.ok) throw new Error('Rating failed')
+    const data = await res.json()
+    const idx = bandMemberSessions.value.findIndex(s => s.id === session.id)
+    if (idx !== -1) bandMemberSessions.value[idx] = { ...bandMemberSessions.value[idx], ...data }
+  } catch (err) { console.error('Failed to rate:', err) }
+  bmRatingPopupId.value = null
+}
+
 // --- Inline edits ---
 async function saveName(session, newName) {
   if (!newName.trim() || newName.trim() === session.name) return
@@ -511,7 +599,7 @@ function openRatingPopup(sessionId, event) {
   event.stopPropagation()
   ratingPopupId.value = ratingPopupId.value === sessionId ? null : sessionId
 }
-function closeRatingPopup() { ratingPopupId.value = null }
+function closeRatingPopup() { ratingPopupId.value = null; bmRatingPopupId.value = null }
 
 async function submitRating(session, value) {
   // Clicking the current rating clears it
@@ -533,7 +621,7 @@ onMounted(async () => {
   await sessions.load()
   if (availableYears.value.length > 0) selectedYear.value = availableYears.value[0]
   document.addEventListener('click', closeRatingPopup)
-  await Promise.all([loadBands(), loadInstruments()])
+  await Promise.all([loadBands(), loadInstruments(), loadBandMemberSessions()])
   await refreshMicDevices()
 })
 </script>
@@ -728,10 +816,107 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Band Members (placeholder) -->
+      <!-- Band Members -->
       <div class="indiv-section-heading">Band Members</div>
-      <div class="card indiv-placeholder-card">
-        <p class="indiv-placeholder-msg">Coming soon — share recordings with your band members.</p>
+      <div class="card sessions-card">
+        <div class="sessions-header">
+          <h2 class="card-title">Band Members' Recordings <span class="count">({{ filteredBandMemberSessions.length }})</span></h2>
+          <div class="bm-filters">
+            <select v-model="bandMemberBandFilter" class="bm-band-select">
+              <option value="">All Bands</option>
+              <option v-for="b in bandMemberBands" :key="b.id" :value="b.id">{{ b.name }}</option>
+            </select>
+            <div v-if="bandMemberAvailableYears.length > 0" class="year-tabs">
+              <button class="year-tab" :class="{ active: bandMemberSelectedYear === null }" @click="bandMemberSelectedYear = null">All</button>
+              <button v-for="year in bandMemberAvailableYears" :key="year"
+                      class="year-tab" :class="{ active: bandMemberSelectedYear === year }"
+                      @click="bandMemberSelectedYear = year">{{ year }}</button>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="filteredBandMemberSessions.length === 0" class="empty-state">
+          No band member recordings yet.
+        </div>
+
+        <div v-else>
+          <div v-for="group in bandMemberYearGroups" :key="group.year" class="year-group">
+            <div v-if="bandMemberSelectedYear === null" class="year-heading">{{ group.year }}</div>
+            <div v-for="mgroup in group.months" :key="mgroup.key" class="month-group">
+              <button class="month-heading" @click="toggleMonth(mgroup.key)">
+                <span class="month-chevron">{{ collapsedMonths.has(mgroup.key) ? '▶' : '▼' }}</span>
+                {{ mgroup.label }}
+                <span class="month-count">{{ mgroup.items.length }}</span>
+              </button>
+              <div v-if="!collapsedMonths.has(mgroup.key)" class="table-wrapper">
+                <table class="sessions-table">
+                  <thead>
+                    <tr>
+                      <th class="col-play"></th>
+                      <th>Name</th>
+                      <th>Recorded</th>
+                      <th>Size</th>
+                      <th>Rating</th>
+                      <th>Band</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <template v-for="session in mgroup.items" :key="session.id">
+                    <tr :class="{ playing: playingId === session.id }">
+                      <td class="col-play">
+                        <button class="play-btn" @click="togglePlay(session)"
+                                :title="playingId === session.id && isPlaying ? 'Pause' : 'Play'">
+                          {{ playingId === session.id && isPlaying ? '⏸' : '▶' }}
+                        </button>
+                      </td>
+                      <td class="col-name">
+                        <span class="session-name-text">{{ session.name }}</span>
+                        <span v-if="session.instrument_name" class="session-sub">{{ session.instrument_name }}</span>
+                        <span v-if="session.uploader_handle" class="session-sub muted">@{{ session.uploader_handle }}</span>
+                      </td>
+                      <td>{{ session.recorded_at ? session.recorded_at.slice(0, 10) : '—' }}</td>
+                      <td class="muted">{{ formatBytes(session.file_size) }}</td>
+                      <td class="col-rating">
+                        <div class="rating-cell" @click.stop>
+                          <span class="avg-rating" :class="{ unrated: !session.avg_rating }">
+                            {{ session.avg_rating ? `★ ${session.avg_rating}` : '★ —' }}
+                            <span v-if="session.rating_count > 0" class="rating-count">({{ session.rating_count }})</span>
+                          </span>
+                          <button class="rate-btn" :class="{ rated: session.my_rating }"
+                                  @click="openBmRatingPopup(session.id, $event)"
+                                  :title="session.my_rating ? `Your rating: ${session.my_rating}/10` : 'Rate this recording'">
+                            {{ session.my_rating ? session.my_rating : 'Rate' }}
+                          </button>
+                          <div v-if="bmRatingPopupId === session.id" class="rating-popup" @click.stop>
+                            <div class="popup-label">Your rating</div>
+                            <div class="popup-numbers">
+                              <button v-for="n in 10" :key="n" class="popup-num"
+                                      :class="{ selected: session.my_rating === n }"
+                                      @click="submitBandMemberRating(session, n)">{{ n }}</button>
+                            </div>
+                            <button v-if="session.my_rating" class="popup-clear" @click="submitBandMemberRating(session, null)">
+                              Clear rating
+                            </button>
+                          </div>
+                        </div>
+                      </td>
+                      <td class="muted">{{ session.band_name || '—' }}</td>
+                    </tr>
+                    <tr v-if="playingId === session.id" class="player-row">
+                      <td colspan="6">
+                        <audio ref="audioEl" :src="`/api/sessions/${playingId}/stream`"
+                               @play="onAudioPlay" @pause="onAudioPause" @ended="onAudioEnded"
+                               @loadedmetadata="onAudioMetadata"
+                               controls preload="metadata"></audio>
+                      </td>
+                    </tr>
+                    </template>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Mashups (placeholder) -->
@@ -1175,6 +1360,10 @@ onMounted(async () => {
 .indiv-section-heading { font-size: 1.1rem; font-weight: 700; color: var(--color-text); margin: 8px 0 12px; padding-left: 2px; border-left: 3px solid var(--color-accent); padding-left: 10px; }
 .indiv-placeholder-card { padding: 32px 24px; }
 .indiv-placeholder-msg { color: var(--color-text-muted); font-size: 0.95rem; margin: 0; }
+.bm-filters { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.bm-band-select { background: var(--color-bg-input, #2a2a2a); border: 1px solid var(--color-border, #555); border-radius: 6px; padding: 5px 10px; font-size: 0.85rem; color: var(--color-text); }
+.session-name-text { display: block; font-weight: 500; }
+.session-sub { display: block; font-size: 0.8rem; color: var(--color-text-muted); }
 
 /* Bands tab */
 .bands-area { display: flex; flex-direction: column; gap: 16px; }

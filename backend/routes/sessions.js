@@ -82,12 +82,47 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/sessions/:id/stream — ownership-checked proxy from S3 (supports range requests)
+// GET /api/sessions/band-members — sessions from other active members of shared bands
+router.get('/band-members', authenticateToken, async (req, res) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,
+         s.band_id, b.name AS band_name,
+         s.instrument_id, i.name AS instrument_name,
+         u.handle AS uploader_handle,
+         ROUND(AVG(sr.rating), 1) AS avg_rating,
+         COUNT(sr.rating) AS rating_count,
+         MAX(CASE WHEN sr.user_id = $2 THEN sr.rating END) AS my_rating
+       FROM sessions s
+       JOIN band_members bm_me ON bm_me.band_id = s.band_id AND bm_me.user_id = $1 AND bm_me.status = 'active'
+       JOIN band_members bm_them ON bm_them.band_id = s.band_id AND bm_them.user_id = s.user_id AND bm_them.status = 'active'
+       LEFT JOIN bands b ON b.id = s.band_id
+       LEFT JOIN instruments i ON i.id = s.instrument_id
+       LEFT JOIN users u ON u.id = s.user_id
+       LEFT JOIN session_ratings sr ON sr.session_id = s.id
+       WHERE s.user_id != $1
+       GROUP BY s.id
+       ORDER BY s.recorded_at DESC, s.uploaded_at DESC`,
+      [req.user.id, req.user.id]
+    );
+    res.json({ sessions: result.rows });
+  } catch (err) {
+    console.error('Error fetching band member sessions:', err);
+    res.status(500).json({ message: 'Failed to fetch band member sessions' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/sessions/:id/stream — access-checked proxy from S3 (owner or active band member)
 router.get('/:id/stream', authenticateToken, async (req, res) => {
   const client = await getClient();
   try {
     const result = await client.query(
-      'SELECT s3_key FROM sessions WHERE id = $1 AND user_id = $2',
+      `SELECT s.s3_key FROM sessions s
+       LEFT JOIN band_members bm ON bm.band_id = s.band_id AND bm.user_id = $2 AND bm.status = 'active'
+       WHERE s.id = $1 AND (s.user_id = $2 OR bm.band_id IS NOT NULL)`,
       [req.params.id, req.user.id]
     );
     if (result.rowCount === 0) return res.status(404).json({ message: 'Session not found' });
@@ -147,9 +182,11 @@ router.post('/:id/rate', authenticateToken, async (req, res) => {
   const { rating } = req.body;
   const client = await getClient();
   try {
-    // For now, only the session owner can rate; expand when sharing is added
+    // Allow session owner or active band member to rate
     const existing = await client.query(
-      'SELECT id FROM sessions WHERE id = $1 AND user_id = $2',
+      `SELECT s.id FROM sessions s
+       LEFT JOIN band_members bm ON bm.band_id = s.band_id AND bm.user_id = $2 AND bm.status = 'active'
+       WHERE s.id = $1 AND (s.user_id = $2 OR bm.band_id IS NOT NULL)`,
       [req.params.id, req.user.id]
     );
     if (existing.rowCount === 0) return res.status(404).json({ message: 'Session not found' });
