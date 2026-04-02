@@ -213,8 +213,10 @@ const audioLevel = ref(0) // 0–100, drives level meter
 const micDevices = ref([])       // available audio input devices
 const selectedMicId = ref('')    // '' = browser default
 const recordingPreviewUrl = ref(null) // blob URL for post-recording preview
-let _mediaRecorder = null
-let _recordingChunks = []
+let _recordingStream = null
+let _pcmSamples = []
+let _recordingSampleRate = 48000
+let _scriptProcessor = null
 let _recordingInterval = null
 let _audioContext = null
 let _levelAnimFrame = null
@@ -228,7 +230,10 @@ async function refreshMicDevices() {
 
 function _startLevelMeter(stream) {
   _audioContext = new AudioContext()
+  _recordingSampleRate = _audioContext.sampleRate
   const source = _audioContext.createMediaStreamSource(stream)
+
+  // Analyser for the visual level meter
   const analyser = _audioContext.createAnalyser()
   analyser.fftSize = 256
   source.connect(analyser)
@@ -240,11 +245,53 @@ function _startLevelMeter(stream) {
     _levelAnimFrame = requestAnimationFrame(tick)
   }
   tick()
+
+  // ScriptProcessorNode captures raw mono PCM for WAV encoding
+  _scriptProcessor = _audioContext.createScriptProcessor(4096, 1, 1)
+  _scriptProcessor.onaudioprocess = (e) => {
+    _pcmSamples.push(new Float32Array(e.inputBuffer.getChannelData(0)))
+  }
+  source.connect(_scriptProcessor)
+  _scriptProcessor.connect(_audioContext.destination) // must be connected to fire
 }
 function _stopLevelMeter() {
-  if (_levelAnimFrame) cancelAnimationFrame(_levelAnimFrame)
+  if (_levelAnimFrame) { cancelAnimationFrame(_levelAnimFrame); _levelAnimFrame = null }
+  if (_scriptProcessor) { _scriptProcessor.disconnect(); _scriptProcessor = null }
   if (_audioContext) { _audioContext.close(); _audioContext = null }
   audioLevel.value = 0
+}
+
+// WAV encoding helpers — writes uncompressed 16-bit mono PCM
+function _writeString(view, offset, str) {
+  for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i))
+}
+function _encodeWAV(samples, sampleRate) {
+  const numChannels = 1
+  const bitsPerSample = 16
+  const bytesPerSample = bitsPerSample / 8
+  const dataSize = samples.length * bytesPerSample
+  const buffer = new ArrayBuffer(44 + dataSize)
+  const view = new DataView(buffer)
+  _writeString(view, 0, 'RIFF')
+  view.setUint32(4, 36 + dataSize, true)
+  _writeString(view, 8, 'WAVE')
+  _writeString(view, 12, 'fmt ')
+  view.setUint32(16, 16, true)                                          // chunk size
+  view.setUint16(20, 1, true)                                           // PCM format
+  view.setUint16(22, numChannels, true)
+  view.setUint32(24, sampleRate, true)
+  view.setUint32(28, sampleRate * numChannels * bytesPerSample, true)   // byte rate
+  view.setUint16(32, numChannels * bytesPerSample, true)                // block align
+  view.setUint16(34, bitsPerSample, true)
+  _writeString(view, 36, 'data')
+  view.setUint32(40, dataSize, true)
+  let off = 44
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]))
+    view.setInt16(off, s < 0 ? s * 32768 : s * 32767, true)
+    off += 2
+  }
+  return new Blob([buffer], { type: 'audio/wav' })
 }
 
 function formatRecordingTime(secs) {
@@ -259,47 +306,13 @@ async function startRecording(context) {
       ? { deviceId: { exact: selectedMicId.value }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
       : { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
     const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+    _recordingStream = stream
 
     // Permission just granted — populate device list with labels
     await refreshMicDevices()
 
-    _recordingChunks = []
-
-    // Pick the best supported MIME type explicitly
-    const preferredTypes = [
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/ogg;codecs=opus',
-      'audio/ogg',
-      'audio/mp4',
-    ]
-    const mimeType = preferredTypes.find(t => MediaRecorder.isTypeSupported(t)) || ''
-    _mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {})
-
-    // Use a 200ms timeslice so data is flushed regularly
-    _mediaRecorder.ondataavailable = e => { if (e.data.size > 0) _recordingChunks.push(e.data) }
-    _mediaRecorder.onstop = () => {
-      _stopLevelMeter()
-      stream.getTracks().forEach(t => t.stop())
-      const finalMime = _mediaRecorder.mimeType || mimeType || 'audio/webm'
-      const ext = finalMime.includes('ogg') ? 'ogg' : finalMime.includes('mp4') ? 'mp4' : 'webm'
-      const blob = new Blob(_recordingChunks, { type: finalMime })
-      console.log('[Recording] chunks:', _recordingChunks.length, '| blob size:', blob.size, '| mime:', finalMime)
-      const file = new File([blob], `recording-${Date.now()}.${ext}`, { type: finalMime })
-      recordingPreviewUrl.value = URL.createObjectURL(blob)
-      if (context === 'band') {
-        selectedFile.value = file
-        if (!sessionName.value) sessionName.value = defaultName()
-      } else {
-        indivFile.value = file
-        if (!indivName.value) indivName.value = defaultName()
-      }
-      recordingFor.value = null
-      recordingSeconds.value = 0
-      clearInterval(_recordingInterval)
-    }
+    _pcmSamples = []
     _startLevelMeter(stream)
-    _mediaRecorder.start(200)
     recordingFor.value = context
     recordingSeconds.value = 0
     _recordingInterval = setInterval(() => recordingSeconds.value++, 1000)
@@ -308,7 +321,42 @@ async function startRecording(context) {
   }
 }
 function stopRecording() {
-  if (_mediaRecorder && _mediaRecorder.state !== 'inactive') _mediaRecorder.stop()
+  // Disconnect PCM capture before stopping stream to avoid trailing silence
+  if (_scriptProcessor) {
+    _scriptProcessor.onaudioprocess = null
+    _scriptProcessor.disconnect()
+    _scriptProcessor = null
+  }
+  if (_recordingStream) {
+    _recordingStream.getTracks().forEach(t => t.stop())
+    _recordingStream = null
+  }
+
+  // Flatten collected PCM chunks and encode as uncompressed WAV
+  const totalSamples = _pcmSamples.reduce((sum, c) => sum + c.length, 0)
+  const flat = new Float32Array(totalSamples)
+  let offset = 0
+  for (const chunk of _pcmSamples) { flat.set(chunk, offset); offset += chunk.length }
+  _pcmSamples = []
+
+  const blob = _encodeWAV(flat, _recordingSampleRate)
+  const file = new File([blob], `recording-${Date.now()}.wav`, { type: 'audio/wav' })
+  console.log('[Recording] samples:', totalSamples, '| blob size:', blob.size, '| sample rate:', _recordingSampleRate)
+
+  recordingPreviewUrl.value = URL.createObjectURL(blob)
+  const ctx = recordingFor.value
+  if (ctx === 'band') {
+    selectedFile.value = file
+    if (!sessionName.value) sessionName.value = defaultName()
+  } else {
+    indivFile.value = file
+    if (!indivName.value) indivName.value = defaultName()
+  }
+  recordingFor.value = null
+  recordingSeconds.value = 0
+  clearInterval(_recordingInterval)
+
+  _stopLevelMeter()
 }
 
 // --- Playback state ---
@@ -405,13 +453,8 @@ async function togglePlay(session) {
 function onAudioPlay() { isPlaying.value = true }
 function onAudioPause() { isPlaying.value = false }
 function onAudioEnded() { isPlaying.value = false }
-function onAudioMetadata(e) {
-  // MediaRecorder WebM files don't include duration; browser reports Infinity.
-  // Seeking to a huge time forces the browser to scan and discover the real duration.
-  if (e.target.duration === Infinity || isNaN(e.target.duration)) {
-    e.target.currentTime = 1e101
-    e.target.addEventListener('timeupdate', () => { e.target.currentTime = 0 }, { once: true })
-  }
+function onAudioMetadata() {
+  // WAV files include duration in their header — no workaround needed.
 }
 
 // --- Upload ---
