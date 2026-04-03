@@ -5,6 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const { getClient } = require('../utilities/db');
 const { uploadToS3, deleteFromS3, getS3Url, streamFromS3 } = require('../utilities/aws-s3');
+const { normalizeToWav } = require('../utilities/audio');
 const { extractToken } = require('../utilities/auth');
 
 require('dotenv').config();
@@ -143,10 +144,19 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
   const bandIdVal = band_id ? parseInt(band_id, 10) : null;
   const instrumentIdVal = instrument_id ? parseInt(instrument_id, 10) : null;
   const sessionTypeVal = session_type === 'individual' ? 'individual' : 'band';
-  const ext = path.extname(req.file.originalname).toLowerCase() || '.audio';
-  const s3Key = `sessions/${req.user.id}/${Date.now()}${ext}`;
 
-  const uploadResult = await uploadToS3(req.file.buffer, s3Key, req.file.mimetype);
+  // Normalize to WAV: convert any format → 44100Hz 16-bit WAV with EBU R128 loudness normalization
+  let wavBuffer;
+  try {
+    wavBuffer = await normalizeToWav(req.file.buffer);
+  } catch (err) {
+    console.error('Audio normalization failed:', err);
+    return res.status(500).json({ message: 'Failed to process audio: ' + err.message });
+  }
+
+  const s3Key = `sessions/${req.user.id}/${Date.now()}.wav`;
+
+  const uploadResult = await uploadToS3(wavBuffer, s3Key, 'audio/wav');
   if (!uploadResult.success) {
     return res.status(500).json({ message: 'Failed to upload to storage: ' + uploadResult.error });
   }
@@ -154,8 +164,8 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
   const client = await getClient();
   try {
     const insertResult = await client.query(
-      'INSERT INTO sessions (user_id, name, s3_key, file_size, mime_type, recorded_at, band_id, session_type, instrument_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)',
-      [req.user.id, name || 'Untitled Session', s3Key, req.file.size, req.file.mimetype, recorded_at || null, bandIdVal, sessionTypeVal, instrumentIdVal]
+      'INSERT INTO sessions (user_id, name, s3_key, file_size, mime_type, recorded_at, band_id, session_type, instrument_id, normalized) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
+      [req.user.id, name || 'Untitled Session', s3Key, wavBuffer.length, 'audio/wav', recorded_at || null, bandIdVal, sessionTypeVal, instrumentIdVal, 1]
     );
     const session = await client.query(
       `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,

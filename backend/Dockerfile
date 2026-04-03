@@ -3,6 +3,9 @@ FROM node:24.2.0-alpine
 # Set the working directory inside the container at _build_ time
 WORKDIR /app
 
+# Install FFmpeg for server-side audio normalization (converts uploads to normalized WAV)
+RUN apk add --no-cache ffmpeg
+
 # Copy the package.json files so that we can do the install note this is done before everything else
 # so that caching can take place and we don't reinstall everything every time
 COPY package*.json ./
