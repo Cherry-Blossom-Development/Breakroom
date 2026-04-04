@@ -447,6 +447,7 @@ async function togglePlay(session) {
   playingId.value = session.id
   isPlaying.value = false
   await nextTick()
+  audioEl.value.volume = 0.5
   audioEl.value.load()
   audioEl.value.play()
 }
@@ -661,6 +662,7 @@ async function deleteSession(id) {
 }
 
 onMounted(async () => {
+  sessions.reset()
   await sessions.load()
   if (availableYears.value.length > 0) selectedYear.value = availableYears.value[0]
   document.addEventListener('click', closeRatingPopup)
