@@ -15,7 +15,8 @@ Breakroom is a full-stack web application with:
 - Local development connects to EC2 Redis for seamless socket messaging between local and production
 - New file: `backend/utilities/redis.js` - Redis connection utility
 - Added `@socket.io/redis-adapter` and `redis` npm packages
-- Environment variables: `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`
+- Environment variables: `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`, `REDIS_KEY_PREFIX`
+- **REDIS_KEY_PREFIX** isolates dev/prod socket channels on shared Redis (dev uses `dev`, prod defaults to `prod`)
 - Extensible for multiple backend servers (horizontal scaling)
 
 ## Recent Changes (Dec 25, 2025)
@@ -76,6 +77,7 @@ CORS_ORIGIN=https://local.prosaurus.com
 REDIS_HOST=44.225.148.34
 REDIS_PORT=6379
 REDIS_PASSWORD=<password>
+REDIS_KEY_PREFIX=dev
 ```
 
 ### Running Locally

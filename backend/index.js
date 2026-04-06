@@ -34,8 +34,10 @@ const io = new Server(server, {
 (async () => {
   try {
     const { pubClient, subClient } = await createRedisClients();
-    io.adapter(createAdapter(pubClient, subClient));
-    console.log('Socket.IO Redis adapter initialized');
+    // Use key prefix to isolate dev/prod socket channels on shared Redis
+    const redisKeyPrefix = process.env.REDIS_KEY_PREFIX || 'prod';
+    io.adapter(createAdapter(pubClient, subClient, { key: `socket.io:${redisKeyPrefix}` }));
+    console.log(`Socket.IO Redis adapter initialized with prefix: ${redisKeyPrefix}`);
   } catch (err) {
     console.error('Redis adapter failed, using in-memory:', err.message);
   }
