@@ -29,6 +29,13 @@ const submitting = ref(false)
 // Selected ticket for detail view
 const selectedTicket = ref(null)
 
+// Comments state
+const ticketComments = ref([])
+const commentText = ref('')
+const postingComment = ref(false)
+const editingCommentId = ref(null)
+const editCommentText = ref('')
+
 // Edit ticket state
 const editingTicket = ref(false)
 const editForm = ref({
@@ -250,11 +257,90 @@ async function onDragChange(event, toStatus) {
 function selectTicket(ticket) {
   selectedTicket.value = { ...ticket }
   editingTicket.value = false
+  fetchComments(ticket.id)
 }
 
 function closeDetail() {
   selectedTicket.value = null
   editingTicket.value = false
+  ticketComments.value = []
+  commentText.value = ''
+  editingCommentId.value = null
+  editCommentText.value = ''
+}
+
+async function fetchComments(ticketId) {
+  try {
+    const res = await authFetch(`/api/helpdesk/ticket/${ticketId}/comments`)
+    if (res.ok) {
+      const data = await res.json()
+      ticketComments.value = data.comments
+    }
+  } catch (err) {
+    console.error('Error fetching comments:', err)
+  }
+}
+
+async function addComment() {
+  if (!commentText.value.trim() || !selectedTicket.value) return
+  postingComment.value = true
+  try {
+    const res = await authFetch(`/api/helpdesk/ticket/${selectedTicket.value.id}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: commentText.value.trim() })
+    })
+    if (res.ok) {
+      const data = await res.json()
+      ticketComments.value.push(data.comment)
+      commentText.value = ''
+    }
+  } catch (err) {
+    console.error('Error adding comment:', err)
+  } finally {
+    postingComment.value = false
+  }
+}
+
+function startEditComment(comment) {
+  editingCommentId.value = comment.id
+  editCommentText.value = comment.content
+}
+
+function cancelEditComment() {
+  editingCommentId.value = null
+  editCommentText.value = ''
+}
+
+async function saveEditComment(commentId) {
+  if (!editCommentText.value.trim()) return
+  try {
+    const res = await authFetch(`/api/helpdesk/comment/${commentId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: editCommentText.value.trim() })
+    })
+    if (res.ok) {
+      const data = await res.json()
+      const idx = ticketComments.value.findIndex(c => c.id === commentId)
+      if (idx !== -1) ticketComments.value[idx] = data.comment
+      cancelEditComment()
+    }
+  } catch (err) {
+    console.error('Error updating comment:', err)
+  }
+}
+
+async function deleteComment(commentId) {
+  try {
+    const res = await authFetch(`/api/helpdesk/comment/${commentId}`, { method: 'DELETE' })
+    if (res.ok) {
+      const idx = ticketComments.value.findIndex(c => c.id === commentId)
+      if (idx !== -1) ticketComments.value[idx] = { ...ticketComments.value[idx], is_deleted: 1 }
+    }
+  } catch (err) {
+    console.error('Error deleting comment:', err)
+  }
 }
 
 function startEditTicket() {
@@ -463,6 +549,56 @@ onMounted(async () => {
                 :style="{ background: statusHex[nextStatus] }"
               >
                 {{ statusLabels[nextStatus] }}
+              </button>
+            </div>
+          </div>
+
+          <div class="detail-comments">
+            <h3>Comments ({{ ticketComments.filter(c => !c.is_deleted).length }})</h3>
+
+            <div v-if="ticketComments.length > 0" class="comments-list">
+              <div v-for="comment in ticketComments" :key="comment.id" class="comment-item">
+                <template v-if="comment.is_deleted">
+                  <p class="comment-deleted">Comment deleted.</p>
+                </template>
+                <template v-else-if="editingCommentId === comment.id">
+                  <div class="comment-edit-form">
+                    <textarea v-model="editCommentText" rows="2" class="comment-input"></textarea>
+                    <div class="comment-edit-actions">
+                      <button class="btn-primary btn-sm" @click="saveEditComment(comment.id)" :disabled="!editCommentText.trim()">Save</button>
+                      <button class="btn-secondary btn-sm" @click="cancelEditComment">Cancel</button>
+                    </div>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="comment-header">
+                    <span class="comment-author">{{ comment.handle }}</span>
+                    <span class="comment-date">{{ formatDate(comment.created_at) }}</span>
+                    <span v-if="comment.updated_at !== comment.created_at" class="comment-edited">(edited)</span>
+                    <div v-if="comment.handle === user.username" class="comment-actions">
+                      <button class="btn-link" @click="startEditComment(comment)">Edit</button>
+                      <button class="btn-link btn-danger" @click="deleteComment(comment.id)">Delete</button>
+                    </div>
+                  </div>
+                  <p class="comment-content">{{ comment.content }}</p>
+                </template>
+              </div>
+            </div>
+            <p v-else class="no-comments">No comments yet.</p>
+
+            <div class="comment-compose">
+              <textarea
+                v-model="commentText"
+                placeholder="Add a comment..."
+                rows="2"
+                class="comment-input"
+              ></textarea>
+              <button
+                class="btn-primary btn-sm"
+                @click="addComment"
+                :disabled="postingComment || !commentText.trim()"
+              >
+                {{ postingComment ? 'Posting...' : 'Add Comment' }}
               </button>
             </div>
           </div>
@@ -1089,5 +1225,130 @@ onMounted(async () => {
     flex: 0 0 220px;
     min-width: 220px;
   }
+}
+
+/* Comments */
+.detail-comments {
+  margin-top: 20px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 16px;
+}
+
+.detail-comments h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0 0 12px;
+  color: var(--color-text);
+}
+
+.comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.comment-item {
+  background: var(--color-surface-variant, #f5f5f5);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.comment-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.comment-author {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.comment-date {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+.comment-edited {
+  font-size: 0.75rem;
+  color: var(--color-text-light);
+  font-style: italic;
+}
+
+.comment-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+
+.comment-content {
+  font-size: 0.9rem;
+  color: var(--color-text);
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.comment-deleted {
+  font-style: italic;
+  color: var(--color-text-light);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.comment-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.comment-edit-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.comment-input {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  resize: vertical;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.comment-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.no-comments {
+  color: var(--color-text-light);
+  font-style: italic;
+  font-size: 0.875rem;
+  margin: 0 0 12px;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.btn-link.btn-danger {
+  color: var(--color-danger, #dc3545);
+}
+
+.btn-sm {
+  padding: 6px 14px;
+  font-size: 0.85rem;
 }
 </style>

@@ -277,4 +277,146 @@ router.put('/ticket/:id', authenticate, async (req, res) => {
   }
 });
 
+// Get comments for a ticket
+router.get('/ticket/:ticketId/comments', authenticate, async (req, res) => {
+  const { ticketId } = req.params;
+  const client = await getClient();
+
+  try {
+    const result = await client.query(
+      `SELECT tc.id, tc.ticket_id, tc.user_id, tc.content, tc.is_deleted,
+              tc.created_at, tc.updated_at, u.handle
+       FROM ticket_comments tc
+       JOIN users u ON tc.user_id = u.id
+       WHERE tc.ticket_id = $1
+       ORDER BY tc.created_at ASC`,
+      [ticketId]
+    );
+
+    res.json({ comments: result.rows });
+  } catch (err) {
+    console.error('Error fetching ticket comments:', err);
+    res.status(500).json({ message: 'Failed to fetch comments' });
+  } finally {
+    client.release();
+  }
+});
+
+// Add a comment to a ticket
+router.post('/ticket/:ticketId/comments', authenticate, async (req, res) => {
+  const { ticketId } = req.params;
+  const { content } = req.body;
+  const client = await getClient();
+
+  try {
+    if (!content || content.trim().length === 0) {
+      return res.status(400).json({ message: 'Content is required' });
+    }
+
+    // Verify ticket exists
+    const ticketCheck = await client.query('SELECT id FROM tickets WHERE id = $1', [ticketId]);
+    if (ticketCheck.rowCount === 0) {
+      return res.status(404).json({ message: 'Ticket not found' });
+    }
+
+    await client.query(
+      'INSERT INTO ticket_comments (ticket_id, user_id, content) VALUES ($1, $2, $3)',
+      [ticketId, req.user.id, content.trim()]
+    );
+
+    const result = await client.query(
+      `SELECT tc.id, tc.ticket_id, tc.user_id, tc.content, tc.is_deleted,
+              tc.created_at, tc.updated_at, u.handle
+       FROM ticket_comments tc
+       JOIN users u ON tc.user_id = u.id
+       WHERE tc.user_id = $1 AND tc.ticket_id = $2
+       ORDER BY tc.id DESC LIMIT 1`,
+      [req.user.id, ticketId]
+    );
+
+    res.status(201).json({ comment: result.rows[0] });
+  } catch (err) {
+    console.error('Error adding ticket comment:', err);
+    res.status(500).json({ message: 'Failed to add comment' });
+  } finally {
+    client.release();
+  }
+});
+
+// Edit own comment
+router.put('/comment/:id', authenticate, async (req, res) => {
+  const { id } = req.params;
+  const { content } = req.body;
+  const client = await getClient();
+
+  try {
+    if (!content || content.trim().length === 0) {
+      return res.status(400).json({ message: 'Content is required' });
+    }
+
+    const check = await client.query(
+      'SELECT id, user_id FROM ticket_comments WHERE id = $1 AND is_deleted = 0',
+      [id]
+    );
+    if (check.rowCount === 0) {
+      return res.status(404).json({ message: 'Comment not found' });
+    }
+    if (check.rows[0].user_id !== req.user.id) {
+      return res.status(403).json({ message: 'Cannot edit another user\'s comment' });
+    }
+
+    await client.query(
+      'UPDATE ticket_comments SET content = $1 WHERE id = $2',
+      [content.trim(), id]
+    );
+
+    const result = await client.query(
+      `SELECT tc.id, tc.ticket_id, tc.user_id, tc.content, tc.is_deleted,
+              tc.created_at, tc.updated_at, u.handle
+       FROM ticket_comments tc
+       JOIN users u ON tc.user_id = u.id
+       WHERE tc.id = $1`,
+      [id]
+    );
+
+    res.json({ comment: result.rows[0] });
+  } catch (err) {
+    console.error('Error updating ticket comment:', err);
+    res.status(500).json({ message: 'Failed to update comment' });
+  } finally {
+    client.release();
+  }
+});
+
+// Soft-delete own comment
+router.delete('/comment/:id', authenticate, async (req, res) => {
+  const { id } = req.params;
+  const client = await getClient();
+
+  try {
+    const check = await client.query(
+      'SELECT id, user_id FROM ticket_comments WHERE id = $1 AND is_deleted = 0',
+      [id]
+    );
+    if (check.rowCount === 0) {
+      return res.status(404).json({ message: 'Comment not found' });
+    }
+    if (check.rows[0].user_id !== req.user.id) {
+      return res.status(403).json({ message: 'Cannot delete another user\'s comment' });
+    }
+
+    await client.query(
+      'UPDATE ticket_comments SET is_deleted = 1 WHERE id = $1',
+      [id]
+    );
+
+    res.json({ message: 'Comment deleted' });
+  } catch (err) {
+    console.error('Error deleting ticket comment:', err);
+    res.status(500).json({ message: 'Failed to delete comment' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
