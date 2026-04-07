@@ -661,6 +661,107 @@ async function deleteSession(id) {
   catch (err) { console.error('Failed to delete:', err) }
 }
 
+// --- Mashups ---
+const mashupSource = ref('')
+const mashupSearch = ref('')
+const mashupSelectedSession = ref(null)
+const mashupPreviewUrl = ref(null)
+const mashupFile = ref(null)
+const mashupName = ref('')
+const mashupRecordedAt = ref(new Date().toISOString().split('T')[0])
+const mashupInstrumentId = ref('')
+const mashupBandId = ref('')
+const mashupUploading = ref(false)
+const mashupUploadError = ref(null)
+const mashupBackingAudioEl = ref(null)
+
+const mashupSourceSessions = computed(() => {
+  if (!mashupSource.value) return []
+  if (mashupSource.value === 'own') return sessions.list
+  const bandId = parseInt(mashupSource.value.replace('band-', ''), 10)
+  return bandMemberSessions.value.filter(s => s.band_id === bandId)
+})
+
+const filteredMashupSessions = computed(() => {
+  const q = mashupSearch.value.toLowerCase().trim()
+  if (!q) return mashupSourceSessions.value
+  return mashupSourceSessions.value.filter(s =>
+    s.name.toLowerCase().includes(q) ||
+    (s.uploader_handle && s.uploader_handle.toLowerCase().includes(q))
+  )
+})
+
+async function startMashupRecording() {
+  try {
+    if (mashupPreviewUrl.value) { URL.revokeObjectURL(mashupPreviewUrl.value); mashupPreviewUrl.value = null }
+    const audioConstraints = selectedMicId.value
+      ? { deviceId: { exact: selectedMicId.value }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      : { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+    _recordingStream = stream
+    await refreshMicDevices()
+    _pcmSamples = []
+    _startLevelMeter(stream)
+    recordingFor.value = 'mashup'
+    recordingSeconds.value = 0
+    _recordingInterval = setInterval(() => recordingSeconds.value++, 1000)
+    if (mashupBackingAudioEl.value) {
+      mashupBackingAudioEl.value.currentTime = 0
+      mashupBackingAudioEl.value.play()
+    }
+  } catch {
+    alert('Microphone access denied or unavailable.')
+  }
+}
+
+function stopMashupRecording() {
+  if (mashupBackingAudioEl.value) {
+    mashupBackingAudioEl.value.pause()
+    mashupBackingAudioEl.value.currentTime = 0
+  }
+  if (_scriptProcessor) {
+    _scriptProcessor.onaudioprocess = null
+    _scriptProcessor.disconnect()
+    _scriptProcessor = null
+  }
+  if (_recordingStream) {
+    _recordingStream.getTracks().forEach(t => t.stop())
+    _recordingStream = null
+  }
+  const totalSamples = _pcmSamples.reduce((sum, c) => sum + c.length, 0)
+  const flat = new Float32Array(totalSamples)
+  let offset = 0
+  for (const chunk of _pcmSamples) { flat.set(chunk, offset); offset += chunk.length }
+  _pcmSamples = []
+  const blob = _encodeWAV(flat, _recordingSampleRate)
+  mashupFile.value = new File([blob], `mashup-${Date.now()}.wav`, { type: 'audio/wav' })
+  mashupPreviewUrl.value = URL.createObjectURL(blob)
+  if (!mashupName.value) mashupName.value = defaultName()
+  recordingFor.value = null
+  recordingSeconds.value = 0
+  clearInterval(_recordingInterval)
+  _stopLevelMeter()
+}
+
+async function handleMashupUpload() {
+  if (!mashupFile.value) return
+  mashupUploading.value = true
+  mashupUploadError.value = null
+  try {
+    await sessions.upload(mashupFile.value, mashupName.value || defaultName(), mashupRecordedAt.value || null, mashupBandId.value || null, 'individual', mashupInstrumentId.value || null)
+    mashupFile.value = null
+    mashupName.value = ''
+    mashupRecordedAt.value = new Date().toISOString().split('T')[0]
+    mashupInstrumentId.value = ''
+    mashupBandId.value = ''
+    if (mashupPreviewUrl.value) { URL.revokeObjectURL(mashupPreviewUrl.value); mashupPreviewUrl.value = null }
+  } catch (err) {
+    mashupUploadError.value = err.message
+  } finally {
+    mashupUploading.value = false
+  }
+}
+
 onMounted(async () => {
   sessions.reset()
   await sessions.load()
@@ -964,10 +1065,126 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Mashups (placeholder) -->
+      <!-- Mashups -->
       <div class="indiv-section-heading">Mashups</div>
-      <div class="card indiv-placeholder-card">
-        <p class="indiv-placeholder-msg">Coming soon — combine individual parts into a mashup.</p>
+      <div class="card mashup-card">
+
+        <!-- Step 1: source selector -->
+        <div class="field mashup-source-field">
+          <label class="field-label">Choose a backing track source</label>
+          <select v-model="mashupSource" class="text-input" @change="mashupSelectedSession = null; mashupSearch = ''"
+                  :disabled="recordingFor === 'mashup'">
+            <option value="">— select source —</option>
+            <option value="own">Your Previous Recordings</option>
+            <option v-for="b in activeBands" :key="b.id" :value="`band-${b.id}`">{{ b.name }}</option>
+          </select>
+        </div>
+
+        <!-- Step 2: pick a recording -->
+        <template v-if="mashupSource && !mashupSelectedSession">
+          <div v-if="mashupSourceSessions.length === 0" class="empty-state" style="padding: 20px 0;">
+            No recordings available from this source.
+          </div>
+          <template v-else>
+            <input v-model="mashupSearch" class="text-input mashup-search" placeholder="Search recordings…" />
+            <div class="mashup-pick-list">
+              <div v-for="s in filteredMashupSessions" :key="s.id"
+                   class="mashup-pick-item" @click="mashupSelectedSession = s">
+                <span class="mashup-pick-name">{{ s.name }}</span>
+                <div class="mashup-pick-meta">
+                  <span v-if="s.uploader_handle" class="session-sub muted">@{{ s.uploader_handle }}</span>
+                  <span class="session-sub muted">{{ formatDate(sessionDate(s)) }}</span>
+                </div>
+              </div>
+              <div v-if="filteredMashupSessions.length === 0" class="empty-state" style="padding: 16px 0;">
+                No matches.
+              </div>
+            </div>
+          </template>
+        </template>
+
+        <!-- Step 3: selected backing track + record form -->
+        <template v-if="mashupSelectedSession">
+          <div class="mashup-backing-track">
+            <div class="mashup-backing-label">Backing track</div>
+            <div class="mashup-backing-name">{{ mashupSelectedSession.name }}</div>
+            <div v-if="mashupSelectedSession.uploader_handle" class="session-sub muted" style="margin-bottom: 4px;">
+              @{{ mashupSelectedSession.uploader_handle }}
+            </div>
+            <audio ref="mashupBackingAudioEl"
+                   :src="`/api/sessions/${mashupSelectedSession.id}/stream`"
+                   preload="metadata" style="display:none;"></audio>
+            <button class="btn-ghost btn-sm mashup-change-btn"
+                    :disabled="recordingFor === 'mashup'"
+                    @click="mashupSelectedSession = null; mashupFile = null; mashupName = ''; if (mashupPreviewUrl) { URL.revokeObjectURL(mashupPreviewUrl); mashupPreviewUrl = null }">
+              ← Change track
+            </button>
+          </div>
+
+          <div class="mashup-divider"></div>
+
+          <div class="upload-form">
+            <div class="file-row">
+              <template v-if="recordingFor === 'mashup'">
+                <span class="rec-indicator">● {{ formatRecordingTime(recordingSeconds) }}</span>
+                <div class="level-meter" title="Input level"><div class="level-fill" :style="{ width: audioLevel + '%' }"></div></div>
+                <button class="rec-stop-btn" @click="stopMashupRecording">Stop</button>
+              </template>
+              <template v-else>
+                <select v-if="micDevices.length > 0" v-model="selectedMicId" class="mic-select"
+                        :disabled="mashupUploading" title="Select microphone">
+                  <option value="">Default mic</option>
+                  <option v-for="d in micDevices" :key="d.deviceId" :value="d.deviceId">
+                    {{ d.label || `Mic ${d.deviceId.slice(0,6)}…` }}
+                  </option>
+                </select>
+                <button class="rec-btn mashup-rec-btn"
+                        :disabled="recordingFor !== null || mashupUploading"
+                        @click="startMashupRecording"
+                        title="Record from mic while backing track plays">
+                  🎙 Record and Play
+                </button>
+              </template>
+            </div>
+
+            <div v-if="mashupPreviewUrl && !recordingFor" class="recording-preview">
+              <span class="preview-label">Preview recording:</span>
+              <audio controls :src="mashupPreviewUrl" style="height:32px;"></audio>
+            </div>
+
+            <div class="fields-row">
+              <div class="field">
+                <label class="field-label">Name</label>
+                <input v-model="mashupName" type="text" class="text-input"
+                       placeholder="Recording name" :disabled="mashupUploading" />
+              </div>
+              <div class="field">
+                <label class="field-label">Original recording date <span class="optional">(optional)</span></label>
+                <input v-model="mashupRecordedAt" type="date" class="text-input" :disabled="mashupUploading" />
+              </div>
+              <div class="field">
+                <label class="field-label">Instrument <span class="optional">(optional)</span></label>
+                <select v-model="mashupInstrumentId" class="text-input" :disabled="mashupUploading">
+                  <option value="">— select instrument —</option>
+                  <option v-for="inst in instruments" :key="inst.id" :value="inst.id">{{ inst.name }}</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="field-label">Band <span class="optional">(optional)</span></label>
+                <select v-model="mashupBandId" class="text-input" :disabled="mashupUploading">
+                  <option value="">— no band —</option>
+                  <option v-for="b in activeBands" :key="b.id" :value="b.id">{{ b.name }}</option>
+                </select>
+              </div>
+            </div>
+
+            <p v-if="mashupUploadError" class="error-msg">{{ mashupUploadError }}</p>
+            <button class="upload-btn" @click="handleMashupUpload" :disabled="!mashupFile || mashupUploading">
+              {{ mashupUploading ? 'Uploading…' : 'Upload' }}
+            </button>
+          </div>
+        </template>
+
       </div>
 
     </template>
@@ -1468,4 +1685,21 @@ onMounted(async () => {
 .btn-danger { background: transparent; border: 1px solid #e53935; color: #e53935; }
 .btn-danger:hover { background: rgba(229,57,53,0.1); }
 .btn-remove { color: #e53935; border-color: #e53935; }
+
+/* Mashups */
+.mashup-card { display: flex; flex-direction: column; gap: 16px; }
+.mashup-source-field { max-width: 320px; }
+.mashup-search { margin-bottom: 4px; }
+.mashup-pick-list { display: flex; flex-direction: column; gap: 4px; max-height: 280px; overflow-y: auto; border: 1px solid var(--color-border, #444); border-radius: 8px; padding: 6px; }
+.mashup-pick-item { padding: 10px 12px; border-radius: 6px; cursor: pointer; transition: background 0.12s; }
+.mashup-pick-item:hover { background: var(--color-background, #222); }
+.mashup-pick-name { font-weight: 500; font-size: 0.9rem; }
+.mashup-pick-meta { display: flex; gap: 10px; margin-top: 2px; }
+.mashup-backing-track { background: var(--color-background, #1a1a1a); border: 1px solid var(--color-accent); border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.mashup-backing-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-accent); margin-bottom: 2px; }
+.mashup-backing-name { font-weight: 600; font-size: 1rem; }
+.mashup-change-btn { align-self: flex-start; margin-top: 6px; }
+.mashup-divider { border: none; border-top: 1px solid var(--color-border, #444); margin: 0; }
+.mashup-rec-btn { border-color: var(--color-accent); color: var(--color-accent); }
+.mashup-rec-btn:not(:disabled):hover { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
 </style>
