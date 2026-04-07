@@ -3,11 +3,31 @@ const router = express.Router();
 
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 const { sendMail } = require('../utilities/sendgrid-email');
 
 const { getClient } = require('../utilities/db');
+const { extractToken } = require('../utilities/auth');
+const { checkPermission } = require('../middleware/checkPermission');
 
 require('dotenv').config();
+const SECRET_KEY = process.env.SECRET_KEY;
+
+const authenticate = async (req, res, next) => {
+  const token = extractToken(req);
+  if (!token) return res.status(401).json({ message: 'Not authenticated' });
+  try {
+    const payload = jwt.verify(token, SECRET_KEY);
+    const client = await getClient();
+    const result = await client.query('SELECT id, handle FROM users WHERE handle = $1', [payload.username]);
+    client.release();
+    if (result.rowCount === 0) return res.status(401).json({ message: 'User not found' });
+    req.user = result.rows[0];
+    next();
+  } catch {
+    return res.status(401).json({ message: 'Invalid token' });
+  }
+};
 
 router.get('/all', async (req, res) => {
   const client = await getClient();
@@ -282,5 +302,36 @@ router.get('/permissionMatrix/:id', async (req, res) => {
 });
 
 
+
+router.put('/:id/password', authenticate, checkPermission('admin_access'), async (req, res) => {
+  const { id } = req.params;
+  const { password } = req.body;
+
+  if (!password || password.length < 8) {
+    return res.status(400).json({ message: 'Password must be at least 8 characters.' });
+  }
+
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.createHash('sha256').update(password + salt).digest('hex');
+
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      'UPDATE users SET hash = $1, salt = $2 WHERE id = $3',
+      [hash, salt, id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    res.status(200).json({ message: 'Password updated successfully.' });
+  } catch (err) {
+    console.error('Error updating password:', err);
+    res.status(500).json({ message: 'Failed to update password.' });
+  } finally {
+    client.release();
+  }
+});
 
 module.exports = router;

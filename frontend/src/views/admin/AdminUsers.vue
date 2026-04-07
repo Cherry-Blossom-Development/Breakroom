@@ -36,6 +36,7 @@
               <td>
                 <button @click="editUser(user)">Edit</button>
                 <button @click="deleteUser(user.id)">Delete</button>
+                <button @click="openPasswordDialog(user)">Password</button>
               </td>
             </tr>
           </tbody>
@@ -89,6 +90,29 @@
           </div>
           <button type="submit">Save</button>
           <button type="button" @click="cancelEdit">Cancel</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Password Reset Modal -->
+    <div v-if="passwordDialogUser" class="modal-overlay">
+      <div class="modal">
+        <h2>Set Password — {{ passwordDialogUser.handle }}</h2>
+        <form @submit.prevent="submitPasswordReset">
+          <input
+            v-model="newPassword"
+            type="password"
+            placeholder="New password (min 8 characters)"
+            required
+            minlength="8"
+            autocomplete="new-password"
+          />
+          <p v-if="passwordError" style="color: red; margin-bottom: 12px;">{{ passwordError }}</p>
+          <p v-if="passwordSuccess" style="color: green; margin-bottom: 12px;">{{ passwordSuccess }}</p>
+          <button type="submit" :disabled="passwordSubmitting">
+            {{ passwordSubmitting ? 'Saving…' : 'Set Password' }}
+          </button>
+          <button type="button" @click="closePasswordDialog">Cancel</button>
         </form>
       </div>
     </div>
@@ -277,6 +301,50 @@ async function deleteUser(userId) {
 
 function cancelEdit() {
   editingUser.value = null
+}
+
+const passwordDialogUser = ref(null)
+const newPassword = ref('')
+const passwordError = ref('')
+const passwordSuccess = ref('')
+const passwordSubmitting = ref(false)
+
+function openPasswordDialog(user) {
+  passwordDialogUser.value = user
+  newPassword.value = ''
+  passwordError.value = ''
+  passwordSuccess.value = ''
+}
+
+function closePasswordDialog() {
+  passwordDialogUser.value = null
+}
+
+async function submitPasswordReset() {
+  passwordError.value = ''
+  passwordSuccess.value = ''
+  passwordSubmitting.value = true
+
+  try {
+    const res = await fetch(`/api/user/${passwordDialogUser.value.id}/password`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: newPassword.value }),
+      credentials: 'include'
+    })
+
+    const data = await res.json()
+    if (!res.ok) {
+      passwordError.value = data.message || 'Failed to update password.'
+    } else {
+      passwordSuccess.value = data.message
+      newPassword.value = ''
+    }
+  } catch {
+    passwordError.value = 'Network error — please try again.'
+  } finally {
+    passwordSubmitting.value = false
+  }
 }
 </script>
 

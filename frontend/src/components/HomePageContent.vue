@@ -39,7 +39,7 @@
       <p>Social, creative, and technical — all in one place. Prosaurus brings it all together so you don't have to jump between a dozen apps.</p>
     </div>
 
-    <p class="version-label">v1.4.0</p>
+    <p class="version-label">v1.5.0</p>
   </section>
 </template>
 
