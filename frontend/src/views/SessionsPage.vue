@@ -733,6 +733,16 @@ function stopMashupRecording() {
   let offset = 0
   for (const chunk of _pcmSamples) { flat.set(chunk, offset); offset += chunk.length }
   _pcmSamples = []
+
+  // OS-level echo processing often attenuates mic input when audio is playing through
+  // speakers simultaneously. Normalize peak to 0.7 before encoding so the server's
+  // EBU R128 normalization has adequate signal to work with.
+  const peak = flat.reduce((max, s) => Math.max(max, Math.abs(s)), 0)
+  if (peak > 0 && peak < 0.7) {
+    const boost = 0.7 / peak
+    for (let i = 0; i < flat.length; i++) flat[i] = Math.max(-1, Math.min(1, flat[i] * boost))
+  }
+
   const blob = _encodeWAV(flat, _recordingSampleRate)
   mashupFile.value = new File([blob], `mashup-${Date.now()}.wav`, { type: 'audio/wav' })
   mashupPreviewUrl.value = URL.createObjectURL(blob)
