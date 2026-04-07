@@ -16,6 +16,7 @@ const goToChat = () => {
       get you going to the chat section because that's the main part of Breakroom.
     </p>
     <button @click="goToChat">Go to Chat</button>
+    <p class="version-label">v1.4.0</p>
   </main>
 </template>
 
@@ -53,5 +54,13 @@ button {
 
 button:hover {
   background: var(--color-accent-hover);
+}
+
+.version-label {
+  margin-top: 32px;
+  margin-bottom: 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  opacity: 0.5;
 }
 </style>
