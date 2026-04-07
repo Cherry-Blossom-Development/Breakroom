@@ -674,6 +674,9 @@ const mashupBandId = ref('')
 const mashupUploading = ref(false)
 const mashupUploadError = ref(null)
 const mashupBackingAudioEl = ref(null)
+const mashupBackingPreviewEl = ref(null)
+const mashupNewPreviewEl = ref(null)
+const mashupBothPlaying = ref(false)
 
 const mashupSourceSessions = computed(() => {
   if (!mashupSource.value) return []
@@ -691,7 +694,35 @@ const filteredMashupSessions = computed(() => {
   )
 })
 
+function playBothTracks() {
+  if (mashupBothPlaying.value) {
+    mashupBackingPreviewEl.value?.pause()
+    mashupNewPreviewEl.value?.pause()
+    mashupBothPlaying.value = false
+    return
+  }
+  if (!mashupBackingPreviewEl.value || !mashupNewPreviewEl.value) return
+  mashupBackingPreviewEl.value.currentTime = 0
+  mashupNewPreviewEl.value.currentTime = 0
+  mashupBothPlaying.value = true
+  Promise.all([
+    mashupBackingPreviewEl.value.play(),
+    mashupNewPreviewEl.value.play()
+  ]).catch(() => { mashupBothPlaying.value = false })
+}
+
+function stopBothTracks() {
+  mashupBackingPreviewEl.value?.pause()
+  mashupNewPreviewEl.value?.pause()
+  if (mashupBackingPreviewEl.value) mashupBackingPreviewEl.value.currentTime = 0
+  if (mashupNewPreviewEl.value) mashupNewPreviewEl.value.currentTime = 0
+  mashupBothPlaying.value = false
+}
+
+function onMashupPreviewEnded() { mashupBothPlaying.value = false }
+
 async function startMashupRecording() {
+  stopBothTracks()
   try {
     if (mashupPreviewUrl.value) { URL.revokeObjectURL(mashupPreviewUrl.value); mashupPreviewUrl.value = null }
     const audioConstraints = selectedMicId.value
@@ -1126,7 +1157,7 @@ onMounted(async () => {
                    preload="metadata" style="display:none;"></audio>
             <button class="btn-ghost btn-sm mashup-change-btn"
                     :disabled="recordingFor === 'mashup'"
-                    @click="mashupSelectedSession = null; mashupFile = null; mashupName = ''; if (mashupPreviewUrl) { URL.revokeObjectURL(mashupPreviewUrl); mashupPreviewUrl = null }">
+                    @click="stopBothTracks(); mashupSelectedSession = null; mashupFile = null; mashupName = ''; if (mashupPreviewUrl) { URL.revokeObjectURL(mashupPreviewUrl); mashupPreviewUrl = null }">
               ← Change track
             </button>
           </div>
@@ -1157,9 +1188,28 @@ onMounted(async () => {
               </template>
             </div>
 
-            <div v-if="mashupPreviewUrl && !recordingFor" class="recording-preview">
-              <span class="preview-label">Preview recording:</span>
-              <audio controls :src="mashupPreviewUrl" style="height:32px;"></audio>
+            <div v-if="mashupPreviewUrl && !recordingFor" class="mashup-dual-preview">
+              <div class="mashup-preview-track">
+                <span class="mashup-preview-label">Backing track</span>
+                <span class="mashup-preview-name">{{ mashupSelectedSession.name }}</span>
+                <audio ref="mashupBackingPreviewEl"
+                       :src="`/api/sessions/${mashupSelectedSession.id}/stream`"
+                       preload="metadata" @ended="onMashupPreviewEnded" style="width:100%;height:34px;"></audio>
+              </div>
+              <div class="mashup-preview-track">
+                <span class="mashup-preview-label">New recording</span>
+                <audio ref="mashupNewPreviewEl"
+                       :src="mashupPreviewUrl"
+                       preload="auto" @ended="onMashupPreviewEnded" style="width:100%;height:34px;"></audio>
+              </div>
+              <div class="mashup-preview-controls">
+                <button class="rec-btn mashup-play-both-btn" @click="playBothTracks">
+                  {{ mashupBothPlaying ? '⏸ Pause Both' : '▶ Play Both' }}
+                </button>
+                <button v-if="mashupBothPlaying" class="rec-stop-btn" @click="stopBothTracks" style="margin-left:8px;">
+                  ■ Stop
+                </button>
+              </div>
             </div>
 
             <div class="fields-row">
@@ -1712,4 +1762,11 @@ onMounted(async () => {
 .mashup-divider { border: none; border-top: 1px solid var(--color-border, #444); margin: 0; }
 .mashup-rec-btn { border-color: var(--color-accent); color: var(--color-accent); }
 .mashup-rec-btn:not(:disabled):hover { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
+.mashup-dual-preview { display: flex; flex-direction: column; gap: 10px; margin-bottom: 8px; }
+.mashup-preview-track { display: flex; flex-direction: column; gap: 4px; background: var(--color-background, #1a1a1a); border: 1px solid var(--color-border, #444); border-radius: 8px; padding: 10px 12px; }
+.mashup-preview-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-text-muted); }
+.mashup-preview-name { font-size: 0.88rem; font-weight: 500; color: var(--color-text); }
+.mashup-preview-controls { display: flex; align-items: center; margin-top: 2px; }
+.mashup-play-both-btn { border-color: var(--color-accent); color: var(--color-accent); font-weight: 600; }
+.mashup-play-both-btn:not(:disabled):hover { background: var(--color-accent); color: #fff; }
 </style>
