@@ -677,6 +677,10 @@ const mashupBackingAudioEl = ref(null)
 const mashupBackingPreviewEl = ref(null)
 const mashupNewPreviewEl = ref(null)
 const mashupBothPlaying = ref(false)
+const mashupBackingVolume = ref(1.0)
+const mashupNewVolume = ref(1.0)
+const isMerging = ref(false)
+const mergeError = ref(null)
 
 const mashupSourceSessions = computed(() => {
   if (!mashupSource.value) return []
@@ -694,6 +698,15 @@ const filteredMashupSessions = computed(() => {
   )
 })
 
+function setBackingVolume(v) {
+  mashupBackingVolume.value = v
+  if (mashupBackingPreviewEl.value) mashupBackingPreviewEl.value.volume = v
+}
+function setNewVolume(v) {
+  mashupNewVolume.value = v
+  if (mashupNewPreviewEl.value) mashupNewPreviewEl.value.volume = v
+}
+
 function playBothTracks() {
   if (mashupBothPlaying.value) {
     mashupBackingPreviewEl.value?.pause()
@@ -702,6 +715,8 @@ function playBothTracks() {
     return
   }
   if (!mashupBackingPreviewEl.value || !mashupNewPreviewEl.value) return
+  mashupBackingPreviewEl.value.volume = mashupBackingVolume.value
+  mashupNewPreviewEl.value.volume = mashupNewVolume.value
   mashupBackingPreviewEl.value.currentTime = 0
   mashupNewPreviewEl.value.currentTime = 0
   mashupBothPlaying.value = true
@@ -709,6 +724,62 @@ function playBothTracks() {
     mashupBackingPreviewEl.value.play(),
     mashupNewPreviewEl.value.play()
   ]).catch(() => { mashupBothPlaying.value = false })
+}
+
+async function saveMerged() {
+  if (!mashupFile.value || !mashupSelectedSession.value) return
+  isMerging.value = true
+  mergeError.value = null
+  try {
+    // Fetch backing track from server
+    const backingRes = await fetch(`/api/sessions/${mashupSelectedSession.value.id}/stream`, { credentials: 'include' })
+    if (!backingRes.ok) throw new Error('Failed to fetch backing track')
+    const backingArrayBuffer = await backingRes.arrayBuffer()
+
+    // Read new recording file
+    const newRecArrayBuffer = await mashupFile.value.arrayBuffer()
+
+    // Decode both into AudioBuffers
+    const tempCtx = new AudioContext()
+    const [backingAudio, newRecAudio] = await Promise.all([
+      tempCtx.decodeAudioData(backingArrayBuffer),
+      tempCtx.decodeAudioData(newRecArrayBuffer)
+    ])
+    await tempCtx.close()
+
+    // Render mix offline at 44100 Hz mono
+    const duration = Math.max(backingAudio.duration, newRecAudio.duration)
+    const sampleRate = 44100
+    const offlineCtx = new OfflineAudioContext(1, Math.ceil(duration * sampleRate), sampleRate)
+
+    const backingSource = offlineCtx.createBufferSource()
+    backingSource.buffer = backingAudio
+    const backingGain = offlineCtx.createGain()
+    backingGain.gain.value = mashupBackingVolume.value
+    backingSource.connect(backingGain)
+    backingGain.connect(offlineCtx.destination)
+    backingSource.start(0)
+
+    const newRecSource = offlineCtx.createBufferSource()
+    newRecSource.buffer = newRecAudio
+    const newRecGain = offlineCtx.createGain()
+    newRecGain.gain.value = mashupNewVolume.value
+    newRecSource.connect(newRecGain)
+    newRecGain.connect(offlineCtx.destination)
+    newRecSource.start(0)
+
+    const mergedAudio = await offlineCtx.startRendering()
+
+    // Encode to WAV then upload — server applies EBU R128 normalization
+    const wavBlob = _encodeWAV(mergedAudio.getChannelData(0), sampleRate)
+    const mergedFile = new File([wavBlob], `merged-${Date.now()}.wav`, { type: 'audio/wav' })
+    const mergedName = `Merged – ${mashupSelectedSession.value.name}`
+    await sessions.upload(mergedFile, mergedName, null, null, 'individual', null)
+  } catch (err) {
+    mergeError.value = err.message
+  } finally {
+    isMerging.value = false
+  }
 }
 
 function stopBothTracks() {
@@ -1195,21 +1266,39 @@ onMounted(async () => {
                 <audio ref="mashupBackingPreviewEl"
                        :src="`/api/sessions/${mashupSelectedSession.id}/stream`"
                        preload="metadata" @ended="onMashupPreviewEnded" style="width:100%;height:34px;"></audio>
+                <div class="mashup-volume-row">
+                  <label class="mashup-volume-label">Volume</label>
+                  <input type="range" class="mashup-volume-slider" min="0" max="1" step="0.05"
+                         :value="mashupBackingVolume"
+                         @input="e => setBackingVolume(parseFloat(e.target.value))" />
+                  <span class="mashup-volume-pct">{{ Math.round(mashupBackingVolume * 100) }}%</span>
+                </div>
               </div>
               <div class="mashup-preview-track">
                 <span class="mashup-preview-label">New recording</span>
                 <audio ref="mashupNewPreviewEl"
                        :src="mashupPreviewUrl"
                        preload="auto" @ended="onMashupPreviewEnded" style="width:100%;height:34px;"></audio>
+                <div class="mashup-volume-row">
+                  <label class="mashup-volume-label">Volume</label>
+                  <input type="range" class="mashup-volume-slider" min="0" max="1" step="0.05"
+                         :value="mashupNewVolume"
+                         @input="e => setNewVolume(parseFloat(e.target.value))" />
+                  <span class="mashup-volume-pct">{{ Math.round(mashupNewVolume * 100) }}%</span>
+                </div>
               </div>
               <div class="mashup-preview-controls">
                 <button class="rec-btn mashup-play-both-btn" @click="playBothTracks">
                   {{ mashupBothPlaying ? '⏸ Pause Both' : '▶ Play Both' }}
                 </button>
-                <button v-if="mashupBothPlaying" class="rec-stop-btn" @click="stopBothTracks" style="margin-left:8px;">
+                <button v-if="mashupBothPlaying" class="rec-stop-btn" @click="stopBothTracks">
                   ■ Stop
                 </button>
+                <button class="upload-btn mashup-merge-btn" :disabled="isMerging" @click="saveMerged">
+                  {{ isMerging ? 'Merging…' : '⬇ Save Merged' }}
+                </button>
               </div>
+              <p v-if="mergeError" class="error-msg">{{ mergeError }}</p>
             </div>
 
             <div class="fields-row">
@@ -1769,4 +1858,10 @@ onMounted(async () => {
 .mashup-preview-controls { display: flex; align-items: center; margin-top: 2px; }
 .mashup-play-both-btn { border-color: var(--color-accent); color: var(--color-accent); font-weight: 600; }
 .mashup-play-both-btn:not(:disabled):hover { background: var(--color-accent); color: #fff; }
+.mashup-volume-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.mashup-volume-label { font-size: 0.78rem; color: var(--color-text-muted); white-space: nowrap; min-width: 44px; }
+.mashup-volume-slider { flex: 1; accent-color: var(--color-accent); cursor: pointer; }
+.mashup-volume-pct { font-size: 0.78rem; color: var(--color-text-muted); min-width: 34px; text-align: right; }
+.mashup-preview-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.mashup-merge-btn { margin-left: auto; padding: 9px 18px; font-size: 0.9rem; }
 </style>
