@@ -38,6 +38,8 @@
       <h2>🌐 For Everyone</h2>
       <p>Social, creative, and technical — all in one place. Prosaurus brings it all together so you don't have to jump between a dozen apps.</p>
     </div>
+
+    <p class="version-label">v1.4.0</p>
   </section>
 </template>
 
@@ -121,6 +123,14 @@
   color: var(--color-text-muted);
   max-width: 500px;
   margin: 0 auto;
+}
+
+.version-label {
+  margin-top: 40px;
+  margin-bottom: 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  opacity: 0.5;
 }
 
 @media (min-width: 768px) {
