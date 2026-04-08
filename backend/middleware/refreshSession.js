@@ -11,6 +11,10 @@ const COOKIE_MAX_AGE = 48 * 60 * 60 * 1000; // 48 hours in ms
  * Mobile clients receive it via the X-New-Token response header.
  */
 function refreshSession(req, res, next) {
+    // Don't refresh the session on logout — the route clears the cookie and
+    // a refresh here would immediately re-issue it, making logout ineffective.
+    if (req.path === '/api/auth/logout') return next();
+
     const token = extractToken(req);
     if (!token) return next();
 
