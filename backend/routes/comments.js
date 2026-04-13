@@ -241,8 +241,23 @@ router.post('/:postId', authenticate, async (req, res) => {
     // Run keyword filter (async, non-blocking to response)
     checkAndFilterContent('comment', comment.id, [content], req.user.id).catch(() => {});
 
-    // Emit real-time event
+    // Emit real-time event to anyone viewing this post's comments
     emitToPost(postId, 'new_comment', { comment });
+
+    // Notify the post author if they didn't write the comment themselves
+    if (post.user_id !== req.user.id) {
+      const settingResult = await client.query(
+        `SELECT notifications_enabled, notify_blog_comments
+         FROM user_settings WHERE user_id = $1`,
+        [post.user_id]
+      );
+      const s = settingResult.rows[0];
+      const notifyEnabled = !s || (s.notifications_enabled && s.notify_blog_comments);
+      if (notifyEnabled) {
+        const { emitToUser } = require('../utilities/socket');
+        emitToUser(post.user_id, 'blog_badge_update', { postId: parseInt(postId) });
+      }
+    }
 
     res.status(201).json({ comment });
   } catch (err) {
@@ -367,6 +382,30 @@ router.delete('/:id', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Error deleting comment:', err);
     res.status(500).json({ message: 'Failed to delete comment' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/comments/posts/:postId/mark-read
+ * Upserts user_post_last_read so the blog badge clears for this post.
+ * Called when the post owner visits one of their own posts.
+ */
+router.post('/posts/:postId/mark-read', authenticate, async (req, res) => {
+  const { postId } = req.params;
+  const client = await getClient();
+  try {
+    await client.query(
+      `INSERT INTO user_post_last_read (user_id, post_id, last_read_at)
+       VALUES ($1, $2, NOW())
+       ON DUPLICATE KEY UPDATE last_read_at = NOW()`,
+      [req.user.id, postId]
+    );
+    res.json({ message: 'Post marked read' });
+  } catch (err) {
+    console.error('Error marking post read:', err);
+    res.status(500).json({ message: 'Failed to mark post read' });
   } finally {
     client.release();
   }

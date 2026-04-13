@@ -5,6 +5,7 @@ import { GridLayout, GridItem } from 'grid-layout-plus'
 import { breakroom } from '@/stores/breakroom.js'
 import { user } from '@/stores/user.js'
 import { authFetch } from '@/utilities/authFetch'
+import { badges } from '@/stores/badges.js'
 import BreakroomBlock from '@/components/BreakroomBlock.vue'
 import AddBlockModal from '@/components/AddBlockModal.vue'
 import LoadingSpinner from '@/components/LoadingSpinner.vue'
@@ -170,6 +171,7 @@ async function fetchShortcuts() {
 onMounted(async () => {
   checkMobile()
   window.addEventListener('resize', checkMobile)
+  badges.markAllRoomsRead()
   await Promise.all([
     breakroom.fetchLayout(),
     fetchShortcuts()

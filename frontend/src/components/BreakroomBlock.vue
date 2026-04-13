@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import ChatWidget from './ChatWidget.vue'
 import UpdatesWidget from './UpdatesWidget.vue'
 import CalendarWidget from './CalendarWidget.vue'
@@ -19,6 +19,19 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['remove', 'toggle'])
+
+// Flash the block header yellow briefly when a new chat message arrives
+const headerFlashing = ref(false)
+let flashTimer = null
+
+function onNewMessage() {
+  if (flashTimer) clearTimeout(flashTimer)
+  headerFlashing.value = true
+  flashTimer = setTimeout(() => {
+    headerFlashing.value = false
+    flashTimer = null
+  }, 2000)
+}
 
 // Determine block title (user title or fallback to block type name)
 const blockTitle = computed(() => {
@@ -43,7 +56,7 @@ const blockTitle = computed(() => {
 
 <template>
   <div class="breakroom-block" :class="{ expanded, 'chat-type': block.block_type === 'chat' }">
-    <div class="block-header" @click="emit('toggle')">
+    <div class="block-header" :class="{ 'header-flash': headerFlashing }" @click="emit('toggle')">
       <button class="remove-btn" @click.stop="emit('remove')" title="Remove block">
         &times;
       </button>
@@ -61,6 +74,7 @@ const blockTitle = computed(() => {
       <ChatWidget
         v-if="block.block_type === 'chat' && block.content_id"
         :room-id="block.content_id"
+        @new-message="onNewMessage"
       />
 
       <!-- Placeholder block -->
@@ -112,6 +126,16 @@ const blockTitle = computed(() => {
   cursor: move;
   flex-shrink: 0;
   gap: 8px;
+  transition: background-color 0.3s ease;
+}
+
+@keyframes header-flash {
+  0%   { background-color: rgba(236, 201, 75, 0.7); }
+  100% { background-color: var(--color-header-bg); }
+}
+
+.block-header.header-flash {
+  animation: header-flash 2s ease-out forwards;
 }
 
 .remove-btn {

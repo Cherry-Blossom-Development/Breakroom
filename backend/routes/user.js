@@ -334,4 +334,155 @@ router.put('/:id/password', authenticate, checkPermission('admin_access'), async
   }
 });
 
+// ── Notification settings ────────────────────────────────────────────────────
+
+/**
+ * GET /api/user/notification-settings
+ * Returns the current user's notification preferences.
+ * Missing row = all defaults ON.
+ */
+router.get('/notification-settings', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      `SELECT notifications_enabled, notify_chat_messages,
+              notify_friend_requests, notify_blog_comments
+       FROM user_settings WHERE user_id = $1`,
+      [req.user.id]
+    );
+    if (result.rowCount === 0) {
+      return res.json({
+        notifications_enabled: true,
+        notify_chat_messages: true,
+        notify_friend_requests: true,
+        notify_blog_comments: true
+      });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching notification settings:', err);
+    res.status(500).json({ message: 'Failed to fetch settings' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * PUT /api/user/notification-settings
+ * Upserts the current user's notification preferences.
+ */
+router.put('/notification-settings', authenticate, async (req, res) => {
+  const { notifications_enabled, notify_chat_messages, notify_friend_requests, notify_blog_comments } = req.body;
+  const client = await getClient();
+  try {
+    await client.query(
+      `INSERT INTO user_settings
+         (user_id, notifications_enabled, notify_chat_messages, notify_friend_requests, notify_blog_comments)
+       VALUES ($1, $2, $3, $4, $5)
+       ON DUPLICATE KEY UPDATE
+         notifications_enabled  = VALUES(notifications_enabled),
+         notify_chat_messages   = VALUES(notify_chat_messages),
+         notify_friend_requests = VALUES(notify_friend_requests),
+         notify_blog_comments   = VALUES(notify_blog_comments)`,
+      [req.user.id,
+       notifications_enabled ?? true,
+       notify_chat_messages ?? true,
+       notify_friend_requests ?? true,
+       notify_blog_comments ?? true]
+    );
+    res.json({ message: 'Settings saved' });
+  } catch (err) {
+    console.error('Error saving notification settings:', err);
+    res.status(500).json({ message: 'Failed to save settings' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * GET /api/user/badge-counts
+ * Returns all badge counts for the current user:
+ *   chatUnread: { [roomId]: count }  — rooms where unread > 0
+ *   friendRequestsUnread: N          — pending requests not yet seen
+ *   blogCommentsUnread: N            — author's posts with new comments
+ */
+router.get('/badge-counts', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    // Respect master toggle and per-type setting (absence of row = defaults ON)
+    const settingsResult = await client.query(
+      `SELECT notifications_enabled, notify_chat_messages,
+              notify_friend_requests, notify_blog_comments
+       FROM user_settings WHERE user_id = $1`,
+      [req.user.id]
+    );
+    const s = settingsResult.rows[0] || {
+      notifications_enabled: true,
+      notify_chat_messages: true,
+      notify_friend_requests: true,
+      notify_blog_comments: true
+    };
+
+    const chatUnread = {};
+    let friendRequestsUnread = 0;
+    let blogCommentsUnread = 0;
+
+    if (s.notifications_enabled) {
+      // Chat: unread per room (messages after last_read_at, excluding own messages)
+      if (s.notify_chat_messages) {
+        const chatResult = await client.query(
+          `SELECT ur.room_id,
+                  COUNT(m.id) AS unread_count
+           FROM users_rooms ur
+           JOIN chat_messages m ON m.room_id = ur.room_id
+           WHERE ur.user_id = $1
+             AND ur.accepted = TRUE
+             AND ur.notifications_muted = FALSE
+             AND m.user_id != $2
+             AND (ur.last_read_at IS NULL OR m.created_at > ur.last_read_at)
+           GROUP BY ur.room_id`,
+          [req.user.id, req.user.id]
+        );
+        for (const row of chatResult.rows) {
+          chatUnread[row.room_id] = parseInt(row.unread_count, 10);
+        }
+      }
+
+      // Friend requests: pending rows not yet seen by recipient
+      if (s.notify_friend_requests) {
+        const frResult = await client.query(
+          `SELECT COUNT(*) AS cnt FROM friends
+           WHERE friend_id = $1 AND status = 'pending' AND seen_by_recipient = FALSE`,
+          [req.user.id]
+        );
+        friendRequestsUnread = parseInt(frResult.rows[0].cnt, 10);
+      }
+
+      // Blog: distinct posts owned by user with comments newer than last_read_at
+      if (s.notify_blog_comments) {
+        const blogResult = await client.query(
+          `SELECT COUNT(DISTINCT c.blog_post_id) AS cnt
+           FROM blog_comments c
+           JOIN blog_posts bp ON c.blog_post_id = bp.id
+           LEFT JOIN user_post_last_read ulr
+             ON ulr.user_id = $1 AND ulr.post_id = c.blog_post_id
+           WHERE bp.user_id = $2
+             AND c.user_id != $3
+             AND c.is_deleted = FALSE
+             AND (ulr.last_read_at IS NULL OR c.created_at > ulr.last_read_at)`,
+          [req.user.id, req.user.id, req.user.id]
+        );
+        blogCommentsUnread = parseInt(blogResult.rows[0].cnt, 10);
+      }
+    }
+
+    res.json({ chatUnread, friendRequestsUnread, blogCommentsUnread });
+  } catch (err) {
+    console.error('Error fetching badge counts:', err);
+    res.status(500).json({ message: 'Failed to fetch badge counts' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;

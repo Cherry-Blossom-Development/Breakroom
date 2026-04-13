@@ -7,6 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner.vue'
 import FlagDialog from '../components/FlagDialog.vue'
 import { user } from '@/stores/user.js'
 import { moderationStore } from '@/stores/moderation.js'
+import { badges } from '@/stores/badges.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -90,8 +91,12 @@ async function blockAuthor() {
   }
 }
 
-onMounted(() => {
-  fetchPost()
+onMounted(async () => {
+  await fetchPost()
+  // If viewing your own post, clear its blog badge
+  if (isOwnPost.value) {
+    badges.markBlogPostRead(route.params.id)
+  }
 })
 </script>
 

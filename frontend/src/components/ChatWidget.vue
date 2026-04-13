@@ -13,6 +13,8 @@ const props = defineProps({
   }
 })
 
+const emit = defineEmits(['new-message'])
+
 // Local state for this widget
 const messages = ref([])
 const newMessage = ref('')
@@ -35,6 +37,13 @@ const editingMessageId = ref(null)
 const editText = ref('')
 const deletingMessageId = ref(null)
 const openMenuId = ref(null)
+
+// Mute state for this room
+const isMuted = ref(false)
+let muteTimeout = null
+
+// Set of message IDs that should flash yellow (newly arrived, not from self)
+const flashingMessageIds = ref(new Set())
 
 const toggleMsgMenu = (id) => {
   openMenuId.value = openMenuId.value === id ? null : id
@@ -413,6 +422,17 @@ const setupSocket = () => {
       if (!exists) {
         messages.value.push(data.message)
         scrollToBottom()
+        // Flash the message row if it's from someone else
+        if (data.message.handle !== user.username) {
+          flashingMessageIds.value = new Set([...flashingMessageIds.value, data.message.id])
+          setTimeout(() => {
+            flashingMessageIds.value = new Set(
+              [...flashingMessageIds.value].filter(id => id !== data.message.id)
+            )
+          }, 2000)
+          // Notify parent (BreakroomBlock) so it can flash the widget header
+          emit('new-message', { roomId: props.roomId })
+        }
       }
     }
   })
@@ -458,8 +478,38 @@ const cleanupSocket = () => {
   }
 }
 
+async function fetchMuteState() {
+  try {
+    const res = await fetch(`/api/chat/rooms/${props.roomId}/mute`, { credentials: 'include' })
+    if (res.ok) {
+      const data = await res.json()
+      isMuted.value = data.muted
+    }
+  } catch (err) {
+    console.error('Failed to fetch mute state:', err)
+  }
+}
+
+async function toggleMute() {
+  const newMuted = !isMuted.value
+  try {
+    const res = await fetch(`/api/chat/rooms/${props.roomId}/mute`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ muted: newMuted })
+    })
+    if (res.ok) {
+      isMuted.value = newMuted
+    }
+  } catch (err) {
+    console.error('Failed to toggle mute:', err)
+  }
+}
+
 onMounted(async () => {
   await fetchMessages()
+  await fetchMuteState()
   setupSocket()
   await nextTick()
   messagesContainer.value?.addEventListener('scroll', handleScroll)
@@ -520,6 +570,7 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
           v-for="msg in messages"
           :key="msg.id"
           class="message"
+          :class="{ 'message-flash': flashingMessageIds.has(msg.id) }"
         >
           <div class="message-header">
             <RouterLink :to="`/user/${msg.handle}`" class="username">{{ msg.handle }}</RouterLink>
@@ -647,6 +698,29 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
           />
           <button type="submit" class="send-btn" :disabled="!newMessage.trim()">
             Send
+          </button>
+          <button
+            type="button"
+            class="mute-btn"
+            :class="{ muted: isMuted }"
+            @click="toggleMute"
+            :title="isMuted ? 'Unmute notifications for this room' : 'Mute notifications for this room'"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+              <template v-if="isMuted">
+                <!-- Bell-off icon -->
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                <path d="M18.63 13A17.9 17.9 0 0 1 18 8"/>
+                <path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/>
+                <path d="M18 8a6 6 0 0 0-9.33-5"/>
+                <line x1="1" y1="1" x2="23" y2="23"/>
+              </template>
+              <template v-else>
+                <!-- Bell icon -->
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </template>
+            </svg>
           </button>
         </form>
       </div>
@@ -1022,6 +1096,39 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
 .send-btn:disabled {
   background: var(--color-button-disabled);
   cursor: not-allowed;
+}
+
+/* Mute button */
+.mute-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  color: var(--color-text-muted);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+
+.mute-btn:hover {
+  color: var(--color-text-secondary);
+}
+
+.mute-btn.muted {
+  color: #e53e3e;
+}
+
+/* New-message flash: yellow highlight fades out */
+@keyframes msg-flash {
+  0%   { background-color: rgba(236, 201, 75, 0.35); }
+  100% { background-color: transparent; }
+}
+
+.message-flash {
+  animation: msg-flash 2s ease-out forwards;
+  border-radius: 4px;
 }
 
 .attach-menu {

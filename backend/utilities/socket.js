@@ -159,6 +159,33 @@ const initializeSocket = (io) => {
           roomId: roomId,
           message: messageData
         });
+
+        // Emit chat_badge_update to each room member who:
+        //   • is not the sender
+        //   • has not muted this room
+        //   • has chat notifications enabled (absent row = defaults ON)
+        const membersResult = await client.query(
+          `SELECT ur.user_id
+           FROM users_rooms ur
+           WHERE ur.room_id = $1
+             AND ur.accepted = TRUE
+             AND ur.user_id != $2
+             AND ur.notifications_muted = FALSE`,
+          [roomId, socket.user.id]
+        );
+        for (const member of membersResult.rows) {
+          // Check master toggle and chat setting (absent row = all ON)
+          const settingResult = await client.query(
+            `SELECT notifications_enabled, notify_chat_messages
+             FROM user_settings WHERE user_id = $1`,
+            [member.user_id]
+          );
+          const s = settingResult.rows[0];
+          const enabled = !s || (s.notifications_enabled && s.notify_chat_messages);
+          if (enabled) {
+            io.to(`user_${member.user_id}`).emit('chat_badge_update', { roomId });
+          }
+        }
       } catch (err) {
         console.error('Error sending message:', err);
         socket.emit('error', { message: 'Failed to send message' });

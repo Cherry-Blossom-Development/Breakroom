@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { friends } from '@/stores/friends.js'
 import LoadingSpinner from '@/components/LoadingSpinner.vue'
 import { user } from '@/stores/user.js'
+import { badges } from '@/stores/badges.js'
 
 const router = useRouter()
 
@@ -25,6 +26,7 @@ const requestCount = computed(() => friends.requests.length)
 
 onMounted(() => {
   friends.fetchAll()
+  badges.markFriendsRead()
 })
 
 async function searchUsers() {

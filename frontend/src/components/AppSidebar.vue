@@ -5,6 +5,7 @@ import { user } from '@/stores/user.js'
 import { chat } from '@/stores/chat.js'
 import { breakroom } from '@/stores/breakroom.js'
 import { friends } from '@/stores/friends.js'
+import { badges } from '@/stores/badges.js'
 import InviteModal from './InviteModal.vue'
 
 const props = defineProps({
@@ -109,6 +110,7 @@ async function selectRoom(room) {
     chat.leaveRoom()
     await chat.joinRoom(room.id)
   }
+  badges.markRoomRead(room.id)
   // Navigate to chat if not already there
   if (route.path !== '/chat') {
     router.push('/chat')
@@ -309,6 +311,7 @@ function handleNavClick() {
         <RouterLink to="/breakroom" class="nav-item" @click="handleNavClick">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
           <span>Home</span>
+          <span v-if="badges.totalChatUnread > 0" class="nav-badge">{{ badges.totalChatUnread }}</span>
         </RouterLink>
 
         <!-- Chat with expandable rooms -->
@@ -344,6 +347,7 @@ function handleNavClick() {
             @click="selectRoom(room)"
           >
             <span class="room-name"># {{ room.name }}</span>
+            <span v-if="badges.chatUnread[room.id]" class="nav-badge room-badge">{{ badges.chatUnread[room.id] }}</span>
             <div class="room-menu-wrapper" @click.stop>
               <button
                 class="room-menu-btn"
@@ -399,10 +403,12 @@ function handleNavClick() {
         <RouterLink to="/blog" class="nav-item" @click="handleNavClick">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
           <span>Blog</span>
+          <span v-if="badges.blogCommentsUnread > 0" class="nav-badge">{{ badges.blogCommentsUnread }}</span>
         </RouterLink>
         <RouterLink to="/friends" class="nav-item" @click="handleNavClick">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           <span>Friends</span>
+          <span v-if="badges.friendRequestsUnread > 0" class="nav-badge">{{ badges.friendRequestsUnread }}</span>
         </RouterLink>
       </div>
 
@@ -662,6 +668,24 @@ function handleNavClick() {
   border-radius: 10px;
   min-width: 18px;
   text-align: center;
+}
+
+.nav-badge {
+  margin-left: auto;
+  background: #e53e3e;
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  min-width: 18px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.room-badge {
+  margin-left: 4px;
+  margin-right: auto;
 }
 
 /* ============================================

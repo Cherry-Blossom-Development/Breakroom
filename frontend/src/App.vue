@@ -4,6 +4,7 @@ import { RouterLink, RouterView, useRouter, useRoute } from 'vue-router'
 import { user } from './stores/user.js'
 import { notificationStore } from './stores/notification.js'
 import { moderationStore } from './stores/moderation.js'
+import { badges } from './stores/badges.js'
 import { initEventService, destroyEventService } from './utilities/eventService.js'
 import HeaderNotification from './components/HeaderNotification.vue'
 import PopupNotification from './components/PopupNotification.vue'
@@ -53,6 +54,18 @@ function setupNotificationSocket() {
     notificationStore.addNotification(notification)
   })
 
+  socket.on('chat_badge_update', ({ roomId }) => {
+    badges.onChatBadgeUpdate(roomId)
+  })
+
+  socket.on('friend_badge_update', () => {
+    badges.onFriendBadgeUpdate()
+  })
+
+  socket.on('blog_badge_update', () => {
+    badges.onBlogBadgeUpdate()
+  })
+
   socket.on('disconnect', () => {
     console.log('Notification socket disconnected')
   })
@@ -72,6 +85,7 @@ user.fetchUser().then(() => {
   if (user.username) {
     notificationStore.fetchNotifications()
     moderationStore.fetchBlockList()
+    badges.fetchAll()
     initEventService()
     setupNotificationSocket()
   }
@@ -82,6 +96,7 @@ watch(() => user.username, (newUsername) => {
   if (newUsername) {
     notificationStore.fetchNotifications()
     moderationStore.fetchBlockList()
+    badges.fetchAll()
     initEventService()
     setupNotificationSocket()
   } else {
@@ -104,6 +119,9 @@ async function logout() {
 
 function toggleSidebar() {
   sidebarOpen.value = !sidebarOpen.value
+  if (sidebarOpen.value) {
+    badges.onSidebarOpen()
+  }
 }
 
 function closeSidebar() {
@@ -138,7 +156,7 @@ setInterval(() => {
 
     <!-- Tablet hamburger top bar -->
     <div class="tablet-top-bar">
-      <button class="hamburger-btn" @click="toggleSidebar" aria-label="Open menu">
+      <button class="hamburger-btn" @click="toggleSidebar" aria-label="Open menu" :class="{ 'has-badge': badges.hasUnseenBadges }">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
           <line x1="3" y1="6" x2="21" y2="6"/>
           <line x1="3" y1="12" x2="21" y2="12"/>
@@ -234,6 +252,17 @@ body {
 
 .hamburger-btn:hover {
   opacity: 0.8;
+}
+
+.hamburger-btn.has-badge {
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #e53e3e, 0 0 6px 2px rgba(229, 62, 62, 0.5);
+  animation: badge-pulse 2s ease-in-out infinite;
+}
+
+@keyframes badge-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px #e53e3e, 0 0 6px 2px rgba(229, 62, 62, 0.4); }
+  50%       { box-shadow: 0 0 0 2px #e53e3e, 0 0 10px 4px rgba(229, 62, 62, 0.7); }
 }
 
 .tablet-logo {

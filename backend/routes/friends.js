@@ -3,6 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
+const { emitToUser } = require('../utilities/socket');
 
 require('dotenv').config();
 
@@ -156,6 +157,18 @@ router.post('/request/:userId', authenticate, async (req, res) => {
       'INSERT INTO friends (user_id, friend_id, status) VALUES ($1, $2, $3)',
       [req.user.id, targetUserId, 'pending']
     );
+
+    // Notify recipient if they have friend request notifications enabled
+    const settingResult = await client.query(
+      `SELECT notifications_enabled, notify_friend_requests
+       FROM user_settings WHERE user_id = $1`,
+      [targetUserId]
+    );
+    const s = settingResult.rows[0];
+    const notifyEnabled = !s || (s.notifications_enabled && s.notify_friend_requests);
+    if (notifyEnabled) {
+      emitToUser(targetUserId, 'friend_badge_update', {});
+    }
 
     res.status(201).json({ message: 'Friend request sent', user: targetUser.rows[0] });
   } catch (err) {
@@ -367,6 +380,28 @@ router.get('/blocked', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Error fetching blocked users:', err);
     res.status(500).json({ message: 'Failed to fetch blocked users' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/friends/mark-seen
+ * Marks all pending incoming friend requests as seen by the recipient.
+ * Called when the user visits the Friends page.
+ */
+router.post('/mark-seen', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    await client.query(
+      `UPDATE friends SET seen_by_recipient = TRUE
+       WHERE friend_id = $1 AND status = 'pending' AND seen_by_recipient = FALSE`,
+      [req.user.id]
+    );
+    res.json({ message: 'Friend requests marked seen' });
+  } catch (err) {
+    console.error('Error marking friend requests seen:', err);
+    res.status(500).json({ message: 'Failed to mark seen' });
   } finally {
     client.release();
   }

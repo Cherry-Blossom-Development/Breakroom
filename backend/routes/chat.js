@@ -978,4 +978,104 @@ router.delete('/rooms/:roomId/messages/:messageId', authenticateToken, async (re
   }
 });
 
+// ── Badge / read-tracking endpoints ─────────────────────────────────────────
+
+/**
+ * POST /api/chat/rooms/:roomId/mark-read
+ * Sets last_read_at = NOW() for the current user in the given room.
+ */
+router.post('/rooms/:roomId/mark-read', authenticateToken, async (req, res) => {
+  const { roomId } = req.params;
+  const client = await getClient();
+  try {
+    await client.query(
+      `UPDATE users_rooms SET last_read_at = NOW()
+       WHERE user_id = $1 AND room_id = $2`,
+      [req.user.id, roomId]
+    );
+    res.json({ message: 'Marked read' });
+  } catch (err) {
+    console.error('Error marking room read:', err);
+    res.status(500).json({ message: 'Failed to mark read' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/chat/rooms/mark-all-read
+ * Sets last_read_at = NOW() for ALL rooms the user belongs to (called on Home visit).
+ */
+router.post('/rooms/mark-all-read', authenticateToken, async (req, res) => {
+  const client = await getClient();
+  try {
+    await client.query(
+      `UPDATE users_rooms SET last_read_at = NOW()
+       WHERE user_id = $1 AND accepted = TRUE`,
+      [req.user.id]
+    );
+    res.json({ message: 'All rooms marked read' });
+  } catch (err) {
+    console.error('Error marking all rooms read:', err);
+    res.status(500).json({ message: 'Failed to mark all read' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * PUT /api/chat/rooms/:roomId/mute
+ * Toggles notifications_muted for the current user in the given room.
+ * Body: { muted: true|false }
+ */
+router.put('/rooms/:roomId/mute', authenticateToken, async (req, res) => {
+  const { roomId } = req.params;
+  const { muted } = req.body;
+  if (typeof muted !== 'boolean') {
+    return res.status(400).json({ message: 'muted must be a boolean' });
+  }
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      `UPDATE users_rooms SET notifications_muted = $1
+       WHERE user_id = $2 AND room_id = $3`,
+      [muted, req.user.id, roomId]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Room membership not found' });
+    }
+    res.json({ muted });
+  } catch (err) {
+    console.error('Error toggling mute:', err);
+    res.status(500).json({ message: 'Failed to toggle mute' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * GET /api/chat/rooms/:roomId/mute
+ * Returns current mute state for the current user in the given room.
+ */
+router.get('/rooms/:roomId/mute', authenticateToken, async (req, res) => {
+  const { roomId } = req.params;
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      `SELECT notifications_muted FROM users_rooms
+       WHERE user_id = $1 AND room_id = $2`,
+      [req.user.id, roomId]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Room membership not found' });
+    }
+    res.json({ muted: result.rows[0].notifications_muted });
+  } catch (err) {
+    console.error('Error fetching mute state:', err);
+    res.status(500).json({ message: 'Failed to fetch mute state' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
