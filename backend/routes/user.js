@@ -426,6 +426,7 @@ router.get('/badge-counts', authenticate, async (req, res) => {
     const chatUnread = {};
     let friendRequestsUnread = 0;
     let blogCommentsUnread = 0;
+    let blogUnreadByPost = {};
 
     if (s.notifications_enabled) {
       // Chat: unread per room (messages after last_read_at, excluding own messages)
@@ -458,10 +459,10 @@ router.get('/badge-counts', authenticate, async (req, res) => {
         friendRequestsUnread = parseInt(frResult.rows[0].cnt, 10);
       }
 
-      // Blog: distinct posts owned by user with comments newer than last_read_at
+      // Blog: per-post unread comment counts for posts owned by user
       if (s.notify_blog_comments) {
         const blogResult = await client.query(
-          `SELECT COUNT(DISTINCT c.blog_post_id) AS cnt
+          `SELECT c.blog_post_id, COUNT(*) AS unread_count
            FROM blog_comments c
            JOIN blog_posts bp ON c.blog_post_id = bp.id
            LEFT JOIN user_post_last_read ulr
@@ -469,14 +470,18 @@ router.get('/badge-counts', authenticate, async (req, res) => {
            WHERE bp.user_id = $2
              AND c.user_id != $3
              AND c.is_deleted = FALSE
-             AND (ulr.last_read_at IS NULL OR c.created_at > ulr.last_read_at)`,
+             AND (ulr.last_read_at IS NULL OR c.created_at > ulr.last_read_at)
+           GROUP BY c.blog_post_id`,
           [req.user.id, req.user.id, req.user.id]
         );
-        blogCommentsUnread = parseInt(blogResult.rows[0].cnt, 10);
+        for (const row of blogResult.rows) {
+          blogUnreadByPost[row.blog_post_id] = parseInt(row.unread_count, 10);
+        }
+        blogCommentsUnread = blogResult.rows.length;  // distinct post count
       }
     }
 
-    res.json({ chatUnread, friendRequestsUnread, blogCommentsUnread });
+    res.json({ chatUnread, friendRequestsUnread, blogCommentsUnread, blogUnreadByPost });
   } catch (err) {
     console.error('Error fetching badge counts:', err);
     res.status(500).json({ message: 'Failed to fetch badge counts' });

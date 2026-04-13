@@ -62,8 +62,8 @@ function setupNotificationSocket() {
     badges.onFriendBadgeUpdate()
   })
 
-  socket.on('blog_badge_update', () => {
-    badges.onBlogBadgeUpdate()
+  socket.on('blog_badge_update', ({ postId }) => {
+    badges.onBlogBadgeUpdate(postId)
   })
 
   socket.on('disconnect', () => {

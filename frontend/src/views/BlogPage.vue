@@ -5,6 +5,7 @@ import BlogEditor from '@/components/BlogEditor.vue'
 import BlogSettings from '@/components/BlogSettings.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 import LoadingSpinner from '@/components/LoadingSpinner.vue'
+import { badges } from '@/stores/badges.js'
 
 const showEditor = ref(false)
 const showSettings = ref(false)
@@ -160,9 +161,14 @@ const getPreview = (content) => {
           </div>
           <p class="post-preview">{{ getPreview(post.content) }}</p>
           <div class="post-footer" @click.stop>
-            <StatusBadge :color="post.is_published ? 'green' : 'yellow'" soft>
-              {{ post.is_published ? 'Published' : 'Draft' }}
-            </StatusBadge>
+            <div class="post-footer-left">
+              <StatusBadge :color="post.is_published ? 'green' : 'yellow'" soft>
+                {{ post.is_published ? 'Published' : 'Draft' }}
+              </StatusBadge>
+              <span v-if="badges.blogUnreadByPost[post.id]" class="post-comment-badge">
+                {{ badges.blogUnreadByPost[post.id] }} new comment{{ badges.blogUnreadByPost[post.id] > 1 ? 's' : '' }}
+              </span>
+            </div>
             <div class="post-actions">
               <button class="btn-icon" @click="editPost(post)" title="Edit">
                 Edit
@@ -354,6 +360,22 @@ const getPreview = (content) => {
   align-items: center;
   padding-top: 10px;
   border-top: 1px solid var(--color-border-light);
+}
+
+.post-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.post-comment-badge {
+  background: #e53e3e;
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
 }
 
 .post-actions {

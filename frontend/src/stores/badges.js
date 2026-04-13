@@ -1,4 +1,4 @@
-import { reactive, computed } from 'vue'
+import { reactive } from 'vue'
 
 export const badges = reactive({
   // Per-room unread message counts: { [roomId]: number }
@@ -7,8 +7,11 @@ export const badges = reactive({
   // Unseen incoming friend requests
   friendRequestsUnread: 0,
 
-  // Author's posts with new comments not yet visited
+  // Number of the author's posts that have new comments (distinct post count)
   blogCommentsUnread: 0,
+
+  // Per-post unread comment counts: { [postId]: number }
+  blogUnreadByPost: {},
 
   // True when a new badge has arrived since the sidebar was last opened.
   // Drives the hamburger red-ring indicator on mobile.
@@ -36,13 +39,17 @@ export const badges = reactive({
       const res = await fetch('/api/user/badge-counts', { credentials: 'include' })
       if (!res.ok) return
       const data = await res.json()
-      // chatUnread arrives as { "5": 3, "12": 1 } – keep as-is but ensure number values
+      // chatUnread arrives as { "5": 3, "12": 1 } – normalise keys to numbers
       const incoming = data.chatUnread || {}
       this.chatUnread = Object.fromEntries(
         Object.entries(incoming).map(([k, v]) => [Number(k), Number(v)])
       )
       this.friendRequestsUnread = data.friendRequestsUnread || 0
       this.blogCommentsUnread = data.blogCommentsUnread || 0
+      const incomingBlog = data.blogUnreadByPost || {}
+      this.blogUnreadByPost = Object.fromEntries(
+        Object.entries(incomingBlog).map(([k, v]) => [Number(k), Number(v)])
+      )
     } catch (err) {
       console.error('Failed to fetch badge counts:', err)
     }
@@ -90,19 +97,17 @@ export const badges = reactive({
   },
 
   async markBlogPostRead(postId) {
-    // Re-fetch the blog count from server after marking, since multiple posts
-    // may be outstanding and we only know the one post just visited.
+    const id = Number(postId)
+    // Optimistically clear this post from local state
+    if (this.blogUnreadByPost[id]) {
+      delete this.blogUnreadByPost[id]
+      this.blogCommentsUnread = Object.keys(this.blogUnreadByPost).length
+    }
     try {
-      await fetch(`/api/comments/posts/${postId}/mark-read`, {
+      await fetch(`/api/comments/posts/${id}/mark-read`, {
         method: 'POST',
         credentials: 'include'
       })
-      // Refresh blog count
-      const res = await fetch('/api/user/badge-counts', { credentials: 'include' })
-      if (res.ok) {
-        const data = await res.json()
-        this.blogCommentsUnread = data.blogCommentsUnread || 0
-      }
     } catch (err) {
       console.error('Failed to mark blog post read:', err)
     }
@@ -121,8 +126,16 @@ export const badges = reactive({
     this.hasUnseenBadges = true
   },
 
-  onBlogBadgeUpdate() {
-    this.blogCommentsUnread++
+  onBlogBadgeUpdate(postId) {
+    const id = Number(postId)
+    if (id) {
+      const wasZero = !this.blogUnreadByPost[id]
+      this.blogUnreadByPost[id] = (this.blogUnreadByPost[id] || 0) + 1
+      // Only increment the distinct-post count if this post was previously clean
+      if (wasZero) this.blogCommentsUnread++
+    } else {
+      this.blogCommentsUnread++
+    }
     this.hasUnseenBadges = true
   },
 
