@@ -49,6 +49,7 @@ const createNewPost = () => {
 }
 
 const editPost = async (post) => {
+  badges.markBlogPostRead(post.id)
   await blog.fetchPost(post.id)
   editingPost.value = blog.currentPost
   showEditor.value = true
