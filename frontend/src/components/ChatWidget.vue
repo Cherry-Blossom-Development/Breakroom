@@ -451,7 +451,7 @@ const setupSocket = () => {
   })
 
   socket.on('user_typing', (data) => {
-    if (!typingUsers.value.includes(data.user)) {
+    if (data.user !== user.username && !typingUsers.value.includes(data.user)) {
       typingUsers.value.push(data.user)
     }
   })
