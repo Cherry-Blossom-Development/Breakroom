@@ -200,3 +200,13 @@ WHERE g.name = 'Restricted' AND p.name = 'update_approved_post';
 INSERT INTO group_permissions (group_id, permission_id)
 SELECT g.id, p.id FROM `groups` g, permissions p
 WHERE g.name = 'Restricted' AND p.name = 'delete_approved_post';
+
+CREATE TABLE IF NOT EXISTS user_fcm_tokens (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  fcm_token VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_token (fcm_token),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

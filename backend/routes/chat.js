@@ -9,6 +9,7 @@ const { getIO } = require('../utilities/socket');
 const { uploadToS3 } = require('../utilities/aws-s3');
 const { extractToken } = require('../utilities/auth');
 const { checkAndFilterContent } = require('../utilities/contentFilter');
+const { sendToUsers } = require('../utilities/fcm');
 
 require('dotenv').config();
 
@@ -312,6 +313,23 @@ router.post('/rooms/:roomId/messages', authenticateToken, async (req, res) => {
         message: messageData
       });
     }
+
+    // Push notification to room members who are offline
+    const roomResult = await client.query('SELECT name FROM chat_rooms WHERE id = $1', [roomId]);
+    const roomName = roomResult.rows[0]?.name || 'Chat';
+    const membersResult = await client.query(
+      `SELECT user_id FROM users_rooms
+       WHERE room_id = $1 AND user_id != $2 AND accepted = TRUE AND notifications_muted = FALSE`,
+      [roomId, req.user.id]
+    );
+    const recipientIds = membersResult.rows.map(r => r.user_id);
+    sendToUsers(recipientIds, {
+      type: 'chat_message',
+      roomId: String(roomId),
+      roomName,
+      senderHandle: messageData.handle,
+      message: messageData.message || 'Sent an attachment'
+    }).catch(() => {});
 
     res.status(201).json({ message: messageData });
   } catch (err) {

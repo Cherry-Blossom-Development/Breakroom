@@ -585,4 +585,65 @@ router.delete('/test-emails/reset/:email', (req, res) => {
   res.json({ message: 'Cleared' });
 });
 
+// Register an FCM device token for push notifications
+router.post('/fcm-token', async (req, res) => {
+  const token = extractToken(req);
+  if (!token) return res.status(401).json({ message: 'Not authenticated' });
+
+  let userId;
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    const client = await getClient();
+    try {
+      const user = await client.query('SELECT id FROM users WHERE handle = $1', [decoded.username]);
+      if (user.rowCount === 0) return res.status(401).json({ message: 'User not found' });
+      userId = user.rows[0].id;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    return res.status(401).json({ message: 'Invalid token' });
+  }
+
+  const { fcmToken } = req.body;
+  if (!fcmToken) return res.status(400).json({ message: 'fcmToken is required' });
+
+  const client = await getClient();
+  try {
+    // Upsert: insert or update to reassign the token to this user if it moved devices
+    await client.query(
+      `INSERT INTO user_fcm_tokens (user_id, fcm_token)
+       VALUES ($1, $2)
+       ON DUPLICATE KEY UPDATE user_id = $1, updated_at = CURRENT_TIMESTAMP`,
+      [userId, fcmToken]
+    );
+    res.json({ message: 'FCM token registered' });
+  } catch (err) {
+    console.error('Error registering FCM token:', err);
+    res.status(500).json({ message: 'Failed to register FCM token' });
+  } finally {
+    client.release();
+  }
+});
+
+// Remove an FCM device token (call on logout)
+router.delete('/fcm-token', async (req, res) => {
+  const token = extractToken(req);
+  if (!token) return res.status(401).json({ message: 'Not authenticated' });
+
+  const { fcmToken } = req.body;
+  if (!fcmToken) return res.status(400).json({ message: 'fcmToken is required' });
+
+  const client = await getClient();
+  try {
+    await client.query('DELETE FROM user_fcm_tokens WHERE fcm_token = $1', [fcmToken]);
+    res.json({ message: 'FCM token removed' });
+  } catch (err) {
+    console.error('Error removing FCM token:', err);
+    res.status(500).json({ message: 'Failed to remove FCM token' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;

@@ -17,3 +17,4 @@ tmpclaude*
 test-emails/
 backend/test-emails/
 .claude*
+/backend/firebase-service-account.json

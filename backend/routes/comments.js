@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { getIO } = require('../utilities/socket');
 const { checkAndFilterContent } = require('../utilities/contentFilter');
+const { sendToUser } = require('../utilities/fcm');
 
 require('dotenv').config();
 
@@ -256,6 +257,12 @@ router.post('/:postId', authenticate, async (req, res) => {
       if (notifyEnabled) {
         const { emitToUser } = require('../utilities/socket');
         emitToUser(post.user_id, 'blog_badge_update', { postId: parseInt(postId) });
+        sendToUser(post.user_id, {
+          type: 'blog_comment',
+          postId: String(postId),
+          commenterHandle: req.user.username,
+          preview: content.substring(0, 100)
+        }).catch(() => {});
       }
     }
 

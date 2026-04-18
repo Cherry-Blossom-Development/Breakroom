@@ -89,6 +89,8 @@ services:
       # S3 configuration
       S3_BUCKET_NAME: ${S3_BUCKET_NAME}
       S3_BUCKET_REGION: ${S3_BUCKET_REGION}
+      # Firebase (FCM push notifications)
+      FIREBASE_SERVICE_ACCOUNT_PATH: ${FIREBASE_SERVICE_ACCOUNT_PATH}
 
     # only in non-prod environments, runs nodemon which
     # looks for changes live (that won't happen in production)

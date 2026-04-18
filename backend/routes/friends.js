@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { emitToUser } = require('../utilities/socket');
+const { sendToUser } = require('../utilities/fcm');
 
 require('dotenv').config();
 
@@ -168,6 +169,10 @@ router.post('/request/:userId', authenticate, async (req, res) => {
     const notifyEnabled = !s || (s.notifications_enabled && s.notify_friend_requests);
     if (notifyEnabled) {
       emitToUser(targetUserId, 'friend_badge_update', {});
+      sendToUser(targetUserId, {
+        type: 'friend_request',
+        senderHandle: req.user.username
+      }).catch(() => {});
     }
 
     res.status(201).json({ message: 'Friend request sent', user: targetUser.rows[0] });
