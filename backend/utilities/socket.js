@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { getClient } = require('./db');
 const { checkAndFilterContent } = require('./contentFilter');
+const { sendToUsers } = require('./fcm');
 
 require('dotenv').config();
 
@@ -159,6 +160,36 @@ const initializeSocket = (io) => {
           roomId: roomId,
           message: messageData
         });
+
+        // Send push notifications to offline room members (fire-and-forget)
+        ;(async () => {
+          try {
+            const pushClient = await getClient();
+            try {
+              const roomResult = await pushClient.query('SELECT name FROM chat_rooms WHERE id = $1', [roomId]);
+              const roomName = roomResult.rows[0]?.name || 'Chat';
+              const membersResult = await pushClient.query(
+                `SELECT user_id FROM users_rooms
+                 WHERE room_id = $1 AND user_id != $2 AND accepted = TRUE AND notifications_muted = FALSE`,
+                [roomId, socket.user.id]
+              );
+              const recipientIds = membersResult.rows.map(r => r.user_id);
+              if (recipientIds.length > 0) {
+                sendToUsers(recipientIds, {
+                  type: 'chat_message',
+                  roomId: String(roomId),
+                  roomName,
+                  senderHandle: messageData.handle,
+                  message: messageData.message || 'Sent an attachment'
+                }).catch(err => console.error('FCM send failed:', err.message));
+              }
+            } finally {
+              pushClient.release();
+            }
+          } catch (pushErr) {
+            console.error('Push notification failed (non-fatal):', pushErr.message);
+          }
+        })();
 
         // Emit chat_badge_update to each room member — fire-and-forget so a
         // failure here never blocks or rolls back the message send.

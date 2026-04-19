@@ -68,10 +68,8 @@ async function sendToUsers(userIds, payload) {
 async function sendToTokens(tokens, payload) {
   if (!tokens || tokens.length === 0) return;
 
-  let admin;
   try {
-    const app = getAdminApp();
-    admin = require('firebase-admin');
+    getAdminApp();
   } catch (err) {
     console.error('[FCM] Firebase not configured, skipping notification:', err.message);
     return;
@@ -85,7 +83,42 @@ async function sendToTokens(tokens, payload) {
 
   try {
     const messaging = require('firebase-admin').messaging();
-    const response = await messaging.sendEachForMulticast({ tokens, data });
+
+    // Build notification title and body based on payload type
+    let title = 'Breakroom';
+    let body = 'You have a new notification';
+
+    if (data.type === 'chat_message') {
+      title = data.roomName || 'Chat';
+      body = `${data.senderHandle}: ${data.message}`;
+    } else if (data.type === 'friend_request') {
+      title = 'Friend Request';
+      body = `${data.senderHandle} sent you a friend request`;
+    } else if (data.type === 'blog_comment') {
+      title = 'New Comment';
+      body = `${data.commenterHandle}: ${data.comment}`;
+    }
+
+    // Include both notification (for iOS background) and data payload
+    const message = {
+      tokens,
+      data,
+      notification: {
+        title,
+        body
+      },
+      apns: {
+        payload: {
+          aps: {
+            alert: { title, body },
+            sound: 'default',
+            badge: 1
+          }
+        }
+      }
+    };
+
+    const response = await messaging.sendEachForMulticast(message);
 
     // Prune stale tokens
     const staleTokens = [];
