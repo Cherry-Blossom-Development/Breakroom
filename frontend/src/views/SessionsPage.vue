@@ -1668,10 +1668,10 @@ onMounted(async () => {
 /* Recording controls */
 .file-row { align-items: center; gap: 10px; }
 .file-label.disabled { opacity: 0.4; pointer-events: none; }
-.mic-select { background: var(--color-bg-input, #2a2a2a); border: 1px solid var(--color-border, #555); border-radius: 6px; padding: 8px 10px; font-size: 0.85rem; color: var(--color-text-muted); cursor: pointer; flex-shrink: 0; max-width: 180px; }
+.mic-select { background: var(--color-background-input); border: 1px solid var(--color-border-input); border-radius: 6px; padding: 8px 10px; font-size: 0.85rem; color: var(--color-text); cursor: pointer; flex-shrink: 0; max-width: 180px; }
 .recording-preview { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .preview-label { font-size: 0.85rem; color: var(--color-text-muted); white-space: nowrap; }
-.rec-btn { background: none; border: 1px solid var(--color-border, #555); border-radius: 6px; padding: 9px 14px; font-size: 0.9rem; color: var(--color-text-muted); cursor: pointer; white-space: nowrap; transition: all 0.15s; flex-shrink: 0; }
+.rec-btn { background: none; border: 1px solid var(--color-border, #555); border-radius: 6px; padding: 9px 14px; font-size: 0.9rem; color: var(--color-text); cursor: pointer; white-space: nowrap; transition: all 0.15s; flex-shrink: 0; }
 .rec-btn:not(:disabled):hover { border-color: #e05555; color: #e05555; }
 .rec-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .rec-indicator { color: #e05555; font-weight: 700; font-size: 0.9rem; white-space: nowrap; flex-shrink: 0; animation: rec-pulse 1s ease-in-out infinite; }
@@ -1685,7 +1685,7 @@ onMounted(async () => {
 .sessions-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; }
 .sessions-header .card-title { margin: 0; }
 .year-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
-.year-tab { background: none; border: 1px solid var(--color-border, #555); border-radius: 20px; padding: 4px 14px; font-size: 0.85rem; color: var(--color-text-muted); cursor: pointer; transition: all 0.15s; }
+.year-tab { background: none; border: 1px solid var(--color-border, #555); border-radius: 20px; padding: 4px 14px; font-size: 0.85rem; color: var(--color-text); cursor: pointer; transition: all 0.15s; }
 .year-tab:hover { border-color: var(--color-accent); color: var(--color-accent); }
 .year-tab.active { background: var(--color-accent); border-color: var(--color-accent); color: #fff; }
 
@@ -1776,7 +1776,7 @@ onMounted(async () => {
 .indiv-placeholder-card { padding: 32px 24px; }
 .indiv-placeholder-msg { color: var(--color-text-muted); font-size: 0.95rem; margin: 0; }
 .bm-filters { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.bm-band-select { background: var(--color-bg-input, #2a2a2a); border: 1px solid var(--color-border, #555); border-radius: 6px; padding: 5px 10px; font-size: 0.85rem; color: var(--color-text); }
+.bm-band-select { background: var(--color-background-input); border: 1px solid var(--color-border-input); border-radius: 6px; padding: 5px 10px; font-size: 0.85rem; color: var(--color-text); }
 .session-name-text { display: block; font-weight: 500; }
 .session-sub { display: block; font-size: 0.8rem; color: var(--color-text-muted); }
 
