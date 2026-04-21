@@ -3,6 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
+const { isSubscribed } = require('../utilities/subscription');
 
 require('dotenv').config();
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -83,6 +84,27 @@ router.get('/:id', authenticate, async (req, res) => {
 router.post('/', authenticate, async (req, res) => {
   const { name, description } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ message: 'Band name is required' });
+
+  // Enforce free-tier limit: 1 band
+  const limitClient = await getClient();
+  try {
+    const countResult = await limitClient.query(
+      `SELECT COUNT(*) AS cnt FROM bands WHERE created_by = $1`,
+      [req.user.id]
+    );
+    const count = parseInt(countResult.rows[0].cnt, 10);
+    if (count >= 1) {
+      const { subscribed } = await isSubscribed(req.user.id);
+      if (!subscribed) {
+        return res.status(402).json({
+          message: 'Free accounts are limited to 1 band',
+          requiresSubscription: true,
+        });
+      }
+    }
+  } finally {
+    limitClient.release();
+  }
 
   const client = await getClient();
   try {

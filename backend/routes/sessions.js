@@ -7,6 +7,7 @@ const { getClient } = require('../utilities/db');
 const { uploadToS3, deleteFromS3, getS3Url, streamFromS3 } = require('../utilities/aws-s3');
 const { normalizeToWav } = require('../utilities/audio');
 const { extractToken } = require('../utilities/auth');
+const { isSubscribed } = require('../utilities/subscription');
 
 require('dotenv').config();
 
@@ -141,9 +142,32 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
   if (!req.file) return res.status(400).json({ message: 'No audio file uploaded' });
 
   const { name, recorded_at, band_id, session_type, instrument_id } = req.body;
+  const sessionTypeVal = session_type === 'individual' ? 'individual' : 'band';
+
+  // Enforce free-tier limits: 3 band sessions, 3 individual sessions
+  const FREE_LIMITS = { band: 3, individual: 3 };
+  const limitClient = await getClient();
+  try {
+    const countResult = await limitClient.query(
+      'SELECT COUNT(*) AS cnt FROM sessions WHERE user_id = $1 AND session_type = $2',
+      [req.user.id, sessionTypeVal]
+    );
+    const count = parseInt(countResult.rows[0].cnt, 10);
+    if (count >= FREE_LIMITS[sessionTypeVal]) {
+      const { subscribed } = await isSubscribed(req.user.id);
+      if (!subscribed) {
+        return res.status(402).json({
+          message: `Free accounts are limited to ${FREE_LIMITS[sessionTypeVal]} ${sessionTypeVal} sessions`,
+          requiresSubscription: true,
+        });
+      }
+    }
+  } finally {
+    limitClient.release();
+  }
+
   const bandIdVal = band_id ? parseInt(band_id, 10) : null;
   const instrumentIdVal = instrument_id ? parseInt(instrument_id, 10) : null;
-  const sessionTypeVal = session_type === 'individual' ? 'individual' : 'band';
 
   // Normalize to WAV: convert any format → 44100Hz 16-bit WAV with EBU R128 loudness normalization
   let wavBuffer;

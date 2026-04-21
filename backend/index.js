@@ -80,6 +80,7 @@ const moderationRoutes = require('./routes/moderation');
 const sessionsRoutes = require('./routes/sessions');
 const bandsRoutes = require('./routes/bands');
 const instrumentsRoutes = require('./routes/instruments');
+const subscriptionsRoutes = require('./routes/subscriptions');
 const { getS3Url } = require('./utilities/aws-s3');
 
 
@@ -120,6 +121,7 @@ app.use('/api/moderation', moderationRoutes);
 app.use('/api/sessions', sessionsRoutes);
 app.use('/api/bands', bandsRoutes);
 app.use('/api/instruments', instrumentsRoutes);
+app.use('/api/subscriptions', subscriptionsRoutes);
 
 // Redirect uploaded file requests to S3
 const handleS3Redirect = (req, res) => {
