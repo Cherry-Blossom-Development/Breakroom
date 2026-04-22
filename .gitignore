@@ -18,3 +18,4 @@ test-emails/
 backend/test-emails/
 .claude*
 /backend/firebase-service-account.json
+/backend/google-play-service-account.json
