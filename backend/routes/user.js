@@ -490,4 +490,68 @@ router.get('/badge-counts', authenticate, async (req, res) => {
   }
 });
 
+// ── Audio defaults ───────────────────────────────────────────────────────────
+
+/**
+ * GET /api/user/audio-defaults
+ * Returns the current user's saved audio defaults.
+ * Missing row = all app defaults.
+ */
+router.get('/audio-defaults', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      `SELECT echo_cancellation, noise_suppression, auto_gain_control, playback_volume
+       FROM audio_defaults WHERE user_id = $1`,
+      [req.user.id]
+    );
+    if (result.rowCount === 0) {
+      return res.json({
+        echo_cancellation: false,
+        noise_suppression: false,
+        auto_gain_control: false,
+        playback_volume: 0.75
+      });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching audio defaults:', err);
+    res.status(500).json({ message: 'Failed to fetch audio defaults' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * PUT /api/user/audio-defaults
+ * Upserts the current user's audio defaults.
+ */
+router.put('/audio-defaults', authenticate, async (req, res) => {
+  const { echo_cancellation, noise_suppression, auto_gain_control, playback_volume } = req.body;
+  const client = await getClient();
+  try {
+    await client.query(
+      `INSERT INTO audio_defaults
+         (user_id, echo_cancellation, noise_suppression, auto_gain_control, playback_volume)
+       VALUES ($1, $2, $3, $4, $5)
+       ON DUPLICATE KEY UPDATE
+         echo_cancellation = VALUES(echo_cancellation),
+         noise_suppression = VALUES(noise_suppression),
+         auto_gain_control = VALUES(auto_gain_control),
+         playback_volume   = VALUES(playback_volume)`,
+      [req.user.id,
+       echo_cancellation ?? false,
+       noise_suppression ?? false,
+       auto_gain_control ?? false,
+       playback_volume ?? 0.75]
+    );
+    res.json({ message: 'Audio defaults saved' });
+  } catch (err) {
+    console.error('Error saving audio defaults:', err);
+    res.status(500).json({ message: 'Failed to save audio defaults' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
