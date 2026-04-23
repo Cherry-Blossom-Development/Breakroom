@@ -1,7 +1,11 @@
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { sessions } from '@/stores/sessions'
+import { features } from '@/stores/features'
 import { authFetch } from '@/utilities/authFetch'
+
+// --- Audio Defaults overlay ---
+const showAudioDefaults = ref(false)
 
 // --- Section tabs ---
 const activeTab = ref('band')
@@ -891,11 +895,26 @@ onMounted(async () => {
       <p class="subtitle">Track and manage your recording sessions</p>
     </header>
 
-    <!-- Section tabs -->
-    <div class="section-tabs">
-      <button class="section-tab" :class="{ active: activeTab === 'band' }" @click="activeTab = 'band'">Band Practice</button>
-      <button class="section-tab" :class="{ active: activeTab === 'individual' }" @click="activeTab = 'individual'">Individual</button>
-      <button class="section-tab" :class="{ active: activeTab === 'bands' }" @click="activeTab = 'bands'">Bands</button>
+    <!-- Section tabs + Audio Defaults button -->
+    <div class="tabs-bar">
+      <div class="section-tabs">
+        <button class="section-tab" :class="{ active: activeTab === 'band' }" @click="activeTab = 'band'">Band Practice</button>
+        <button class="section-tab" :class="{ active: activeTab === 'individual' }" @click="activeTab = 'individual'">Individual</button>
+        <button class="section-tab" :class="{ active: activeTab === 'bands' }" @click="activeTab = 'bands'">Bands</button>
+      </div>
+      <button v-if="features.has('audio_defaults')" class="btn-ghost btn-sm audio-defaults-btn" @click="showAudioDefaults = true">
+        🎛 Audio Defaults
+      </button>
+    </div>
+
+    <!-- Audio Defaults overlay -->
+    <div v-if="showAudioDefaults" class="modal-overlay" @click.self="showAudioDefaults = false">
+      <div class="modal">
+        <h3>Audio Defaults</h3>
+        <div class="modal-actions">
+          <button class="btn-ghost" @click="showAudioDefaults = false">Close</button>
+        </div>
+      </div>
     </div>
 
     <!-- Individual tab -->
@@ -1766,7 +1785,11 @@ onMounted(async () => {
 
 
 /* Section tabs */
-.section-tabs { display: flex; gap: 0; margin-bottom: 24px; border-bottom: 2px solid var(--color-border, #444); }
+.tabs-bar { display: flex; justify-content: space-between; align-items: flex-end; }
+.audio-defaults-btn { margin-bottom: 4px; white-space: nowrap; }
+.section-tabs { display: flex; gap: 0; flex: 1; margin-bottom: 0; border-bottom: 2px solid var(--color-border, #444); }
+.tabs-bar { margin-bottom: 24px; border-bottom: 2px solid var(--color-border, #444); }
+.tabs-bar .section-tabs { border-bottom: none; }
 .section-tab { background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -2px; padding: 10px 24px; font-size: 0.95rem; font-weight: 600; color: var(--color-text-muted); cursor: pointer; transition: color 0.15s, border-color 0.15s; }
 .section-tab:hover { color: var(--color-text); }
 .section-tab.active { color: var(--color-accent); border-bottom-color: var(--color-accent); }
@@ -1864,4 +1887,9 @@ onMounted(async () => {
 .mashup-volume-pct { font-size: 0.78rem; color: var(--color-text-muted); min-width: 34px; text-align: right; }
 .mashup-preview-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
 .mashup-merge-btn { margin-left: auto; padding: 9px 18px; font-size: 0.9rem; }
+
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
+.modal { background: var(--color-background-card); border-radius: 12px; padding: 24px; width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto; }
+.modal h3 { margin: 0 0 20px; color: var(--color-text); font-size: 1.2rem; font-weight: 700; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
 </style>
