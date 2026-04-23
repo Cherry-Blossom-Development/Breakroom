@@ -18,3 +18,8 @@ CREATE TABLE IF NOT EXISTS audio_defaults (
 INSERT INTO audio_defaults (user_id, echo_cancellation, noise_suppression, auto_gain_control, playback_volume)
 SELECT id, FALSE, FALSE, FALSE, 0.75 FROM users WHERE handle = 'dallas'
 ON DUPLICATE KEY UPDATE user_id = user_id;
+
+-- Register feature flag so it appears in Admin/Features
+INSERT INTO features (feature_key, name, description, is_active)
+VALUES ('audio_defaults', 'Audio Defaults', 'Per-user audio preferences (echo cancellation, noise suppression, auto gain control, playback volume) that persist across sessions and platforms.', TRUE)
+ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description);
