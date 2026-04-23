@@ -1,11 +1,48 @@
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { sessions } from '@/stores/sessions'
 import { features } from '@/stores/features'
 import { authFetch } from '@/utilities/authFetch'
 
-// --- Audio Defaults overlay ---
+// --- Audio Defaults ---
 const showAudioDefaults = ref(false)
+const audioDefaultsSaving = ref(false)
+const audioDefaultsSaved = ref(false)
+const audioDefaults = reactive({
+  echo_cancellation: false,
+  noise_suppression: false,
+  auto_gain_control: false,
+  playback_volume: 0.75
+})
+
+async function loadAudioDefaults() {
+  try {
+    const res = await authFetch('/api/user/audio-defaults')
+    if (res.ok) {
+      const data = await res.json()
+      audioDefaults.echo_cancellation = !!data.echo_cancellation
+      audioDefaults.noise_suppression = !!data.noise_suppression
+      audioDefaults.auto_gain_control = !!data.auto_gain_control
+      audioDefaults.playback_volume = parseFloat(data.playback_volume) || 0.75
+    }
+  } catch { /* keep defaults */ }
+}
+
+async function saveAudioDefaults() {
+  audioDefaultsSaving.value = true
+  audioDefaultsSaved.value = false
+  try {
+    await authFetch('/api/user/audio-defaults', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(audioDefaults)
+    })
+    audioDefaultsSaved.value = true
+    setTimeout(() => { audioDefaultsSaved.value = false }, 2500)
+  } catch { /* ignore */ } finally {
+    audioDefaultsSaving.value = false
+  }
+}
 
 // --- Section tabs ---
 const activeTab = ref('band')
@@ -307,8 +344,8 @@ async function startRecording(context) {
   try {
     if (recordingPreviewUrl.value) { URL.revokeObjectURL(recordingPreviewUrl.value); recordingPreviewUrl.value = null }
     const audioConstraints = selectedMicId.value
-      ? { deviceId: { exact: selectedMicId.value }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
-      : { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      ? { deviceId: { exact: selectedMicId.value }, echoCancellation: audioDefaults.echo_cancellation, noiseSuppression: audioDefaults.noise_suppression, autoGainControl: audioDefaults.auto_gain_control }
+      : { echoCancellation: audioDefaults.echo_cancellation, noiseSuppression: audioDefaults.noise_suppression, autoGainControl: audioDefaults.auto_gain_control }
     const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
     _recordingStream = stream
 
@@ -451,7 +488,7 @@ async function togglePlay(session) {
   playingId.value = session.id
   isPlaying.value = false
   await nextTick()
-  audioEl.value.volume = 0.5
+  audioEl.value.volume = audioDefaults.playback_volume
   audioEl.value.load()
   audioEl.value.play()
 }
@@ -801,8 +838,8 @@ async function startMashupRecording() {
   try {
     if (mashupPreviewUrl.value) { URL.revokeObjectURL(mashupPreviewUrl.value); mashupPreviewUrl.value = null }
     const audioConstraints = selectedMicId.value
-      ? { deviceId: { exact: selectedMicId.value }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
-      : { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      ? { deviceId: { exact: selectedMicId.value }, echoCancellation: audioDefaults.echo_cancellation, noiseSuppression: audioDefaults.noise_suppression, autoGainControl: audioDefaults.auto_gain_control }
+      : { echoCancellation: audioDefaults.echo_cancellation, noiseSuppression: audioDefaults.noise_suppression, autoGainControl: audioDefaults.auto_gain_control }
     const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
     _recordingStream = stream
     await refreshMicDevices()
@@ -880,7 +917,7 @@ async function handleMashupUpload() {
 
 onMounted(async () => {
   sessions.reset()
-  await Promise.all([sessions.load(), features.load()])
+  await Promise.all([sessions.load(), features.load(), loadAudioDefaults()])
   if (availableYears.value.length > 0) selectedYear.value = availableYears.value[0]
   document.addEventListener('click', closeRatingPopup)
   await Promise.all([loadBands(), loadInstruments(), loadBandMemberSessions()])
@@ -911,8 +948,69 @@ onMounted(async () => {
     <div v-if="showAudioDefaults" class="modal-overlay" @click.self="showAudioDefaults = false">
       <div class="modal">
         <h3>Audio Defaults</h3>
+
+        <!-- Playback Volume -->
+        <div class="ad-group">
+          <div class="ad-row">
+            <div class="ad-label">
+              <span class="ad-name">Playback Volume</span>
+              <span class="ad-desc">Default volume when playing back sessions</span>
+            </div>
+            <span class="ad-value">{{ Math.round(audioDefaults.playback_volume * 100) }}%</span>
+          </div>
+          <input type="range" class="ad-slider" min="0" max="1" step="0.05"
+                 :value="audioDefaults.playback_volume"
+                 @input="e => audioDefaults.playback_volume = parseFloat(e.target.value)" />
+        </div>
+
+        <!-- Recording toggles -->
+        <div class="ad-section-label">Recording</div>
+
+        <div class="ad-group">
+          <label class="ad-toggle-row">
+            <div class="ad-label">
+              <span class="ad-name">Echo Cancellation</span>
+              <span class="ad-desc">Reduce echo when monitoring through speakers. Disable for music recording to preserve the full signal.</span>
+            </div>
+            <div class="ad-toggle" :class="{ active: audioDefaults.echo_cancellation }"
+                 @click="audioDefaults.echo_cancellation = !audioDefaults.echo_cancellation">
+              <div class="ad-toggle-knob"></div>
+            </div>
+          </label>
+        </div>
+
+        <div class="ad-group">
+          <label class="ad-toggle-row">
+            <div class="ad-label">
+              <span class="ad-name">Noise Suppression</span>
+              <span class="ad-desc">Filter out background noise. Disable for music recording to avoid artifacts on sustained notes.</span>
+            </div>
+            <div class="ad-toggle" :class="{ active: audioDefaults.noise_suppression }"
+                 @click="audioDefaults.noise_suppression = !audioDefaults.noise_suppression">
+              <div class="ad-toggle-knob"></div>
+            </div>
+          </label>
+        </div>
+
+        <div class="ad-group">
+          <label class="ad-toggle-row">
+            <div class="ad-label">
+              <span class="ad-name">Auto Gain Control</span>
+              <span class="ad-desc">Automatically adjust mic gain to keep a steady level. Disable for music recording to preserve dynamics.</span>
+            </div>
+            <div class="ad-toggle" :class="{ active: audioDefaults.auto_gain_control }"
+                 @click="audioDefaults.auto_gain_control = !audioDefaults.auto_gain_control">
+              <div class="ad-toggle-knob"></div>
+            </div>
+          </label>
+        </div>
+
         <div class="modal-actions">
+          <span v-if="audioDefaultsSaved" class="ad-saved">Saved</span>
           <button class="btn-ghost" @click="showAudioDefaults = false">Close</button>
+          <button class="btn-primary" :disabled="audioDefaultsSaving" @click="saveAudioDefaults">
+            {{ audioDefaultsSaving ? 'Saving…' : 'Save' }}
+          </button>
         </div>
       </div>
     </div>
@@ -1891,5 +1989,21 @@ onMounted(async () => {
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
 .modal { background: var(--color-background-card); border-radius: 12px; padding: 24px; width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto; }
 .modal h3 { margin: 0 0 20px; color: var(--color-text); font-size: 1.2rem; font-weight: 700; }
-.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+.modal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+
+/* Audio Defaults form */
+.ad-section-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-text-muted); margin: 20px 0 8px; }
+.ad-group { margin-bottom: 16px; }
+.ad-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.ad-toggle-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; cursor: pointer; }
+.ad-label { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.ad-name { font-size: 0.95rem; font-weight: 600; color: var(--color-text); }
+.ad-desc { font-size: 0.8rem; color: var(--color-text-muted); line-height: 1.4; }
+.ad-value { font-size: 0.9rem; font-weight: 600; color: var(--color-accent); min-width: 38px; text-align: right; }
+.ad-slider { width: 100%; accent-color: var(--color-accent); cursor: pointer; margin-top: 2px; }
+.ad-toggle { flex-shrink: 0; width: 44px; height: 24px; border-radius: 12px; background: var(--color-border, #555); position: relative; cursor: pointer; transition: background 0.2s; margin-top: 2px; }
+.ad-toggle.active { background: var(--color-accent); }
+.ad-toggle-knob { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left 0.2s; }
+.ad-toggle.active .ad-toggle-knob { left: 23px; }
+.ad-saved { font-size: 0.85rem; color: var(--color-accent); margin-right: auto; }
 </style>
