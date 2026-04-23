@@ -3,7 +3,7 @@
 
 services:
   backend:
-    image: dallascaley/breakroom-backend:latest
+    image: dallascaley/breakroom-backend:release-1.7.1
     working_dir: /app
     ports:
       # Expose to localhost only (host nginx proxies to this)
