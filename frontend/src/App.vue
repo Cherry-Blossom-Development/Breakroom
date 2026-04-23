@@ -112,9 +112,7 @@ onUnmounted(() => {
 
 async function logout() {
   await user.logout()
-  isAdmin.value = false
-  sidebarOpen.value = false
-  router.push('/login')
+  window.location.href = '/login'
 }
 
 function toggleSidebar() {

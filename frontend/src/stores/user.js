@@ -27,8 +27,6 @@ export const user = reactive({
   },
 
   async logout() {
-    sessions.reset();
-    state.username = null;
     try {
       await fetch('/api/auth/logout', {
         method: 'POST',
@@ -37,5 +35,7 @@ export const user = reactive({
     } catch (err) {
       console.error('Logout failed:', err);
     }
+    sessions.reset();
+    state.username = null;
   }
 });
