@@ -880,7 +880,7 @@ async function handleMashupUpload() {
 
 onMounted(async () => {
   sessions.reset()
-  await sessions.load()
+  await Promise.all([sessions.load(), features.load()])
   if (availableYears.value.length > 0) selectedYear.value = availableYears.value[0]
   document.addEventListener('click', closeRatingPopup)
   await Promise.all([loadBands(), loadInstruments(), loadBandMemberSessions()])
