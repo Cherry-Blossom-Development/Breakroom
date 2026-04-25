@@ -157,7 +157,7 @@ const router = createRouter({
       path: '/user/:handle',
       name: 'publicProfile',
       component: () => import('../views/PublicProfilePage.vue'),
-      meta: { requiresAuth: true },
+      meta: { publicLayout: true }, // No requiresAuth - truly public, no app shell
     },
     {
       path: '/about-company',

@@ -543,6 +543,7 @@ onMounted(() => {
           <p class="handle">@{{ profile.handle }}</p>
           <p class="member-since">Member since {{ memberSince }}</p>
           <p class="friend-count">{{ profile.friendCount }} {{ profile.friendCount === 1 ? 'friend' : 'friends' }}</p>
+          <RouterLink v-if="profile.handle" :to="`/user/${profile.handle}`" target="_blank" class="view-public-link">View Public Profile</RouterLink>
         </div>
       </div>
 
@@ -960,8 +961,18 @@ onMounted(() => {
 .friend-count {
   color: #666;
   font-size: 0.9rem;
-  margin: 0;
+  margin: 0 0 8px 0;
   font-weight: 500;
+}
+
+.view-public-link {
+  color: var(--color-accent);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.view-public-link:hover {
+  text-decoration: underline;
 }
 
 .success-message {

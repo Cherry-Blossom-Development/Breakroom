@@ -185,7 +185,8 @@ setInterval(() => {
             <RouterLink to="/">Home</RouterLink>
             <RouterLink to="/about">About</RouterLink>
             <RouterLink to="/eula">EULA</RouterLink>
-            <RouterLink to="/blog" class="back-link">← Blog Edit</RouterLink>
+            <RouterLink v-if="route.name === 'publicBlog' || route.name === 'publicBlogPost'" to="/blog" class="back-link">← Blog Edit</RouterLink>
+            <RouterLink v-else-if="route.name === 'publicProfile'" to="/profile" class="back-link">← My Profile</RouterLink>
             <a href="#" class="logout-link" @click.prevent="logout">Logout</a>
           </template>
           <!-- Standard public nav for non-logged-in visitors -->
