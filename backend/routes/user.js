@@ -554,4 +554,69 @@ router.put('/audio-defaults', authenticate, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/user/devices
+ * Registers or refreshes a device for the current user.
+ * device_token is generated client-side and stored in localStorage (web) or SharedPreferences (Android).
+ * system_name is regenerated from UA/build info on every call — always stays current.
+ * Returns the full device record including any existing user_name.
+ */
+router.post('/devices', authenticate, async (req, res) => {
+  const { deviceToken, systemName, platform, isEmulator, deviceInfo } = req.body;
+  if (!deviceToken || !systemName) {
+    return res.status(400).json({ message: 'deviceToken and systemName are required' });
+  }
+  const client = await getClient();
+  try {
+    await client.query(
+      `INSERT INTO user_devices (user_id, device_token, system_name, platform, is_emulator, device_info)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON DUPLICATE KEY UPDATE
+         system_name  = VALUES(system_name),
+         platform     = VALUES(platform),
+         is_emulator  = VALUES(is_emulator),
+         device_info  = VALUES(device_info),
+         last_seen_at = CURRENT_TIMESTAMP`,
+      [req.user.id, deviceToken, systemName, platform || 'web',
+       isEmulator ? 1 : 0,
+       deviceInfo ? JSON.stringify(deviceInfo) : null]
+    );
+    const result = await client.query(
+      `SELECT device_token, system_name, user_name, platform, is_emulator
+       FROM user_devices WHERE user_id = $1 AND device_token = $2`,
+      [req.user.id, deviceToken]
+    );
+    res.json({ device: result.rows[0] });
+  } catch (err) {
+    console.error('Error registering device:', err);
+    res.status(500).json({ message: 'Failed to register device' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * PUT /api/user/devices/:token/name
+ * Sets or clears the user-friendly name for a device.
+ * Pass userName as empty string or null to revert to system_name display.
+ */
+router.put('/devices/:token/name', authenticate, async (req, res) => {
+  const { token } = req.params;
+  const { userName } = req.body;
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      `UPDATE user_devices SET user_name = $1 WHERE user_id = $2 AND device_token = $3`,
+      [userName || null, req.user.id, token]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Device not found' });
+    res.json({ message: 'Device name updated' });
+  } catch (err) {
+    console.error('Error updating device name:', err);
+    res.status(500).json({ message: 'Failed to update device name' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;

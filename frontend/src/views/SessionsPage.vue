@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { sessions } from '@/stores/sessions'
 import { features } from '@/stores/features'
 import { authFetch } from '@/utilities/authFetch'
+import { buildDevicePayload } from '@/utilities/deviceId'
 
 // --- Audio Defaults ---
 const showAudioDefaults = ref(false)
@@ -14,6 +15,56 @@ const audioDefaults = reactive({
   auto_gain_control: false,
   playback_volume: 0.75
 })
+
+// --- Device tracking ---
+const currentDevice = ref(null) // { device_token, system_name, user_name, ... }
+const deviceEditing = ref(false)
+const deviceNameInput = ref('')
+const deviceNameSaving = ref(false)
+
+async function registerDevice() {
+  try {
+    const payload = buildDevicePayload()
+    const res = await authFetch('/api/user/devices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (res.ok) {
+      const data = await res.json()
+      currentDevice.value = data.device
+    }
+  } catch { /* non-critical */ }
+}
+
+function startRename() {
+  deviceNameInput.value = currentDevice.value?.user_name || ''
+  deviceEditing.value = true
+}
+
+function cancelRename() {
+  deviceEditing.value = false
+  deviceNameInput.value = ''
+}
+
+async function saveDeviceName() {
+  if (!currentDevice.value) return
+  deviceNameSaving.value = true
+  try {
+    const res = await authFetch(`/api/user/devices/${currentDevice.value.device_token}/name`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userName: deviceNameInput.value.trim() || null })
+    })
+    if (res.ok) {
+      currentDevice.value = { ...currentDevice.value, user_name: deviceNameInput.value.trim() || null }
+      deviceEditing.value = false
+      deviceNameInput.value = ''
+    }
+  } catch { /* ignore */ } finally {
+    deviceNameSaving.value = false
+  }
+}
 
 async function loadAudioDefaults() {
   try {
@@ -917,7 +968,7 @@ async function handleMashupUpload() {
 
 onMounted(async () => {
   sessions.reset()
-  await Promise.all([sessions.load(), features.load(), loadAudioDefaults()])
+  await Promise.all([sessions.load(), features.load(), loadAudioDefaults(), registerDevice()])
   if (availableYears.value.length > 0) selectedYear.value = availableYears.value[0]
   document.addEventListener('click', closeRatingPopup)
   await Promise.all([loadBands(), loadInstruments(), loadBandMemberSessions()])
@@ -948,6 +999,31 @@ onMounted(async () => {
     <div v-if="showAudioDefaults" class="modal-overlay" @click.self="showAudioDefaults = false">
       <div class="modal">
         <h3>Audio Defaults</h3>
+
+        <!-- This Device -->
+        <div v-if="currentDevice" class="ad-device-section">
+          <div class="ad-device-row">
+            <span class="ad-name">This Device</span>
+            <button v-if="!deviceEditing" class="ad-device-rename-btn" @click="startRename">Rename</button>
+            <button v-else class="ad-device-rename-btn" @click="cancelRename">Cancel</button>
+          </div>
+          <div v-if="!deviceEditing" class="ad-device-name">
+            {{ currentDevice.user_name || currentDevice.system_name }}
+          </div>
+          <div v-else class="ad-device-edit">
+            <input
+              v-model="deviceNameInput"
+              type="text"
+              class="ad-device-input"
+              :placeholder="currentDevice.system_name"
+              maxlength="255"
+              @keyup.enter="saveDeviceName"
+            />
+            <button class="ad-device-save-btn" :disabled="deviceNameSaving" @click="saveDeviceName">
+              {{ deviceNameSaving ? '…' : 'Save' }}
+            </button>
+          </div>
+        </div>
 
         <!-- Playback Volume -->
         <div class="ad-group">
@@ -2006,4 +2082,17 @@ onMounted(async () => {
 .ad-toggle-knob { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left 0.2s; }
 .ad-toggle.active .ad-toggle-knob { left: 23px; }
 .ad-saved { font-size: 0.85rem; color: var(--color-accent); margin-right: auto; }
+
+/* Device section in Audio Defaults dialog */
+.ad-device-section { margin-bottom: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--color-border); }
+.ad-device-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.ad-device-name { font-size: 1rem; font-weight: 600; color: var(--color-text); }
+.ad-device-rename-btn { background: none; border: none; font-size: 0.8rem; color: var(--color-accent); cursor: pointer; padding: 0; }
+.ad-device-rename-btn:hover { text-decoration: underline; }
+.ad-device-edit { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+.ad-device-input { flex: 1; padding: 6px 10px; border: 1px solid var(--color-border-input); border-radius: 6px; background: var(--color-background-input); color: var(--color-text); font-size: 0.9rem; }
+.ad-device-input:focus { outline: none; border-color: var(--color-accent); }
+.ad-device-save-btn { background: var(--color-accent); color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 0.85rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.ad-device-save-btn:hover:not(:disabled) { background: var(--color-accent-hover); }
+.ad-device-save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
