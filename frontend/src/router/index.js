@@ -133,13 +133,13 @@ const router = createRouter({
       path: '/b/:blogUrl',
       name: 'publicBlog',
       component: () => import('../views/PublicBlogPage.vue'),
-      // No requiresAuth - truly public
+      meta: { publicLayout: true }, // No requiresAuth - truly public, no app shell
     },
     {
       path: '/b/:blogUrl/:postId',
       name: 'publicBlogPost',
       component: () => import('../views/PublicBlogPage.vue'),
-      // No requiresAuth - truly public
+      meta: { publicLayout: true }, // No requiresAuth - truly public, no app shell
     },
     {
       path: '/chat',

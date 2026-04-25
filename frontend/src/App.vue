@@ -144,7 +144,7 @@ setInterval(() => {
   <PopupNotification />
 
   <!-- Logged-in: sidebar + bottom bar navigation -->
-  <template v-if="user.username">
+  <template v-if="user.username && !route.meta.publicLayout">
     <AppSidebar
       :is-admin="isAdmin"
       :visible="sidebarOpen"
@@ -174,9 +174,9 @@ setInterval(() => {
     />
   </template>
 
-  <!-- Logged-out: simple top nav -->
+  <!-- Logged-out: simple top nav. Also handles publicLayout routes for logged-in users (no chrome). -->
   <template v-else>
-    <header class="public-header">
+    <header v-if="!user.username" class="public-header">
       <div class="wrapper page-container">
         <nav class="public-nav">
           <RouterLink to="/">Home</RouterLink>
