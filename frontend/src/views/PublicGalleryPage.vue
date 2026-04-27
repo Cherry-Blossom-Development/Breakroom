@@ -110,6 +110,12 @@ function formatDate(dateStr) {
   })
 }
 
+const displayBio = computed(() => gallery.value?.bio || gallery.value?.artist?.bio || null)
+const pageStyle = computed(() => {
+  const bg = gallery.value?.settings?.background_color
+  return bg ? { backgroundColor: bg } : {}
+})
+
 function goToArtistProfile() {
   if (gallery.value?.artist?.handle) {
     router.push({ name: 'publicProfile', params: { handle: gallery.value.artist.handle } })
@@ -127,7 +133,7 @@ function navigateArtwork(direction) {
 </script>
 
 <template>
-  <main class="public-gallery-page">
+  <main class="public-gallery-page" :style="pageStyle">
     <div v-if="loading" class="loading">
       <LoadingSpinner size="small" /> Loading gallery...
     </div>
@@ -147,7 +153,7 @@ function navigateArtwork(direction) {
         <div class="artist-info">
           <h1 class="gallery-title">{{ gallery.gallery_name }}</h1>
           <p class="artist-name">by {{ artistName }}</p>
-          <p v-if="gallery.artist?.bio" class="artist-bio">{{ gallery.artist.bio }}</p>
+          <p v-if="displayBio" class="artist-bio">{{ displayBio }}</p>
         </div>
       </header>
 

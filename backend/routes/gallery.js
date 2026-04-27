@@ -68,8 +68,8 @@ router.get('/public/:galleryUrl', async (req, res) => {
   try {
     // Get gallery info and user details
     const galleryResult = await client.query(
-      `SELECT ug.id, ug.gallery_url, ug.gallery_name, ug.user_id,
-              u.handle, u.first_name, u.last_name, u.photo_path, u.bio
+      `SELECT ug.id, ug.gallery_url, ug.gallery_name, ug.bio, ug.settings, ug.user_id,
+              u.handle, u.first_name, u.last_name, u.photo_path, u.bio AS profile_bio
        FROM user_gallery ug
        JOIN users u ON ug.user_id = u.id
        WHERE ug.gallery_url = $1`,
@@ -91,17 +91,23 @@ router.get('/public/:galleryUrl', async (req, res) => {
       [gallery.user_id]
     );
 
+    const settings = typeof gallery.settings === 'string'
+      ? JSON.parse(gallery.settings || 'null')
+      : gallery.settings;
+
     res.json({
       gallery: {
         id: gallery.id,
         gallery_url: gallery.gallery_url,
         gallery_name: gallery.gallery_name,
+        bio: gallery.bio || null,
+        settings: settings || {},
         artist: {
           handle: gallery.handle,
           first_name: gallery.first_name,
           last_name: gallery.last_name,
           photo_path: gallery.photo_path,
-          bio: gallery.bio
+          bio: gallery.profile_bio
         }
       },
       artworks: artworksResult.rows
@@ -123,8 +129,8 @@ router.get('/public/:galleryUrl/:artworkId', async (req, res) => {
     // Verify gallery exists and get artwork
     const result = await client.query(
       `SELECT ga.id, ga.title, ga.description, ga.image_path, ga.created_at, ga.updated_at,
-              ug.gallery_url, ug.gallery_name,
-              u.handle, u.first_name, u.last_name, u.photo_path, u.bio
+              ug.gallery_url, ug.gallery_name, ug.bio AS gallery_bio, ug.settings,
+              u.handle, u.first_name, u.last_name, u.photo_path, u.bio AS profile_bio
        FROM gallery_artworks ga
        JOIN users u ON ga.user_id = u.id
        JOIN user_gallery ug ON ug.user_id = u.id
@@ -137,6 +143,10 @@ router.get('/public/:galleryUrl/:artworkId', async (req, res) => {
     }
 
     const row = result.rows[0];
+    const settings = typeof row.settings === 'string'
+      ? JSON.parse(row.settings || 'null')
+      : row.settings;
+
     res.json({
       artwork: {
         id: row.id,
@@ -149,12 +159,14 @@ router.get('/public/:galleryUrl/:artworkId', async (req, res) => {
       gallery: {
         gallery_url: row.gallery_url,
         gallery_name: row.gallery_name,
+        bio: row.gallery_bio || null,
+        settings: settings || {},
         artist: {
           handle: row.handle,
           first_name: row.first_name,
           last_name: row.last_name,
           photo_path: row.photo_path,
-          bio: row.bio
+          bio: row.profile_bio
         }
       }
     });
@@ -176,7 +188,7 @@ router.get('/settings', authenticate, async (req, res) => {
 
   try {
     const result = await client.query(
-      `SELECT id, gallery_url, gallery_name, created_at
+      `SELECT id, gallery_url, gallery_name, bio, settings, created_at
        FROM user_gallery
        WHERE user_id = $1`,
       [req.user.id]
@@ -186,7 +198,12 @@ router.get('/settings', authenticate, async (req, res) => {
       return res.json({ settings: null });
     }
 
-    res.json({ settings: result.rows[0] });
+    const row = result.rows[0];
+    const settings = typeof row.settings === 'string'
+      ? JSON.parse(row.settings || 'null')
+      : row.settings;
+
+    res.json({ settings: { ...row, settings: settings || {} } });
   } catch (err) {
     console.error('Error fetching gallery settings:', err);
     res.status(500).json({ message: 'Failed to fetch settings' });
@@ -197,7 +214,7 @@ router.get('/settings', authenticate, async (req, res) => {
 
 // Create gallery settings
 router.post('/settings', authenticate, async (req, res) => {
-  const { gallery_url, gallery_name } = req.body;
+  const { gallery_url, gallery_name, bio, settings } = req.body;
   const client = await getClient();
 
   try {
@@ -226,17 +243,19 @@ router.post('/settings', authenticate, async (req, res) => {
     }
 
     await client.query(
-      `INSERT INTO user_gallery (user_id, gallery_url, gallery_name)
-       VALUES ($1, $2, $3)`,
-      [req.user.id, finalGalleryUrl, finalGalleryName]
+      `INSERT INTO user_gallery (user_id, gallery_url, gallery_name, bio, settings)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [req.user.id, finalGalleryUrl, finalGalleryName, bio || null, settings ? JSON.stringify(settings) : null]
     );
 
     const result = await client.query(
-      'SELECT id, gallery_url, gallery_name, created_at FROM user_gallery WHERE user_id = $1',
+      'SELECT id, gallery_url, gallery_name, bio, settings, created_at FROM user_gallery WHERE user_id = $1',
       [req.user.id]
     );
 
-    res.status(201).json({ settings: result.rows[0] });
+    const row = result.rows[0];
+    const parsedSettings = typeof row.settings === 'string' ? JSON.parse(row.settings || 'null') : row.settings;
+    res.status(201).json({ settings: { ...row, settings: parsedSettings || {} } });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(400).json({ message: 'This gallery URL is already taken' });
@@ -250,7 +269,7 @@ router.post('/settings', authenticate, async (req, res) => {
 
 // Update gallery settings
 router.put('/settings', authenticate, async (req, res) => {
-  const { gallery_url, gallery_name } = req.body;
+  const { gallery_url, gallery_name, bio, settings } = req.body;
   const client = await getClient();
 
   try {
@@ -269,8 +288,8 @@ router.put('/settings', authenticate, async (req, res) => {
     }
 
     const result = await client.query(
-      `UPDATE user_gallery SET gallery_url = $1, gallery_name = $2 WHERE user_id = $3`,
-      [gallery_url.trim(), gallery_name || `${req.user.handle}'s Gallery`, req.user.id]
+      `UPDATE user_gallery SET gallery_url = $1, gallery_name = $2, bio = $3, settings = $4 WHERE user_id = $5`,
+      [gallery_url.trim(), gallery_name || `${req.user.handle}'s Gallery`, bio || null, settings ? JSON.stringify(settings) : null, req.user.id]
     );
 
     if (result.affectedRows === 0) {
@@ -278,11 +297,13 @@ router.put('/settings', authenticate, async (req, res) => {
     }
 
     const updated = await client.query(
-      'SELECT id, gallery_url, gallery_name, created_at FROM user_gallery WHERE user_id = $1',
+      'SELECT id, gallery_url, gallery_name, bio, settings, created_at FROM user_gallery WHERE user_id = $1',
       [req.user.id]
     );
 
-    res.json({ settings: updated.rows[0] });
+    const row = updated.rows[0];
+    const parsedSettings = typeof row.settings === 'string' ? JSON.parse(row.settings || 'null') : row.settings;
+    res.json({ settings: { ...row, settings: parsedSettings || {} } });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
       return res.status(400).json({ message: 'This gallery URL is already taken' });

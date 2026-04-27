@@ -14,6 +14,9 @@ const successMessage = ref('')
 // Settings form
 const galleryUrl = ref('')
 const galleryName = ref('')
+const galleryBio = ref('')
+const useCustomBg = ref(false)
+const backgroundColor = ref('#ffffff')
 const urlAvailable = ref(true)
 const urlChecking = ref(false)
 
@@ -69,6 +72,10 @@ async function loadGalleryData() {
       if (data.settings) {
         galleryUrl.value = data.settings.gallery_url
         galleryName.value = data.settings.gallery_name
+        galleryBio.value = data.settings.bio || ''
+        const savedBg = data.settings.settings?.background_color
+        useCustomBg.value = !!savedBg
+        backgroundColor.value = savedBg || '#ffffff'
       }
     }
 
@@ -96,7 +103,9 @@ async function saveSettings() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         gallery_url: galleryUrl.value,
-        gallery_name: galleryName.value
+        gallery_name: galleryName.value,
+        bio: galleryBio.value.trim() || null,
+        settings: useCustomBg.value ? { background_color: backgroundColor.value } : {}
       })
     })
 
@@ -199,6 +208,10 @@ async function uploadArtwork() {
           if (settingsData.settings) {
             galleryUrl.value = settingsData.settings.gallery_url
             galleryName.value = settingsData.settings.gallery_name
+            galleryBio.value = settingsData.settings.bio || ''
+            const savedBg = settingsData.settings.settings?.background_color
+            useCustomBg.value = !!savedBg
+            backgroundColor.value = savedBg || '#ffffff'
           }
         }
       }
@@ -391,6 +404,28 @@ function copyGalleryUrl() {
               <span v-if="urlChecking" class="url-status checking">Checking...</span>
               <span v-else-if="!urlAvailable" class="url-status unavailable">Taken</span>
               <span v-else-if="galleryUrl" class="url-status available">Available</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="galleryBio">Gallery Description</label>
+            <textarea
+              id="galleryBio"
+              v-model="galleryBio"
+              rows="3"
+              placeholder="Describe your gallery (leave blank to use your profile bio)"
+            ></textarea>
+          </div>
+          <div class="form-group">
+            <label>Background Color</label>
+            <div class="bg-color-row">
+              <label class="checkbox-label">
+                <input type="checkbox" v-model="useCustomBg" />
+                Use custom background color
+              </label>
+              <div v-if="useCustomBg" class="color-picker-wrap">
+                <input type="color" v-model="backgroundColor" />
+                <span class="color-hex">{{ backgroundColor }}</span>
+              </div>
             </div>
           </div>
           <div class="settings-actions">
@@ -670,6 +705,45 @@ function copyGalleryUrl() {
   align-items: center;
   gap: 8px;
   cursor: pointer;
+}
+
+.bg-color-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+}
+
+.color-picker-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.color-picker-wrap input[type="color"] {
+  width: 40px;
+  height: 32px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 2px;
+  cursor: pointer;
+  background: none;
+}
+
+.color-hex {
+  font-family: monospace;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
 }
 
 .url-input-wrapper {
