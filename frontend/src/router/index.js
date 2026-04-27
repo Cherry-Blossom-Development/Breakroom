@@ -229,13 +229,13 @@ const router = createRouter({
       path: '/g/:galleryUrl',
       name: 'publicGallery',
       component: () => import('../views/PublicGalleryPage.vue'),
-      // No requiresAuth - truly public
+      meta: { publicLayout: true },
     },
     {
       path: '/g/:galleryUrl/:artworkId',
       name: 'publicGalleryArtwork',
       component: () => import('../views/PublicGalleryPage.vue'),
-      // No requiresAuth - truly public
+      meta: { publicLayout: true },
     }
   ],
 })
