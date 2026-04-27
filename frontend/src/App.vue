@@ -186,7 +186,7 @@ setInterval(() => {
             <RouterLink to="/about">About</RouterLink>
             <RouterLink to="/eula">EULA</RouterLink>
             <RouterLink v-if="route.name === 'publicBlog' || route.name === 'publicBlogPost'" to="/blog" class="back-link">← Blog Edit</RouterLink>
-            <RouterLink v-else-if="route.name === 'publicGallery' || route.name === 'publicGalleryArtwork'" to="/gallery" class="back-link">← Gallery Edit</RouterLink>
+            <RouterLink v-else-if="route.name === 'publicGallery' || route.name === 'publicGalleryArtwork'" to="/art-gallery" class="back-link">← Gallery Edit</RouterLink>
             <RouterLink v-else-if="route.name === 'publicProfile'" to="/profile" class="back-link">← My Profile</RouterLink>
             <a href="#" class="logout-link" @click.prevent="logout">Logout</a>
           </template>
