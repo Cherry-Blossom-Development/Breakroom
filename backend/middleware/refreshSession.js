@@ -2,11 +2,11 @@ const jwt = require('jsonwebtoken');
 const { extractToken } = require('../utilities/auth');
 
 const SECRET_KEY = process.env.SECRET_KEY;
-const COOKIE_MAX_AGE = 48 * 60 * 60 * 1000; // 48 hours in ms
+const COOKIE_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days in ms
 
 /**
  * Sliding session middleware.
- * On every API request that carries a valid JWT, issue a fresh 48h token.
+ * On every API request that carries a valid JWT, issue a fresh 30d token.
  * Web clients receive it via the refreshed cookie (automatic).
  * Mobile clients receive it via the X-New-Token response header.
  */
@@ -20,7 +20,7 @@ function refreshSession(req, res, next) {
 
     try {
         const payload = jwt.verify(token, SECRET_KEY);
-        const newToken = jwt.sign({ username: payload.username }, SECRET_KEY, { expiresIn: '48h' });
+        const newToken = jwt.sign({ username: payload.username }, SECRET_KEY, { expiresIn: '30d' });
 
         // Refresh cookie for web clients
         res.cookie('jwtToken', newToken, {
