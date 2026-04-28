@@ -102,9 +102,9 @@ router.post('/signup', async (req, res) => {
 
     // Auto-login: set JWT cookie
     const payload = { username: req.body.handle };
-    const token = jwt.sign(payload, SECRET_KEY, { expiresIn: '48h' });
+    const token = jwt.sign(payload, SECRET_KEY, { expiresIn: '30d' });
     res.cookie('jwtToken', token, {
-      maxAge: 172800000, // 48 hours
+      maxAge: 2592000000, // 30 days
       domain: process.env.NODE_ENV === 'production' ? '.prosaurus.com' : undefined,
       path: '/',
       httpOnly: false,
@@ -296,7 +296,7 @@ router.post('/login', async (req, res) => {
       if (hash === user.rows[0].hash) {
 
         const payload = { username: req.body.handle };
-        const token = jwt.sign(payload, SECRET_KEY, { expiresIn: '48h' });
+        const token = jwt.sign(payload, SECRET_KEY, { expiresIn: '30d' });
 
         // Ensure EULA notification exists for this user.
         // If not yet accepted (dismissed), create or reset to 'unviewed' so the popup shows.
@@ -330,7 +330,7 @@ router.post('/login', async (req, res) => {
         client.release();
 
         res.cookie('jwtToken', token, {
-          maxAge: 172800000, // 48 hours
+          maxAge: 2592000000, // 30 days
           domain: process.env.NODE_ENV === 'production' ? '.prosaurus.com' : undefined,
           path: '/',
           httpOnly: false,
