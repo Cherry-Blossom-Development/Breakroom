@@ -34,6 +34,14 @@ const allTools = {
       description: 'Upload and display your artwork in a personal gallery with a shareable public URL.',
       route: '/art-gallery',
       shortcutName: 'Art Gallery'
+    },
+    {
+      id: 'collections',
+      name: 'Collections',
+      description: 'List and sell your original artwork and prints directly through Prosaurus.',
+      route: '/collections',
+      shortcutName: 'Collections',
+      featureKey: 'collections'
     }
   ],
   writer: [
