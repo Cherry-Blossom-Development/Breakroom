@@ -668,9 +668,9 @@ router.get('/rooms/:roomId/members', authenticateToken, async (req, res) => {
 
   const client = await getClient();
   try {
-    // Verify user has access to this room (is member or room is General)
+    // Verify user has access to this room (is member or room is public)
     const room = await client.query(
-      'SELECT owner_id FROM chat_rooms WHERE id = $1 AND is_active = true',
+      'SELECT owner_id, is_default FROM chat_rooms WHERE id = $1 AND is_active = true',
       [roomId]
     );
 
@@ -678,8 +678,8 @@ router.get('/rooms/:roomId/members', authenticateToken, async (req, res) => {
       return res.status(404).json({ message: 'Room not found' });
     }
 
-    // For non-General rooms, verify membership
-    if (room.rows[0].owner_id !== null) {
+    // For non-public rooms, verify membership
+    if (room.rows[0].owner_id !== null && !room.rows[0].is_default) {
       const membership = await client.query(
         'SELECT 1 FROM users_rooms WHERE user_id = $1 AND room_id = $2 AND accepted = true',
         [req.user.id, roomId]

@@ -63,14 +63,14 @@ const initializeSocket = (io) => {
       const client = await getClient();
       try {
         // Verify room exists
-        const room = await client.query('SELECT id, name, owner_id FROM chat_rooms WHERE id = $1 AND is_active = true', [roomId]);
+        const room = await client.query('SELECT id, name, owner_id, is_default FROM chat_rooms WHERE id = $1 AND is_active = true', [roomId]);
         if (room.rowCount === 0) {
           socket.emit('error', { message: 'Chat room not found' });
           return;
         }
 
-        // Check membership (General room is public, others require membership)
-        if (room.rows[0].owner_id !== null) {
+        // Check membership (public rooms: owner_id IS NULL or is_default = true)
+        if (room.rows[0].owner_id !== null && !room.rows[0].is_default) {
           const membership = await client.query(
             'SELECT 1 FROM users_rooms WHERE user_id = $1 AND room_id = $2 AND accepted = true',
             [socket.user.id, roomId]

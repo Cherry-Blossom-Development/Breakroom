@@ -246,7 +246,8 @@ export const chat = reactive({
 
   // Join a chat room
   async joinRoom(roomId) {
-    // Reset older-message state for fresh room join
+    // Reset older-message state and clear any stale errors for fresh room join
+    state.error = null
     state.hasOlderMessages = false
     state.isLoadingOlderMessages = false
     state.oldestMessageDate = null
