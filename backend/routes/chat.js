@@ -10,6 +10,7 @@ const { uploadToS3 } = require('../utilities/aws-s3');
 const { extractToken } = require('../utilities/auth');
 const { checkAndFilterContent } = require('../utilities/contentFilter');
 const { sendToUsers } = require('../utilities/fcm');
+const { logCreation } = require('../utilities/creationLogger');
 
 require('dotenv').config();
 
@@ -302,6 +303,13 @@ router.post('/rooms/:roomId/messages', authenticateToken, async (req, res) => {
 
     const messageData = newMessage.rows[0];
 
+    // Log creation (fire-and-forget)
+    logCreation('chat_messages', messageData.id, {
+      userId: req.user.id,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    }).catch(() => {});
+
     // Run keyword filter (async, non-blocking to response)
     checkAndFilterContent('chat_message', messageData.id, [message], req.user.id).catch(() => {});
 
@@ -387,6 +395,13 @@ router.post('/rooms/:roomId/image', authenticateToken, upload.single('image'), a
 
     const messageData = newMessage.rows[0];
 
+    // Log creation (fire-and-forget)
+    logCreation('chat_messages', messageData.id, {
+      userId: req.user.id,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    }).catch(() => {});
+
     // Broadcast message to everyone in the room via socket
     const io = getIO();
     if (io) {
@@ -453,6 +468,13 @@ router.post('/rooms/:roomId/video', authenticateToken, videoUpload.single('video
     );
 
     const messageData = newMessage.rows[0];
+
+    // Log creation (fire-and-forget)
+    logCreation('chat_messages', messageData.id, {
+      userId: req.user.id,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    }).catch(() => {});
 
     // Broadcast message to everyone in the room via socket
     const io = getIO();

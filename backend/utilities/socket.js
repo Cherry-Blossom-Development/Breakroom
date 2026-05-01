@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const { getClient } = require('./db');
 const { checkAndFilterContent } = require('./contentFilter');
 const { sendToUsers } = require('./fcm');
+const { logCreation } = require('./creationLogger');
 
 require('dotenv').config();
 
@@ -151,6 +152,13 @@ const initializeSocket = (io) => {
         );
 
         const messageData = newMessage.rows[0];
+
+        // Log creation (fire-and-forget)
+        logCreation('chat_messages', messageData.id, {
+          userId: socket.user.id,
+          ipAddress: socket.handshake.address,
+          userAgent: socket.handshake.headers['user-agent']
+        }).catch(() => {});
 
         // Run keyword filter (async, fire-and-forget)
         checkAndFilterContent('chat_message', messageData.id, [message], socket.user.id).catch(() => {});
