@@ -412,4 +412,36 @@ router.post('/mark-seen', authenticate, async (req, res) => {
   }
 });
 
+// Search friends by handle/name (for @mention autocomplete)
+router.get('/search', authenticate, async (req, res) => {
+  const { q } = req.query;
+  if (!q || q.trim().length === 0) {
+    return res.status(400).json({ message: 'Query is required' });
+  }
+
+  const client = await getClient();
+  try {
+    const search = `%${q.trim().toLowerCase()}%`;
+    const results = await client.query(
+      `SELECT u.id, u.handle, u.first_name, u.last_name, u.photo_path
+       FROM friends f
+       JOIN users u ON (
+         (f.user_id = $1 AND f.friend_id = u.id) OR
+         (f.friend_id = $2 AND f.user_id = u.id)
+       )
+       WHERE f.status = 'accepted'
+         AND (LOWER(u.handle) LIKE $3 OR LOWER(u.first_name) LIKE $4 OR LOWER(u.last_name) LIKE $5)
+       ORDER BY u.handle
+       LIMIT 10`,
+      [req.user.id, req.user.id, search, search, search]
+    );
+    res.json({ users: results.rows });
+  } catch (err) {
+    console.error('Error searching friends:', err);
+    res.status(500).json({ message: 'Failed to search friends' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;

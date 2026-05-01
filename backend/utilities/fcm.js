@@ -97,6 +97,9 @@ async function sendToTokens(tokens, payload) {
     } else if (data.type === 'blog_comment') {
       title = 'New Comment';
       body = `${data.commenterHandle}: ${data.comment}`;
+    } else if (data.type === 'chat_mention') {
+      title = `Mentioned in ${data.roomName || 'Chat'}`;
+      body = `${data.senderHandle}: ${data.message}`;
     }
 
     // Include both notification (for iOS background) and data payload

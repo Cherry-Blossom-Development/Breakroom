@@ -8,9 +8,24 @@ import { badges } from './stores/badges.js'
 import { initEventService, destroyEventService } from './utilities/eventService.js'
 import HeaderNotification from './components/HeaderNotification.vue'
 import PopupNotification from './components/PopupNotification.vue'
+import MentionToast from './components/MentionToast.vue'
 import AppSidebar from './components/AppSidebar.vue'
 import BottomTabBar from './components/BottomTabBar.vue'
 import { io } from 'socket.io-client'
+
+const mentionQueue = ref([])
+
+function addMention(data) {
+  const id = Date.now()
+  mentionQueue.value.push({ id, ...data })
+  setTimeout(() => {
+    mentionQueue.value = mentionQueue.value.filter(m => m.id !== id)
+  }, 6000)
+}
+
+function dismissMention(id) {
+  mentionQueue.value = mentionQueue.value.filter(m => m.id !== id)
+}
 
 const router = useRouter()
 const route = useRoute()
@@ -52,6 +67,10 @@ function setupNotificationSocket() {
   socket.on('new_notification', (notification) => {
     console.log('Received new notification:', notification)
     notificationStore.addNotification(notification)
+  })
+
+  socket.on('chat_mention', (data) => {
+    addMention(data)
   })
 
   socket.on('chat_badge_update', ({ roomId }) => {
@@ -143,6 +162,7 @@ setInterval(() => {
   <!-- Notification components -->
   <HeaderNotification />
   <PopupNotification />
+  <MentionToast :mentions="mentionQueue" @dismiss="dismissMention" />
 
   <!-- Logged-in: sidebar + bottom bar navigation -->
   <template v-if="user.username && !route.meta.publicLayout">

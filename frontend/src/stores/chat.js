@@ -592,6 +592,18 @@ export const chat = reactive({
     }
   },
 
+  // Search friends for @mention autocomplete
+  async searchMentions(query) {
+    try {
+      const res = await authFetch(`/api/friends/search?q=${encodeURIComponent(query)}`)
+      if (!res.ok) return []
+      const data = await res.json()
+      return data.users || []
+    } catch {
+      return []
+    }
+  },
+
   // Fetch members of a room
   async fetchMembers(roomId) {
     try {

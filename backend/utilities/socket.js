@@ -169,6 +169,53 @@ const initializeSocket = (io) => {
           message: messageData
         });
 
+        // Parse @mentions and notify mentioned users (fire-and-forget)
+        ;(async () => {
+          try {
+            const handles = [...new Set([...message.matchAll(/@(\w+)/g)].map(m => m[1]))]
+            if (handles.length === 0) return;
+
+            const mentionClient = await getClient();
+            try {
+              const roomResult = await mentionClient.query('SELECT name FROM chat_rooms WHERE id = $1', [roomId]);
+              const roomName = roomResult.rows[0]?.name || 'Chat';
+
+              const placeholders = handles.map((_, i) => `$${i + 1}`).join(',');
+              const mentioned = await mentionClient.query(
+                `SELECT id FROM users WHERE handle IN (${placeholders}) AND id != $${handles.length + 1}`,
+                [...handles, socket.user.id]
+              );
+              const mentionedIds = mentioned.rows.map(r => r.id);
+              if (mentionedIds.length === 0) return;
+
+              const excerpt = message.length > 100 ? message.substring(0, 100) + '…' : message;
+
+              // Real-time: emit to online users
+              for (const userId of mentionedIds) {
+                io.to(`user_${userId}`).emit('chat_mention', {
+                  fromHandle: socket.user.handle,
+                  roomId,
+                  roomName,
+                  excerpt
+                });
+              }
+
+              // Push: notify offline users
+              sendToUsers(mentionedIds, {
+                type: 'chat_mention',
+                roomId: String(roomId),
+                roomName,
+                senderHandle: socket.user.handle,
+                message: excerpt
+              }).catch(() => {});
+            } finally {
+              mentionClient.release();
+            }
+          } catch (err) {
+            console.error('Mention notification failed (non-fatal):', err.message);
+          }
+        })();
+
         // Send push notifications to offline room members (fire-and-forget)
         ;(async () => {
           try {

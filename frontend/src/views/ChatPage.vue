@@ -14,6 +14,14 @@ const videoInput = ref(null)
 const uploadingVideo = ref(false)
 const showAttachMenu = ref(false)
 const isPrepending = ref(false)
+const messageInputEl = ref(null)
+
+// @mention autocomplete state
+const mentionQuery = ref('')
+const mentionResults = ref([])
+const mentionActive = ref(false)
+const mentionIndex = ref(0)
+let mentionDebounce = null
 
 const toggleAttachMenu = () => {
   showAttachMenu.value = !showAttachMenu.value
@@ -89,6 +97,7 @@ const handleScroll = async () => {
 
 // Handle sending a message
 const sendMessage = () => {
+  if (mentionActive.value) return  // let Enter select the mention
   if (messageInput.value.trim()) {
     chat.sendMessage(messageInput.value)
     messageInput.value = ''
@@ -96,19 +105,79 @@ const sendMessage = () => {
   }
 }
 
-// Handle typing indicator
+// Detect @mention trigger and navigate the dropdown
+const handleMentionKeydown = (e) => {
+  if (!mentionActive.value) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    mentionIndex.value = (mentionIndex.value + 1) % mentionResults.value.length
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    mentionIndex.value = (mentionIndex.value - 1 + mentionResults.value.length) % mentionResults.value.length
+  } else if (e.key === 'Enter' || e.key === 'Tab') {
+    e.preventDefault()
+    selectMention(mentionResults.value[mentionIndex.value])
+  } else if (e.key === 'Escape') {
+    closeMention()
+  }
+}
+
+const closeMention = () => {
+  mentionActive.value = false
+  mentionResults.value = []
+  mentionQuery.value = ''
+  mentionIndex.value = 0
+}
+
+const selectMention = (user) => {
+  if (!user) return
+  // Replace the trailing @query with @handle + space
+  const val = messageInput.value
+  const atPos = val.lastIndexOf('@')
+  messageInput.value = val.substring(0, atPos) + '@' + user.handle + ' '
+  closeMention()
+  nextTick(() => messageInputEl.value?.focus())
+}
+
+// Handle typing indicator and mention detection
 const handleTyping = () => {
   chat.startTyping()
 
-  // Clear existing timeout
-  if (typingTimeout.value) {
-    clearTimeout(typingTimeout.value)
-  }
+  if (typingTimeout.value) clearTimeout(typingTimeout.value)
+  typingTimeout.value = setTimeout(() => { chat.stopTyping() }, 2000)
 
-  // Stop typing after 2 seconds of no input
-  typingTimeout.value = setTimeout(() => {
-    chat.stopTyping()
-  }, 2000)
+  // Check for @mention pattern
+  const val = messageInput.value
+  const atPos = val.lastIndexOf('@')
+  if (atPos !== -1) {
+    const after = val.substring(atPos + 1)
+    // Only trigger if after @ is word chars (no spaces) and cursor is right after
+    if (/^\w{0,30}$/.test(after)) {
+      mentionQuery.value = after
+      mentionIndex.value = 0
+      clearTimeout(mentionDebounce)
+      if (after.length === 0) {
+        // Show recent friends immediately on bare @
+        mentionDebounce = setTimeout(async () => {
+          mentionResults.value = await chat.searchMentions('')
+          mentionActive.value = mentionResults.value.length > 0
+        }, 0)
+      } else {
+        mentionDebounce = setTimeout(async () => {
+          mentionResults.value = await chat.searchMentions(after)
+          mentionActive.value = mentionResults.value.length > 0
+        }, 150)
+      }
+      return
+    }
+  }
+  closeMention()
+}
+
+// Render message text with styled @mentions
+const renderMessage = (text) => {
+  if (!text) return ''
+  return text.replace(/@(\w+)/g, '<span class="mention-highlight">@$1</span>')
 }
 
 // Format timestamp - show date if not today
@@ -398,7 +467,7 @@ onUnmounted(() => {
                   <button @click="cancelEdit" class="edit-cancel-btn">Cancel</button>
                 </div>
               </template>
-              <template v-else>{{ msg.message }}</template>
+              <template v-else><span v-html="renderMessage(msg.message)"></span></template>
             </div>
             <FlagDialog
               :visible="flaggingMessageId === msg.id"
@@ -463,11 +532,26 @@ onUnmounted(() => {
               <span v-if="uploadingImage || uploadingVideo" class="uploading">...</span>
               <span v-else class="plus-icon">+</span>
             </button>
+            <div class="mention-dropdown" v-if="mentionActive && mentionResults.length > 0">
+              <div
+                v-for="(u, i) in mentionResults"
+                :key="u.id"
+                class="mention-option"
+                :class="{ active: i === mentionIndex }"
+                @mousedown.prevent="selectMention(u)"
+              >
+                <span class="mention-option-handle">@{{ u.handle }}</span>
+                <span v-if="u.first_name || u.last_name" class="mention-option-name">{{ u.first_name }} {{ u.last_name }}</span>
+              </div>
+            </div>
             <input
+              ref="messageInputEl"
               v-model="messageInput"
+              @keydown="handleMentionKeydown"
               @keyup.enter="sendMessage"
               @input="handleTyping"
               @focus="closeAttachMenu"
+              @blur="closeMention"
               type="text"
               placeholder="Type a message..."
               maxlength="1000"
@@ -832,6 +916,7 @@ onUnmounted(() => {
   padding: 12px;
   gap: 8px;
   align-items: center;
+  position: relative;
 }
 
 .message-input-container input[type="text"] {
@@ -961,6 +1046,49 @@ onUnmounted(() => {
 
 .attach-icon {
   font-size: 1.5em;
+}
+
+.mention-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background: var(--color-background-card);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  z-index: 20;
+  margin-bottom: 4px;
+}
+
+.mention-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+
+.mention-option:hover,
+.mention-option.active {
+  background: var(--color-background-hover);
+}
+
+.mention-option-handle {
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.mention-option-name {
+  color: var(--color-text-muted);
+  font-size: 0.82rem;
+}
+
+:deep(.mention-highlight) {
+  color: var(--color-accent);
+  font-weight: 600;
 }
 
 .error-message {
