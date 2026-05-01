@@ -1087,8 +1087,16 @@ onUnmounted(() => {
 }
 
 :deep(.mention-highlight) {
-  color: var(--color-accent);
+  background: rgba(99, 91, 255, 0.12);
+  color: #6355e8;
+  border-radius: 3px;
+  padding: 1px 4px;
   font-weight: 600;
+}
+
+.message.own :deep(.mention-highlight) {
+  background: rgba(255, 255, 255, 0.25);
+  color: white;
 }
 
 .error-message {

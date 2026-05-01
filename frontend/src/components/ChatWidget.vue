@@ -5,6 +5,7 @@ import LoadingSpinner from './LoadingSpinner.vue'
 import FlagDialog from './FlagDialog.vue'
 import { user } from '@/stores/user.js'
 import { moderationStore } from '@/stores/moderation.js'
+import { chat } from '@/stores/chat.js'
 
 const props = defineProps({
   roomId: {
@@ -37,6 +38,14 @@ const editingMessageId = ref(null)
 const editText = ref('')
 const deletingMessageId = ref(null)
 const openMenuId = ref(null)
+
+// @mention autocomplete state
+const mentionQuery = ref('')
+const mentionResults = ref([])
+const mentionActive = ref(false)
+const mentionIndex = ref(0)
+const messageInputEl = ref(null)
+let mentionDebounce = null
 
 // Mute state for this room
 const isMuted = ref(false)
@@ -107,6 +116,43 @@ const blockUser = async (msg) => {
     const res = await fetch(`/api/moderation/block/${msg.user_id}`, { method: 'POST', credentials: 'include' })
     if (res.ok) moderationStore.addBlock(msg.user_id)
   }
+}
+
+const closeMention = () => {
+  mentionActive.value = false
+  mentionResults.value = []
+  mentionQuery.value = ''
+  mentionIndex.value = 0
+}
+
+const selectMention = (mentionedUser) => {
+  if (!mentionedUser) return
+  const val = newMessage.value
+  const atPos = val.lastIndexOf('@')
+  newMessage.value = val.substring(0, atPos) + '@' + mentionedUser.handle + ' '
+  closeMention()
+  nextTick(() => messageInputEl.value?.focus())
+}
+
+const handleMentionKeydown = (e) => {
+  if (!mentionActive.value) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    mentionIndex.value = (mentionIndex.value + 1) % mentionResults.value.length
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    mentionIndex.value = (mentionIndex.value - 1 + mentionResults.value.length) % mentionResults.value.length
+  } else if (e.key === 'Enter' || e.key === 'Tab') {
+    e.preventDefault()
+    selectMention(mentionResults.value[mentionIndex.value])
+  } else if (e.key === 'Escape') {
+    closeMention()
+  }
+}
+
+const renderMessage = (text) => {
+  if (!text) return ''
+  return text.replace(/@(\w+)/g, '<span class="mention-highlight">@$1</span>')
 }
 
 const attachBtnRef = ref(null)
@@ -222,6 +268,7 @@ const handleScroll = async () => {
 
 // Send message
 const sendMessage = async () => {
+  if (mentionActive.value) return
   if (!newMessage.value.trim()) return
 
   const messageText = newMessage.value.trim()
@@ -262,23 +309,36 @@ const sendMessage = async () => {
   }
 }
 
-// Handle typing
+// Handle typing and @mention detection
 const onInput = () => {
   if (socket && socket.connected) {
     socket.emit('typing_start', props.roomId)
 
-    // Clear existing timeout
-    if (typingTimeout) {
-      clearTimeout(typingTimeout)
-    }
-
-    // Stop typing after 2 seconds of no input
+    if (typingTimeout) clearTimeout(typingTimeout)
     typingTimeout = setTimeout(() => {
       if (socket && socket.connected) {
         socket.emit('typing_stop', props.roomId)
       }
     }, 2000)
   }
+
+  // Check for @mention pattern
+  const val = newMessage.value
+  const atPos = val.lastIndexOf('@')
+  if (atPos !== -1) {
+    const after = val.substring(atPos + 1)
+    if (/^\w{0,30}$/.test(after)) {
+      mentionQuery.value = after
+      mentionIndex.value = 0
+      clearTimeout(mentionDebounce)
+      mentionDebounce = setTimeout(async () => {
+        mentionResults.value = await chat.searchMentions(after)
+        mentionActive.value = mentionResults.value.length > 0
+      }, after.length === 0 ? 0 : 150)
+      return
+    }
+  }
+  closeMention()
 }
 
 // Format timestamp - show date if not today
@@ -623,7 +683,7 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
                 <button @click="cancelEdit" class="edit-cancel-btn">Cancel</button>
               </div>
             </template>
-            <template v-else>{{ msg.message }}</template>
+            <template v-else><span v-html="renderMessage(msg.message)"></span></template>
           </div>
           <FlagDialog
             :visible="flaggingMessageId === msg.id"
@@ -688,13 +748,28 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
             <span v-if="uploadingImage || uploadingVideo" class="uploading">...</span>
             <span v-else class="plus-icon">+</span>
           </button>
+          <div class="mention-dropdown" v-if="mentionActive && mentionResults.length > 0">
+            <div
+              v-for="(u, i) in mentionResults"
+              :key="u.id"
+              class="mention-option"
+              :class="{ active: i === mentionIndex }"
+              @mousedown.prevent="selectMention(u)"
+            >
+              <span class="mention-option-handle">@{{ u.handle }}</span>
+              <span v-if="u.first_name || u.last_name" class="mention-option-name">{{ u.first_name }} {{ u.last_name }}</span>
+            </div>
+          </div>
           <input
+            ref="messageInputEl"
             v-model="newMessage"
             type="text"
             placeholder="Type a message..."
             maxlength="2000"
+            @keydown="handleMentionKeydown"
             @input="onInput"
             @focus="closeAttachMenu"
+            @blur="closeMention"
           />
           <button type="submit" class="send-btn" :disabled="!newMessage.trim()">
             Send
@@ -1018,6 +1093,7 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   gap: 6px;
   padding: 8px;
   align-items: center;
+  position: relative;
 }
 
 .input-area input[type="text"] {
@@ -1213,5 +1289,51 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
 .load-more-btn:hover {
   background: var(--color-background-mute);
   color: var(--color-text);
+}
+
+.mention-dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  background: var(--color-background-card);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  z-index: 20;
+  margin-bottom: 4px;
+}
+
+.mention-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 0.82rem;
+}
+
+.mention-option:hover,
+.mention-option.active {
+  background: var(--color-background-hover);
+}
+
+.mention-option-handle {
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.mention-option-name {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}
+
+:deep(.mention-highlight) {
+  background: rgba(99, 91, 255, 0.12);
+  color: #6355e8;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-weight: 600;
 }
 </style>
