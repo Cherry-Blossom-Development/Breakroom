@@ -147,7 +147,7 @@ function closeSidebar() {
 
 setInterval(() => {
   user.fetchUser()
-  const publicRoutes = ['/', '/login', '/signup', '/about', '/welcome', '/chat', '/privacy', '/eula', '/child-safety']
+  const publicRoutes = ['/', '/login', '/signup', '/about', '/welcome', '/chat', '/privacy', '/eula', '/terms', '/child-safety']
 
   // Only redirect if on a protected route and not logged in.
   // Routes with publicLayout:true (e.g. public blog) are always accessible — never redirect from them.
