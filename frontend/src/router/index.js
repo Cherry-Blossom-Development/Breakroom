@@ -53,6 +53,10 @@ const router = createRouter({
       // No requiresAuth - public page
     },
     {
+      path: '/terms',
+      redirect: '/eula',
+    },
+    {
       path: '/breakroom',
       name: 'breakroom',
       component: () => import('../views/BreakroomPage.vue'),
