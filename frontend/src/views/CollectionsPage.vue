@@ -41,6 +41,34 @@
       </div>
     </section>
 
+    <!-- Storefront -->
+    <section class="storefront-section">
+      <h2 class="section-label">Storefront</h2>
+      <RouterLink to="/collections/storefront" class="storefront-card">
+        <div class="storefront-card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
+        </div>
+        <div class="storefront-card-body">
+          <div class="storefront-card-title">Storefront</div>
+          <div class="storefront-card-desc">
+            Your public-facing landing page — the first thing visitors see when they arrive at your domain.
+          </div>
+          <div v-if="storefront" class="storefront-card-status configured">
+            <span class="status-dot"></span>
+            {{ storefront.page_title ? `"${storefront.page_title}"` : 'Configured' }}
+          </div>
+          <div v-else class="storefront-card-status">
+            <span class="status-dot empty"></span>
+            Not set up yet
+          </div>
+        </div>
+        <span class="storefront-card-arrow">→</span>
+      </RouterLink>
+    </section>
+
     <!-- Collections list -->
     <section class="collections-section">
       <h2 class="section-label">Your Collections</h2>
@@ -135,6 +163,7 @@ import { authFetch } from '@/utilities/authFetch'
 
 const collections = ref([])
 const loading = ref(true)
+const storefront = ref(null)
 const showModal = ref(false)
 const editing = ref(null)
 const saving = ref(false)
@@ -143,6 +172,15 @@ const form = ref({ name: '', background_color: '#ffffff' })
 const showDeleteConfirm = ref(false)
 const deletingCollection = ref(null)
 const deleting = ref(false)
+
+async function fetchStorefront() {
+  try {
+    const res = await authFetch('/api/storefront')
+    if (res.ok) storefront.value = await res.json()
+  } catch (err) {
+    console.error('Failed to fetch storefront:', err)
+  }
+}
 
 async function fetchCollections() {
   loading.value = true
@@ -224,7 +262,10 @@ async function executeDelete() {
   }
 }
 
-onMounted(fetchCollections)
+onMounted(() => {
+  fetchCollections()
+  fetchStorefront()
+})
 </script>
 
 <style scoped>
@@ -311,6 +352,82 @@ onMounted(fetchCollections)
 }
 
 .setup-link-arrow {
+  color: var(--color-text-secondary);
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+/* ---- Storefront section ---- */
+.storefront-section {
+  margin-bottom: 40px;
+}
+
+.storefront-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 20px;
+  background: var(--color-background-soft, rgba(0,0,0,0.03));
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  text-decoration: none;
+  color: var(--color-text);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.storefront-card:hover {
+  border-color: var(--color-link);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+}
+
+.storefront-card-icon {
+  color: var(--color-link);
+  flex-shrink: 0;
+}
+
+.storefront-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.storefront-card-title {
+  font-weight: 700;
+  font-size: 1rem;
+  margin-bottom: 3px;
+}
+
+.storefront-card-desc {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.storefront-card-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+}
+
+.storefront-card-status.configured {
+  color: var(--color-link);
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-link);
+  flex-shrink: 0;
+}
+
+.status-dot.empty {
+  background: var(--color-border);
+}
+
+.storefront-card-arrow {
   color: var(--color-text-secondary);
   font-size: 1.1rem;
   flex-shrink: 0;
