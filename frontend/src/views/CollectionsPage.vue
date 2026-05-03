@@ -56,13 +56,14 @@
           <div class="storefront-card-desc">
             Your public-facing landing page — the first thing visitors see when they arrive at your domain.
           </div>
-          <div v-if="storefront" class="storefront-card-status configured">
+          <div v-if="storefront?.store_url" class="storefront-card-status configured">
             <span class="status-dot"></span>
-            {{ storefront.page_title ? `"${storefront.page_title}"` : 'Configured' }}
+            {{ storefront.page_title || storefront.store_url }}
+            <span class="store-url-badge">/store/{{ storefront.store_url }}</span>
           </div>
           <div v-else class="storefront-card-status">
             <span class="status-dot empty"></span>
-            Not set up yet
+            Not set up yet — click to add your store URL and content
           </div>
         </div>
         <span class="storefront-card-arrow">→</span>
@@ -425,6 +426,16 @@ onMounted(() => {
 
 .status-dot.empty {
   background: var(--color-border);
+}
+
+.store-url-badge {
+  font-family: monospace;
+  font-size: 0.78rem;
+  background: var(--color-background-soft, rgba(0,0,0,0.06));
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  margin-left: 4px;
 }
 
 .storefront-card-arrow {

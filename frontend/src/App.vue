@@ -148,6 +148,8 @@ function closeSidebar() {
 setInterval(() => {
   user.fetchUser()
   const publicRoutes = ['/', '/login', '/signup', '/about', '/welcome', '/chat', '/privacy', '/eula', '/terms', '/child-safety']
+  // bareLayout routes (public stores) are always accessible — never redirect from them
+  if (route.meta.bareLayout) return
 
   // Only redirect if on a protected route and not logged in.
   // Routes with publicLayout:true (e.g. public blog) are always accessible — never redirect from them.
@@ -159,6 +161,12 @@ setInterval(() => {
 </script>
 
 <template>
+  <!-- Bare layout: public store pages — no Prosaurus chrome at all -->
+  <template v-if="route.meta.bareLayout">
+    <RouterView />
+  </template>
+
+  <template v-else>
   <!-- Notification components -->
   <HeaderNotification />
   <PopupNotification />
@@ -224,6 +232,7 @@ setInterval(() => {
 
     <RouterView />
   </template>
+  </template> <!-- end v-else (non-bareLayout) -->
 </template>
 
 <style>

@@ -242,6 +242,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/store/:storeUrl',
+      name: 'publicStore',
+      component: () => import('../views/PublicStorePage.vue'),
+      meta: { bareLayout: true },
+    },
+    {
       path: '/collections/payment-setup',
       name: 'collectionsPayment',
       component: () => import('../views/CollectionsPaymentPage.vue'),

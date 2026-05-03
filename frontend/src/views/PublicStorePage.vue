@@ -1,0 +1,169 @@
+<template>
+  <div class="store-shell" :style="pageStyle">
+
+    <div v-if="loading" class="store-loading">Loading…</div>
+
+    <div v-else-if="notFound" class="store-not-found">
+      <h1>Store not found</h1>
+      <p>This store doesn't exist or hasn't been set up yet.</p>
+    </div>
+
+    <main v-else class="store-content">
+      <h1 v-if="storefront.page_title" class="store-title">{{ storefront.page_title }}</h1>
+      <div v-if="storefront.content" class="store-body" v-html="storefront.content"></div>
+    </main>
+
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
+
+const route = useRoute()
+const loading = ref(true)
+const notFound = ref(false)
+const storefront = ref(null)
+
+const pageStyle = computed(() => {
+  const bg = storefront.value?.settings?.background_color
+  return bg ? { backgroundColor: bg } : {}
+})
+
+async function fetchStore() {
+  loading.value = true
+  try {
+    const res = await fetch(`/api/storefront/public/${route.params.storeUrl}`)
+    if (res.status === 404) {
+      notFound.value = true
+    } else if (res.ok) {
+      storefront.value = await res.json()
+      if (storefront.value?.page_title) {
+        document.title = storefront.value.page_title
+      }
+    }
+  } catch (err) {
+    notFound.value = true
+  } finally {
+    loading.value = false
+  }
+}
+
+onMounted(fetchStore)
+</script>
+
+<style scoped>
+.store-shell {
+  min-height: 100vh;
+  background: #fff;
+}
+
+.store-loading,
+.store-not-found {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 40px;
+  text-align: center;
+  color: #555;
+}
+
+.store-not-found h1 {
+  font-size: 2rem;
+  margin-bottom: 12px;
+  color: #222;
+}
+
+.store-content {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 60px 32px 80px;
+}
+
+.store-title {
+  font-size: 2.6rem;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 0 0 32px;
+  color: inherit;
+}
+
+/* Rich text content styles (mirrors StorefrontEditor output) */
+.store-body {
+  font-size: 1.05rem;
+  line-height: 1.75;
+  color: inherit;
+}
+
+.store-body :deep(p) {
+  margin: 0 0 1em;
+}
+
+.store-body :deep(h1) {
+  font-size: 2rem;
+  font-weight: 700;
+  margin: 0.5em 0 0.4em;
+  line-height: 1.2;
+}
+
+.store-body :deep(h2) {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0.7em 0 0.4em;
+  line-height: 1.3;
+}
+
+.store-body :deep(h3) {
+  font-size: 1.15rem;
+  font-weight: 600;
+  margin: 0.8em 0 0.35em;
+}
+
+.store-body :deep(ul),
+.store-body :deep(ol) {
+  padding-left: 1.6em;
+  margin: 0.5em 0;
+}
+
+.store-body :deep(li) {
+  margin-bottom: 0.25em;
+}
+
+.store-body :deep(blockquote) {
+  border-left: 3px solid #aaa;
+  margin: 1em 0;
+  padding: 0.4em 0 0.4em 1em;
+  color: #666;
+  font-style: italic;
+}
+
+.store-body :deep(hr) {
+  border: none;
+  border-top: 1px solid #ddd;
+  margin: 1.5em 0;
+}
+
+.store-body :deep(strong) {
+  font-weight: 700;
+}
+
+.store-body :deep(em) {
+  font-style: italic;
+}
+
+.store-body :deep(s) {
+  text-decoration: line-through;
+}
+
+@media (max-width: 600px) {
+  .store-content {
+    padding: 40px 20px 60px;
+  }
+
+  .store-title {
+    font-size: 1.8rem;
+  }
+}
+</style>

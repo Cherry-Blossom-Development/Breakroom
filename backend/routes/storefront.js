@@ -24,21 +24,68 @@ const authenticate = async (req, res, next) => {
   }
 };
 
+const parseSettings = (row) => {
+  if (row && typeof row.settings === 'string') {
+    try { row.settings = JSON.parse(row.settings); } catch { row.settings = {}; }
+  }
+  return row;
+};
+
+const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,58}[a-z0-9]$|^[a-z0-9]{3}$/;
+
+// GET /api/storefront/public/:storeUrl  (no auth — must be before /)
+router.get('/public/:storeUrl', async (req, res) => {
+  let client;
+  try {
+    client = await getClient();
+    const result = await client.query(
+      'SELECT page_title, content, settings FROM user_storefront WHERE store_url = $1',
+      [req.params.storeUrl]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Store not found' });
+    res.json(parseSettings(result.rows[0]));
+  } catch (err) {
+    console.error('Failed to fetch public storefront:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// GET /api/storefront/check-url/:storeUrl  (auth required)
+router.get('/check-url/:storeUrl', authenticate, async (req, res) => {
+  const { storeUrl } = req.params;
+  if (!SLUG_RE.test(storeUrl)) {
+    return res.json({ available: false, reason: 'Use 3–60 lowercase letters, numbers, or hyphens (no leading/trailing hyphens).' });
+  }
+  let client;
+  try {
+    client = await getClient();
+    const result = await client.query(
+      'SELECT user_id FROM user_storefront WHERE store_url = $1',
+      [storeUrl]
+    );
+    if (result.rowCount === 0) return res.json({ available: true });
+    res.json({ available: result.rows[0].user_id === req.user.id });
+  } catch (err) {
+    console.error('Failed to check store URL:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
 // GET /api/storefront
 router.get('/', authenticate, async (req, res) => {
   let client;
   try {
     client = await getClient();
     const result = await client.query(
-      'SELECT id, page_title, content, settings, updated_at FROM user_storefront WHERE user_id = $1',
+      'SELECT id, store_url, page_title, content, settings, updated_at FROM user_storefront WHERE user_id = $1',
       [req.user.id]
     );
     if (result.rowCount === 0) return res.json(null);
-    const row = result.rows[0];
-    if (typeof row.settings === 'string') {
-      try { row.settings = JSON.parse(row.settings); } catch { row.settings = {}; }
-    }
-    res.json(row);
+    res.json(parseSettings(result.rows[0]));
   } catch (err) {
     console.error('Failed to fetch storefront:', err);
     res.status(500).json({ message: 'Server error' });
@@ -49,15 +96,33 @@ router.get('/', authenticate, async (req, res) => {
 
 // PUT /api/storefront — upsert
 router.put('/', authenticate, async (req, res) => {
-  const { page_title, content, settings } = req.body;
+  const { store_url, page_title, content, settings } = req.body;
+
+  if (store_url && !SLUG_RE.test(store_url)) {
+    return res.status(400).json({ message: 'Invalid store URL format.' });
+  }
+
   let client;
   try {
     client = await getClient();
+
+    // If a URL is provided, ensure it isn't taken by someone else
+    if (store_url) {
+      const conflict = await client.query(
+        'SELECT user_id FROM user_storefront WHERE store_url = $1 AND user_id != $2',
+        [store_url, req.user.id]
+      );
+      if (conflict.rowCount > 0) {
+        client.release();
+        return res.status(409).json({ message: 'That store URL is already taken.' });
+      }
+    }
+
     await client.query(
-      `INSERT INTO user_storefront (user_id, page_title, content, settings)
-       VALUES ($1, $2, $3, $4)
-       ON DUPLICATE KEY UPDATE page_title = $2, content = $3, settings = $4`,
-      [req.user.id, page_title || '', content || '', JSON.stringify(settings || {})]
+      `INSERT INTO user_storefront (user_id, store_url, page_title, content, settings)
+       VALUES ($1, $2, $3, $4, $5)
+       ON DUPLICATE KEY UPDATE store_url = $2, page_title = $3, content = $4, settings = $5`,
+      [req.user.id, store_url || null, page_title || '', content || '', JSON.stringify(settings || {})]
     );
     res.json({ message: 'Saved' });
   } catch (err) {
