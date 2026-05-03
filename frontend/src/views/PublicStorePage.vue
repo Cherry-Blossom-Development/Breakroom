@@ -10,7 +10,35 @@
 
     <main v-else class="store-content">
       <h1 v-if="storefront.page_title" class="store-title">{{ storefront.page_title }}</h1>
-      <div v-if="storefront.content" class="store-body" v-html="storefront.content"></div>
+
+      <template v-for="section in storefront.sections" :key="section.id">
+        <template v-if="section.visible">
+
+          <!-- Content section -->
+          <div
+            v-if="section.type === 'content' && storefront.content"
+            class="store-body"
+            v-html="storefront.content"
+          />
+
+          <!-- Collections section -->
+          <div v-else-if="section.type === 'collections'" class="collections-section">
+            <h2 v-if="section.title" class="collections-heading">{{ section.title }}</h2>
+            <div v-if="storefront.collections && storefront.collections.length" class="collections-grid">
+              <div
+                v-for="col in storefront.collections"
+                :key="col.id"
+                class="collection-card"
+                :style="{ backgroundColor: col.settings?.background_color || '#f5f5f5' }"
+              >
+                <span class="collection-name">{{ col.name }}</span>
+              </div>
+            </div>
+            <p v-else class="collections-empty">No collections yet.</p>
+          </div>
+
+        </template>
+      </template>
     </main>
 
   </div>
@@ -90,16 +118,15 @@ onMounted(fetchStore)
   color: inherit;
 }
 
-/* Rich text content styles (mirrors StorefrontEditor output) */
+/* Rich text content section */
 .store-body {
   font-size: 1.05rem;
   line-height: 1.75;
   color: inherit;
+  margin-bottom: 48px;
 }
 
-.store-body :deep(p) {
-  margin: 0 0 1em;
-}
+.store-body :deep(p) { margin: 0 0 1em; }
 
 .store-body :deep(h1) {
   font-size: 2rem;
@@ -127,9 +154,7 @@ onMounted(fetchStore)
   margin: 0.5em 0;
 }
 
-.store-body :deep(li) {
-  margin-bottom: 0.25em;
-}
+.store-body :deep(li) { margin-bottom: 0.25em; }
 
 .store-body :deep(blockquote) {
   border-left: 3px solid #aaa;
@@ -145,16 +170,47 @@ onMounted(fetchStore)
   margin: 1.5em 0;
 }
 
-.store-body :deep(strong) {
+.store-body :deep(strong) { font-weight: 700; }
+.store-body :deep(em) { font-style: italic; }
+.store-body :deep(s) { text-decoration: line-through; }
+
+/* Collections section */
+.collections-section {
+  margin-bottom: 48px;
+}
+
+.collections-heading {
+  font-size: 1.6rem;
   font-weight: 700;
+  margin: 0 0 24px;
+  color: inherit;
 }
 
-.store-body :deep(em) {
-  font-style: italic;
+.collections-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
 }
 
-.store-body :deep(s) {
-  text-decoration: line-through;
+.collection-card {
+  border-radius: 10px;
+  padding: 28px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100px;
+  text-align: center;
+}
+
+.collection-name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: inherit;
+}
+
+.collections-empty {
+  color: #888;
+  font-size: 0.95rem;
 }
 
 @media (max-width: 600px) {
@@ -164,6 +220,10 @@ onMounted(fetchStore)
 
   .store-title {
     font-size: 1.8rem;
+  }
+
+  .collections-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   }
 }
 </style>

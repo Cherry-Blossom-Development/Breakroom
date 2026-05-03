@@ -33,17 +33,47 @@ const parseSettings = (row) => {
 
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,58}[a-z0-9]$|^[a-z0-9]{3}$/;
 
+const DEFAULT_SECTIONS = [
+  { id: 'content', type: 'content', visible: true },
+  { id: 'collections', type: 'collections', visible: true, title: 'My Collections' }
+];
+
 // GET /api/storefront/public/:storeUrl  (no auth — must be before /)
 router.get('/public/:storeUrl', async (req, res) => {
   let client;
   try {
     client = await getClient();
     const result = await client.query(
-      'SELECT page_title, content, settings FROM user_storefront WHERE store_url = $1',
+      'SELECT user_id, page_title, content, settings FROM user_storefront WHERE store_url = $1',
       [req.params.storeUrl]
     );
     if (result.rowCount === 0) return res.status(404).json({ message: 'Store not found' });
-    res.json(parseSettings(result.rows[0]));
+
+    const row = parseSettings(result.rows[0]);
+    const sections = (row.settings && row.settings.sections) ? row.settings.sections : DEFAULT_SECTIONS;
+
+    const collectionsVisible = sections.some(s => s.type === 'collections' && s.visible);
+    let collections = [];
+    if (collectionsVisible) {
+      const colResult = await client.query(
+        'SELECT id, name, settings FROM user_collections WHERE user_id = $1 ORDER BY created_at ASC',
+        [row.user_id]
+      );
+      collections = colResult.rows.map(c => {
+        if (c.settings && typeof c.settings === 'string') {
+          try { c.settings = JSON.parse(c.settings); } catch { c.settings = {}; }
+        }
+        return c;
+      });
+    }
+
+    res.json({
+      page_title: row.page_title,
+      content: row.content,
+      settings: row.settings,
+      sections,
+      collections
+    });
   } catch (err) {
     console.error('Failed to fetch public storefront:', err);
     res.status(500).json({ message: 'Server error' });

@@ -72,11 +72,70 @@
           />
         </div>
 
-        <!-- Content -->
+        <!-- Section builder -->
         <div class="form-group">
-          <label class="form-label">Content</label>
-          <p class="form-hint">Use the toolbar to add headings, lists, quotes, and more — no HTML required.</p>
-          <StorefrontEditor v-model="content" />
+          <label class="form-label">Page Sections</label>
+          <p class="form-hint">Drag to reorder. Toggle the eye to show or hide a section on your public store.</p>
+
+          <draggable
+            v-model="sections"
+            item-key="id"
+            handle=".drag-handle"
+            class="sections-list"
+            :animation="150"
+          >
+            <template #item="{ element: section }">
+              <div class="section-card" :class="{ 'section-hidden': !section.visible }">
+                <div class="section-card-header">
+                  <span class="drag-handle" title="Drag to reorder">⠿</span>
+                  <span class="section-type-label">{{ section.type === 'content' ? 'Content' : 'Collections' }}</span>
+                  <button
+                    class="visibility-btn"
+                    :title="section.visible ? 'Hide section' : 'Show section'"
+                    @click="section.visible = !section.visible"
+                  >
+                    <svg v-if="section.visible" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                    <svg v-else viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                      <line x1="1" y1="1" x2="23" y2="23"/>
+                    </svg>
+                  </button>
+                </div>
+
+                <div v-if="section.visible" class="section-card-body">
+                  <!-- Content section -->
+                  <template v-if="section.type === 'content'">
+                    <StorefrontEditor v-model="contentBody" />
+                  </template>
+
+                  <!-- Collections section -->
+                  <template v-else-if="section.type === 'collections'">
+                    <div class="form-group" style="gap:4px">
+                      <label class="form-label" style="font-size:0.82rem">Section heading</label>
+                      <input
+                        v-model="section.title"
+                        type="text"
+                        class="form-input"
+                        placeholder="e.g. My Collections"
+                        maxlength="120"
+                        style="max-width:360px"
+                      />
+                    </div>
+                    <p class="form-hint" style="margin-top:8px">
+                      All your collections will appear here automatically. Manage them on the
+                      <RouterLink to="/collections">Collections</RouterLink> page.
+                    </p>
+                  </template>
+                </div>
+
+                <div v-else class="section-hidden-label">Hidden from public store</div>
+              </div>
+            </template>
+          </draggable>
         </div>
 
       </div>
@@ -97,16 +156,23 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { RouterLink } from 'vue-router'
 import { authFetch } from '@/utilities/authFetch'
 import StorefrontEditor from '@/components/StorefrontEditor.vue'
+import draggable from 'vuedraggable'
+
+const DEFAULT_SECTIONS = [
+  { id: 'content', type: 'content', visible: true },
+  { id: 'collections', type: 'collections', visible: true, title: 'My Collections' }
+]
 
 const loading = ref(true)
 const saving = ref(false)
 const savedAt = ref(null)
 const storeUrl = ref('')
 const pageTitle = ref('')
-const content = ref('')
+const contentBody = ref('')
+const sections = ref(DEFAULT_SECTIONS.map(s => ({ ...s })))
 
 const urlChecking = ref(false)
-const urlAvailable = ref(null)   // null = unchecked, true, false
+const urlAvailable = ref(null)
 const urlReason = ref('')
 
 const origin = window.location.origin
@@ -127,7 +193,6 @@ const canSave = computed(() => {
 let urlCheckTimer = null
 
 function onUrlInput() {
-  // Strip invalid chars, force lowercase as user types
   storeUrl.value = storeUrl.value.toLowerCase().replace(/[^a-z0-9-]/g, '')
   urlAvailable.value = null
   urlReason.value = ''
@@ -163,9 +228,12 @@ async function fetchStorefront() {
       if (data) {
         storeUrl.value = data.store_url || ''
         pageTitle.value = data.page_title || ''
-        content.value = data.content || ''
+        contentBody.value = data.content || ''
         savedAt.value = formatDate(data.updated_at)
         if (storeUrl.value) urlAvailable.value = true
+        if (data.settings && data.settings.sections) {
+          sections.value = data.settings.sections
+        }
       }
     }
   } catch (err) {
@@ -185,7 +253,8 @@ async function save() {
       body: JSON.stringify({
         store_url: storeUrl.value,
         page_title: pageTitle.value,
-        content: content.value
+        content: contentBody.value,
+        settings: { sections: sections.value }
       })
     })
     if (res.ok) {
@@ -356,6 +425,82 @@ onBeforeUnmount(() => clearTimeout(urlCheckTimer))
 .form-input:focus {
   outline: none;
   border-color: var(--color-link);
+}
+
+/* ---- Section Builder ---- */
+.sections-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.section-card {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-background, #fff);
+  transition: opacity 0.15s;
+}
+
+.section-card.section-hidden {
+  opacity: 0.6;
+}
+
+.section-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--color-background-soft, #f5f5f5);
+  border-bottom: 1px solid var(--color-border);
+  user-select: none;
+}
+
+.drag-handle {
+  cursor: grab;
+  font-size: 1.2rem;
+  color: var(--color-text-secondary);
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.section-type-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--color-text);
+  flex: 1;
+}
+
+.visibility-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+
+.visibility-btn:hover {
+  color: var(--color-text);
+}
+
+.section-card-body {
+  padding: 16px 14px;
+}
+
+.section-hidden-label {
+  padding: 10px 14px;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  font-style: italic;
 }
 
 /* ---- Buttons ---- */
