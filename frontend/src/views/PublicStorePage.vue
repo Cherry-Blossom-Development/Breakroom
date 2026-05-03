@@ -25,14 +25,16 @@
           <div v-else-if="section.type === 'collections'" class="collections-section">
             <h2 v-if="section.title" class="collections-heading">{{ section.title }}</h2>
             <div v-if="storefront.collections && storefront.collections.length" class="collections-grid">
-              <div
+              <RouterLink
                 v-for="col in storefront.collections"
                 :key="col.id"
+                :to="`/store/${route.params.storeUrl}/c/${col.id}`"
                 class="collection-card"
                 :style="{ backgroundColor: col.settings?.background_color || '#f5f5f5' }"
               >
                 <span class="collection-name">{{ col.name }}</span>
-              </div>
+                <span class="collection-arrow">→</span>
+              </RouterLink>
             </div>
             <p v-else class="collections-empty">No collections yet.</p>
           </div>
@@ -46,7 +48,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 
 const route = useRoute()
 const loading = ref(true)
@@ -197,15 +199,30 @@ onMounted(fetchStore)
   padding: 28px 20px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
+  gap: 12px;
   min-height: 100px;
-  text-align: center;
+  text-decoration: none;
+  color: inherit;
+  transition: filter 0.15s, box-shadow 0.15s;
+  cursor: pointer;
+}
+
+.collection-card:hover {
+  filter: brightness(0.95);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
 }
 
 .collection-name {
   font-size: 1rem;
   font-weight: 600;
   color: inherit;
+}
+
+.collection-arrow {
+  font-size: 1.1rem;
+  opacity: 0.6;
+  flex-shrink: 0;
 }
 
 .collections-empty {

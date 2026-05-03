@@ -82,6 +82,49 @@ router.get('/public/:storeUrl', async (req, res) => {
   }
 });
 
+// GET /api/storefront/public/:storeUrl/collection/:collectionId  (no auth)
+router.get('/public/:storeUrl/collection/:collectionId', async (req, res) => {
+  let client;
+  try {
+    client = await getClient();
+    // Resolve storeUrl → user_id
+    const storeResult = await client.query(
+      'SELECT user_id, page_title, settings FROM user_storefront WHERE store_url = $1',
+      [req.params.storeUrl]
+    );
+    if (storeResult.rowCount === 0) return res.status(404).json({ message: 'Store not found' });
+
+    const { user_id } = storeResult.rows[0];
+
+    // Fetch collection — must belong to this store's owner
+    const colResult = await client.query(
+      'SELECT id, name, settings FROM user_collections WHERE id = $1 AND user_id = $2',
+      [req.params.collectionId, user_id]
+    );
+    if (colResult.rowCount === 0) return res.status(404).json({ message: 'Collection not found' });
+
+    const collection = parseSettings(colResult.rows[0]);
+
+    // Fetch items
+    const itemResult = await client.query(
+      'SELECT id, name, description, image_path FROM collection_items WHERE collection_id = $1 ORDER BY display_order ASC, created_at ASC',
+      [req.params.collectionId]
+    );
+
+    res.json({
+      store_url: req.params.storeUrl,
+      store_title: storeResult.rows[0].page_title,
+      collection,
+      items: itemResult.rows
+    });
+  } catch (err) {
+    console.error('Failed to fetch public collection:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
 // GET /api/storefront/check-url/:storeUrl  (auth required)
 router.get('/check-url/:storeUrl', authenticate, async (req, res) => {
   const { storeUrl } = req.params;
