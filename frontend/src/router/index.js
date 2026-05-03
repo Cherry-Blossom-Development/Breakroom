@@ -236,6 +236,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/collections/:id',
+      name: 'collectionDetail',
+      component: () => import('../views/CollectionDetailPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/collections/storefront',
       name: 'collectionsStorefront',
       component: () => import('../views/StorefrontPage.vue'),

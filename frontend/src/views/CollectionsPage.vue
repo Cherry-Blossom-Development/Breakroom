@@ -88,8 +88,9 @@
             :style="{ backgroundColor: col.settings?.background_color || '#f5f5f5' }"
           ></div>
           <div class="card-body">
-            <div class="card-name">{{ col.name }}</div>
+            <RouterLink :to="`/collections/${col.id}`" class="card-name">{{ col.name }}</RouterLink>
             <div class="card-actions">
+              <RouterLink :to="`/collections/${col.id}`" class="btn-sm">Manage →</RouterLink>
               <button class="btn-sm" @click="openEdit(col)">Edit</button>
               <button class="btn-sm btn-danger" @click="confirmDelete(col)">Delete</button>
             </div>
@@ -503,6 +504,12 @@ onMounted(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-decoration: none;
+  display: block;
+}
+
+.card-name:hover {
+  color: var(--color-link);
 }
 
 .card-actions {

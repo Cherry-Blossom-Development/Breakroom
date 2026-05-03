@@ -1,7 +1,10 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const path = require('path');
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
+const { uploadToS3, deleteFromS3 } = require('../utilities/aws-s3');
 const { extractToken } = require('../utilities/auth');
 
 require('dotenv').config();
@@ -31,6 +34,23 @@ const parseSettings = (row) => {
   return row;
 };
 
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = /jpeg|jpg|png|gif|webp/;
+    if (allowed.test(path.extname(file.originalname).toLowerCase()) && allowed.test(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  }
+});
+
+// =====================
+// COLLECTION CRUD
+// =====================
+
 // GET /api/collections
 router.get('/', authenticate, async (req, res) => {
   let client;
@@ -43,6 +63,25 @@ router.get('/', authenticate, async (req, res) => {
     res.json(result.rows.map(parseSettings));
   } catch (err) {
     console.error('Failed to fetch collections:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// GET /api/collections/:id
+router.get('/:id', authenticate, async (req, res) => {
+  let client;
+  try {
+    client = await getClient();
+    const result = await client.query(
+      'SELECT id, name, settings, created_at, updated_at FROM user_collections WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Collection not found' });
+    res.json(parseSettings(result.rows[0]));
+  } catch (err) {
+    console.error('Failed to fetch collection:', err);
     res.status(500).json({ message: 'Server error' });
   } finally {
     if (client) client.release();
@@ -101,14 +140,175 @@ router.delete('/:id', authenticate, async (req, res) => {
   let client;
   try {
     client = await getClient();
+    // Fetch all item image_paths so we can clean up S3
+    const items = await client.query(
+      'SELECT image_path FROM collection_items WHERE collection_id = $1 AND user_id = $2',
+      [id, req.user.id]
+    );
     const result = await client.query(
       'DELETE FROM user_collections WHERE id = $1 AND user_id = $2',
       [id, req.user.id]
     );
     if (result.affectedRows === 0) return res.status(404).json({ message: 'Collection not found' });
+    // Clean up S3 images (fire and forget — don't block the response)
+    for (const row of items.rows) {
+      if (row.image_path) deleteFromS3(row.image_path).catch(() => {});
+    }
     res.json({ message: 'Deleted' });
   } catch (err) {
     console.error('Failed to delete collection:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// =====================
+// COLLECTION ITEMS
+// =====================
+
+// GET /api/collections/:id/items
+router.get('/:id/items', authenticate, async (req, res) => {
+  const { id } = req.params;
+  let client;
+  try {
+    client = await getClient();
+    // Verify ownership
+    const col = await client.query(
+      'SELECT id FROM user_collections WHERE id = $1 AND user_id = $2',
+      [id, req.user.id]
+    );
+    if (col.rowCount === 0) return res.status(404).json({ message: 'Collection not found' });
+
+    const result = await client.query(
+      'SELECT id, name, description, image_path, display_order, created_at, updated_at FROM collection_items WHERE collection_id = $1 ORDER BY display_order ASC, created_at ASC',
+      [id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Failed to fetch items:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// POST /api/collections/:id/items
+router.post('/:id/items', authenticate, upload.single('image'), async (req, res) => {
+  const { id } = req.params;
+  const { name, description } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ message: 'Name is required' });
+
+  let client;
+  try {
+    client = await getClient();
+    // Verify ownership
+    const col = await client.query(
+      'SELECT id FROM user_collections WHERE id = $1 AND user_id = $2',
+      [id, req.user.id]
+    );
+    if (col.rowCount === 0) return res.status(404).json({ message: 'Collection not found' });
+
+    let s3Key = null;
+    if (req.file) {
+      const ext = path.extname(req.file.originalname).toLowerCase();
+      s3Key = `collections/${req.user.id}/${id}/item_${Date.now()}${ext}`;
+      const upload = await uploadToS3(req.file.buffer, s3Key, req.file.mimetype);
+      if (!upload.success) return res.status(500).json({ message: 'Image upload failed' });
+    }
+
+    const insert = await client.query(
+      'INSERT INTO collection_items (collection_id, user_id, name, description, image_path) VALUES ($1, $2, $3, $4, $5)',
+      [id, req.user.id, name.trim(), description || null, s3Key]
+    );
+    const result = await client.query(
+      'SELECT id, name, description, image_path, display_order, created_at, updated_at FROM collection_items WHERE id = $1',
+      [insert.insertId]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('Failed to create item:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// PUT /api/collections/:id/items/:itemId
+router.put('/:id/items/:itemId', authenticate, upload.single('image'), async (req, res) => {
+  const { id, itemId } = req.params;
+  const { name, description } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ message: 'Name is required' });
+
+  let client;
+  try {
+    client = await getClient();
+    // Verify ownership via collection
+    const col = await client.query(
+      'SELECT id FROM user_collections WHERE id = $1 AND user_id = $2',
+      [id, req.user.id]
+    );
+    if (col.rowCount === 0) return res.status(404).json({ message: 'Collection not found' });
+
+    const existing = await client.query(
+      'SELECT id, image_path FROM collection_items WHERE id = $1 AND collection_id = $2',
+      [itemId, id]
+    );
+    if (existing.rowCount === 0) return res.status(404).json({ message: 'Item not found' });
+
+    let s3Key = existing.rows[0].image_path;
+    if (req.file) {
+      const ext = path.extname(req.file.originalname).toLowerCase();
+      const newKey = `collections/${req.user.id}/${id}/item_${Date.now()}${ext}`;
+      const upload = await uploadToS3(req.file.buffer, newKey, req.file.mimetype);
+      if (!upload.success) return res.status(500).json({ message: 'Image upload failed' });
+      // Delete old image after successful upload
+      if (s3Key) deleteFromS3(s3Key).catch(() => {});
+      s3Key = newKey;
+    }
+
+    await client.query(
+      'UPDATE collection_items SET name = $1, description = $2, image_path = $3 WHERE id = $4',
+      [name.trim(), description || null, s3Key, itemId]
+    );
+    const result = await client.query(
+      'SELECT id, name, description, image_path, display_order, created_at, updated_at FROM collection_items WHERE id = $1',
+      [itemId]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Failed to update item:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// DELETE /api/collections/:id/items/:itemId
+router.delete('/:id/items/:itemId', authenticate, async (req, res) => {
+  const { id, itemId } = req.params;
+  let client;
+  try {
+    client = await getClient();
+    const col = await client.query(
+      'SELECT id FROM user_collections WHERE id = $1 AND user_id = $2',
+      [id, req.user.id]
+    );
+    if (col.rowCount === 0) return res.status(404).json({ message: 'Collection not found' });
+
+    const existing = await client.query(
+      'SELECT id, image_path FROM collection_items WHERE id = $1 AND collection_id = $2',
+      [itemId, id]
+    );
+    if (existing.rowCount === 0) return res.status(404).json({ message: 'Item not found' });
+
+    await client.query('DELETE FROM collection_items WHERE id = $1', [itemId]);
+    if (existing.rows[0].image_path) {
+      deleteFromS3(existing.rows[0].image_path).catch(() => {});
+    }
+    res.json({ message: 'Deleted' });
+  } catch (err) {
+    console.error('Failed to delete item:', err);
     res.status(500).json({ message: 'Server error' });
   } finally {
     if (client) client.release();
