@@ -1,14 +1,22 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
-const Stripe = require('stripe');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
-const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+
+// Lazy init — avoids crashing the server at startup if the key is missing
+let _stripe = null;
+function getStripe() {
+  if (!_stripe) {
+    if (!process.env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY is not set');
+    _stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+  }
+  return _stripe;
+}
 
 const authenticate = async (req, res, next) => {
   try {
@@ -52,7 +60,7 @@ router.get('/connect/status', authenticate, async (req, res) => {
     }
 
     // Otherwise ask Stripe for the current state
-    const account = await stripe.accounts.retrieve(stripe_account_id);
+    const account = await getStripe().accounts.retrieve(stripe_account_id);
     const isComplete = account.details_submitted && account.charges_enabled;
 
     if (isComplete) {
@@ -89,7 +97,7 @@ router.post('/connect/start', authenticate, async (req, res) => {
 
     if (result.rowCount === 0) {
       // Create a new Express account
-      const account = await stripe.accounts.create({ type: 'express' });
+      const account = await getStripe().accounts.create({ type: 'express' });
       stripeAccountId = account.id;
       await client.query(
         'INSERT INTO user_stripe_connect (user_id, stripe_account_id) VALUES ($1, $2)',
@@ -104,7 +112,7 @@ router.post('/connect/start', authenticate, async (req, res) => {
     }
 
     // Generate an Account Link for onboarding
-    const accountLink = await stripe.accountLinks.create({
+    const accountLink = await getStripe().accountLinks.create({
       account: stripeAccountId,
       refresh_url: REFRESH_URL,
       return_url: RETURN_URL,
