@@ -29,6 +29,8 @@ services:
       # S3 configuration
       S3_BUCKET_NAME: ${S3_BUCKET_NAME}
       S3_BUCKET_REGION: ${S3_BUCKET_REGION}
+      # Stripe
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       # Firebase (FCM push notifications)
       FIREBASE_SERVICE_ACCOUNT_JSON: ${FIREBASE_SERVICE_ACCOUNT_JSON}
     volumes:
