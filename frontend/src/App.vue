@@ -11,6 +11,7 @@ import PopupNotification from './components/PopupNotification.vue'
 import MentionToast from './components/MentionToast.vue'
 import AppSidebar from './components/AppSidebar.vue'
 import BottomTabBar from './components/BottomTabBar.vue'
+import SupportModal from './components/SupportModal.vue'
 import { io } from 'socket.io-client'
 
 const mentionQueue = ref([])
@@ -31,6 +32,7 @@ const router = useRouter()
 const route = useRoute()
 const sidebarOpen = ref(false)
 const isAdmin = ref(false)
+const showSupport = ref(false)
 
 async function checkAdminPermission() {
   if (!user.username) {
@@ -171,6 +173,7 @@ setInterval(() => {
   <HeaderNotification />
   <PopupNotification />
   <MentionToast :mentions="mentionQueue" @dismiss="dismissMention" />
+  <SupportModal :visible="showSupport" @close="showSupport = false" />
 
   <!-- Logged-in: sidebar + bottom bar navigation -->
   <template v-if="user.username && !route.meta.publicLayout">
@@ -179,6 +182,7 @@ setInterval(() => {
       :visible="sidebarOpen"
       @close="closeSidebar"
       @logout="logout"
+      @support="showSupport = true"
     />
 
     <!-- Tablet hamburger top bar -->
@@ -223,6 +227,7 @@ setInterval(() => {
             <RouterLink to="/">Home</RouterLink>
             <RouterLink to="/about">About</RouterLink>
             <RouterLink to="/eula">EULA</RouterLink>
+            <a href="#" @click.prevent="showSupport = true">Support</a>
             <RouterLink to="/login">Login</RouterLink>
             <RouterLink to="/signup">Sign Up</RouterLink>
           </template>
