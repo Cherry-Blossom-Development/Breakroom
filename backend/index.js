@@ -77,6 +77,7 @@ const galleryRoutes = require('./routes/gallery');
 const collectionsRoutes = require('./routes/collections');
 const storefrontRoutes = require('./routes/storefront');
 const billingRoutes = require('./routes/billing');
+const { handleStripeWebhook } = require('./routes/billing');
 const supportRoutes = require('./routes/support');
 const featuresRoutes = require('./routes/features');
 const eulaRoutes = require('./routes/eula');
@@ -89,6 +90,10 @@ const shippingRoutes = require('./routes/shipping');
 const { getS3Url } = require('./utilities/aws-s3');
 
 
+
+// Stripe webhook — must be registered BEFORE express.json() so the raw body
+// is available for signature verification
+app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), handleStripeWebhook);
 
 // Middleware to parse incoming JSON data
 app.use(express.json());
