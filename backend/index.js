@@ -85,6 +85,7 @@ const sessionsRoutes = require('./routes/sessions');
 const bandsRoutes = require('./routes/bands');
 const instrumentsRoutes = require('./routes/instruments');
 const subscriptionsRoutes = require('./routes/subscriptions');
+const shippingRoutes = require('./routes/shipping');
 const { getS3Url } = require('./utilities/aws-s3');
 
 
@@ -130,6 +131,7 @@ app.use('/api/sessions', sessionsRoutes);
 app.use('/api/bands', bandsRoutes);
 app.use('/api/instruments', instrumentsRoutes);
 app.use('/api/subscriptions', subscriptionsRoutes);
+app.use('/api/shipping', shippingRoutes);
 
 // Redirect uploaded file requests to S3
 const handleS3Redirect = (req, res) => {
