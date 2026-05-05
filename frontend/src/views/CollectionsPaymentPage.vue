@@ -149,13 +149,14 @@ async function startConnect() {
       const data = await res.json()
       if (data.status === 'active') {
         status.value = 'active'
-        starting.value = false
       } else if (data.url) {
         window.location.href = data.url
+        return
       }
     }
   } catch (err) {
     console.error('Failed to start connect:', err)
+  } finally {
     starting.value = false
   }
 }
