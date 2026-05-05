@@ -105,9 +105,13 @@ router.get('/public/:storeUrl/collection/:collectionId', async (req, res) => {
 
     const collection = parseSettings(colResult.rows[0]);
 
-    // Fetch items
+    // Fetch available items only
     const itemResult = await client.query(
-      'SELECT id, name, description, image_path FROM collection_items WHERE collection_id = $1 ORDER BY display_order ASC, created_at ASC',
+      `SELECT id, name, description, image_path, price_cents, shipping_cost_cents,
+              weight_oz, length_in, width_in, height_in
+       FROM collection_items
+       WHERE collection_id = $1 AND is_available = 1
+       ORDER BY display_order ASC, created_at ASC`,
       [req.params.collectionId]
     );
 

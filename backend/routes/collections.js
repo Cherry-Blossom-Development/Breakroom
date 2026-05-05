@@ -181,7 +181,11 @@ router.get('/:id/items', authenticate, async (req, res) => {
     if (col.rowCount === 0) return res.status(404).json({ message: 'Collection not found' });
 
     const result = await client.query(
-      'SELECT id, name, description, image_path, display_order, created_at, updated_at FROM collection_items WHERE collection_id = $1 ORDER BY display_order ASC, created_at ASC',
+      `SELECT id, name, description, image_path, display_order,
+              price_cents, is_available, shipping_cost_cents,
+              weight_oz, length_in, width_in, height_in,
+              created_at, updated_at
+       FROM collection_items WHERE collection_id = $1 ORDER BY display_order ASC, created_at ASC`,
       [id]
     );
     res.json(result.rows);
@@ -199,10 +203,17 @@ router.post('/:id/items', authenticate, upload.single('image'), async (req, res)
   const { name, description } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ message: 'Name is required' });
 
+  const priceCents       = req.body.price        ? Math.round(parseFloat(req.body.price) * 100)        : null;
+  const shippingCents    = req.body.shipping_cost ? Math.round(parseFloat(req.body.shipping_cost) * 100) : null;
+  const weightOz         = req.body.weight_oz    ? parseFloat(req.body.weight_oz)    : null;
+  const lengthIn         = req.body.length_in    ? parseFloat(req.body.length_in)    : null;
+  const widthIn          = req.body.width_in     ? parseFloat(req.body.width_in)     : null;
+  const heightIn         = req.body.height_in    ? parseFloat(req.body.height_in)    : null;
+  const isAvailable      = req.body.is_available === 'true' ? 1 : 0;
+
   let client;
   try {
     client = await getClient();
-    // Verify ownership
     const col = await client.query(
       'SELECT id FROM user_collections WHERE id = $1 AND user_id = $2',
       [id, req.user.id]
@@ -218,11 +229,19 @@ router.post('/:id/items', authenticate, upload.single('image'), async (req, res)
     }
 
     const insert = await client.query(
-      'INSERT INTO collection_items (collection_id, user_id, name, description, image_path) VALUES ($1, $2, $3, $4, $5)',
-      [id, req.user.id, name.trim(), description || null, s3Key]
+      `INSERT INTO collection_items
+         (collection_id, user_id, name, description, image_path,
+          price_cents, is_available, shipping_cost_cents, weight_oz, length_in, width_in, height_in)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [id, req.user.id, name.trim(), description || null, s3Key,
+       priceCents, isAvailable, shippingCents, weightOz, lengthIn, widthIn, heightIn]
     );
     const result = await client.query(
-      'SELECT id, name, description, image_path, display_order, created_at, updated_at FROM collection_items WHERE id = $1',
+      `SELECT id, name, description, image_path, display_order,
+              price_cents, is_available, shipping_cost_cents,
+              weight_oz, length_in, width_in, height_in,
+              created_at, updated_at
+       FROM collection_items WHERE id = $1`,
       [insert.insertId]
     );
     res.status(201).json(result.rows[0]);
@@ -240,10 +259,17 @@ router.put('/:id/items/:itemId', authenticate, upload.single('image'), async (re
   const { name, description } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ message: 'Name is required' });
 
+  const priceCents       = req.body.price        ? Math.round(parseFloat(req.body.price) * 100)        : null;
+  const shippingCents    = req.body.shipping_cost ? Math.round(parseFloat(req.body.shipping_cost) * 100) : null;
+  const weightOz         = req.body.weight_oz    ? parseFloat(req.body.weight_oz)    : null;
+  const lengthIn         = req.body.length_in    ? parseFloat(req.body.length_in)    : null;
+  const widthIn          = req.body.width_in     ? parseFloat(req.body.width_in)     : null;
+  const heightIn         = req.body.height_in    ? parseFloat(req.body.height_in)    : null;
+  const isAvailable      = req.body.is_available === 'true' ? 1 : 0;
+
   let client;
   try {
     client = await getClient();
-    // Verify ownership via collection
     const col = await client.query(
       'SELECT id FROM user_collections WHERE id = $1 AND user_id = $2',
       [id, req.user.id]
@@ -262,17 +288,26 @@ router.put('/:id/items/:itemId', authenticate, upload.single('image'), async (re
       const newKey = `collections/${req.user.id}/${id}/item_${Date.now()}${ext}`;
       const upload = await uploadToS3(req.file.buffer, newKey, req.file.mimetype);
       if (!upload.success) return res.status(500).json({ message: 'Image upload failed' });
-      // Delete old image after successful upload
       if (s3Key) deleteFromS3(s3Key).catch(() => {});
       s3Key = newKey;
     }
 
     await client.query(
-      'UPDATE collection_items SET name = $1, description = $2, image_path = $3 WHERE id = $4',
-      [name.trim(), description || null, s3Key, itemId]
+      `UPDATE collection_items SET
+         name = $1, description = $2, image_path = $3,
+         price_cents = $4, is_available = $5, shipping_cost_cents = $6,
+         weight_oz = $7, length_in = $8, width_in = $9, height_in = $10
+       WHERE id = $11`,
+      [name.trim(), description || null, s3Key,
+       priceCents, isAvailable, shippingCents,
+       weightOz, lengthIn, widthIn, heightIn, itemId]
     );
     const result = await client.query(
-      'SELECT id, name, description, image_path, display_order, created_at, updated_at FROM collection_items WHERE id = $1',
+      `SELECT id, name, description, image_path, display_order,
+              price_cents, is_available, shipping_cost_cents,
+              weight_oz, length_in, width_in, height_in,
+              created_at, updated_at
+       FROM collection_items WHERE id = $1`,
       [itemId]
     );
     res.json(result.rows[0]);

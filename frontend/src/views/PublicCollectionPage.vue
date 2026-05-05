@@ -41,6 +41,13 @@
           <div class="item-body">
             <div class="item-name">{{ item.name }}</div>
             <div v-if="item.description" class="item-desc">{{ item.description }}</div>
+            <div class="item-price-row">
+              <span v-if="item.price_cents != null" class="item-price">${{ (item.price_cents / 100).toFixed(2) }}</span>
+              <span v-if="item.shipping_cost_cents != null" class="item-shipping">
+                + ${{ (item.shipping_cost_cents / 100).toFixed(2) }} shipping
+              </span>
+              <span v-else-if="item.price_cents != null" class="item-shipping">Free shipping</span>
+            </div>
           </div>
         </div>
       </div>
@@ -204,6 +211,27 @@ onMounted(fetchCollection)
   color: inherit;
   opacity: 0.7;
   line-height: 1.5;
+  margin-bottom: 8px;
+}
+
+.item-price-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.item-price {
+  font-size: 1rem;
+  font-weight: 700;
+  color: inherit;
+}
+
+.item-shipping {
+  font-size: 0.8rem;
+  color: inherit;
+  opacity: 0.65;
 }
 
 @media (max-width: 600px) {
