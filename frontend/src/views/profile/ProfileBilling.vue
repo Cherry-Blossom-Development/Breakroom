@@ -94,8 +94,8 @@
       </div>
 
       <p class="fee-note-bottom">
-        At roughly 5 sales per month averaging $10, Pro pays for itself. At higher volumes or
-        higher prices, the savings are significantly larger.
+        At roughly 8 sales per month averaging $10, Pro pays for itself ($0.50 saved per sale × 8 = $4.00).
+        At higher volume or higher prices, the savings are significantly larger.
       </p>
     </div>
   </section>
