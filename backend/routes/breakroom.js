@@ -25,6 +25,26 @@ const SOURCES = {
 const NEWS_CACHE_DURATION = 5 * 60 * 1000;
 const sourceCache = {};
 
+function decodeEntities(str) {
+  if (!str) return '';
+  return str
+    .replace(/&#(\d+);/g,       (_, n) => String.fromCharCode(parseInt(n, 10)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
+    .replace(/&amp;/g,   '&')
+    .replace(/&lt;/g,    '<')
+    .replace(/&gt;/g,    '>')
+    .replace(/&quot;/g,  '"')
+    .replace(/&apos;/g,  "'")
+    .replace(/&nbsp;/g,  ' ')
+    .replace(/&mdash;/g, '—')
+    .replace(/&ndash;/g, '–')
+    .replace(/&hellip;/g,'…')
+    .replace(/&rsquo;/g, '’')
+    .replace(/&lsquo;/g, '‘')
+    .replace(/&rdquo;/g, '“')
+    .replace(/&ldquo;/g, '“');
+}
+
 function extractText(val) {
   if (!val) return '';
   if (typeof val === 'string') return val;
@@ -66,9 +86,9 @@ async function fetchSourceItems(sourceId) {
     if (channel) {
       const raw = Array.isArray(channel.item) ? channel.item : (channel.item ? [channel.item] : []);
       items = raw.slice(0, 15).map(item => ({
-        title: extractText(item.title),
+        title: decodeEntities(extractText(item.title)),
         link: extractText(item.link) || extractText(item.guid),
-        description: extractText(item.description).replace(/<[^>]*>/g, '').substring(0, 200),
+        description: decodeEntities(extractText(item.description).replace(/<[^>]*>/g, '')).substring(0, 200),
         pubDate: extractText(item.pubDate),
         source: source.name,
         sourceId,
@@ -81,9 +101,9 @@ async function fetchSourceItems(sourceId) {
       if (feed) {
         const raw = Array.isArray(feed.entry) ? feed.entry : (feed.entry ? [feed.entry] : []);
         items = raw.slice(0, 15).map(item => ({
-          title: extractText(item.title),
+          title: decodeEntities(extractText(item.title)),
           link: extractAtomLink(item.link),
-          description: (extractText(item.summary) || extractText(item.content)).replace(/<[^>]*>/g, '').substring(0, 200),
+          description: decodeEntities((extractText(item.summary) || extractText(item.content)).replace(/<[^>]*>/g, '')).substring(0, 200),
           pubDate: extractText(item.published) || extractText(item.updated),
           source: source.name,
           sourceId,
