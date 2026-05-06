@@ -7,10 +7,97 @@ const { XMLParser } = require('fast-xml-parser');
 
 require('dotenv').config();
 
-// News RSS feed URL (NPR Top Stories)
-const NEWS_RSS_URL = 'https://feeds.npr.org/1001/rss.xml';
-const NEWS_CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-let newsCache = { data: null, timestamp: 0 };
+const SOURCES = {
+  npr:          { name: 'NPR',          url: 'https://feeds.npr.org/1001/rss.xml' },
+  bbc:          { name: 'BBC News',     url: 'https://feeds.bbci.co.uk/news/rss.xml' },
+  guardian:     { name: 'The Guardian', url: 'https://www.theguardian.com/world/rss' },
+  abc:          { name: 'ABC News',     url: 'https://abcnews.go.com/abcnews/topstories' },
+  cbs:          { name: 'CBS News',     url: 'https://www.cbsnews.com/latest/rss/main' },
+  aljazeera:    { name: 'Al Jazeera',   url: 'https://www.aljazeera.com/xml/rss/all.xml' },
+  usatoday:     { name: 'USA Today',    url: 'https://rssfeeds.usatoday.com/usatoday-NewsTopStories' },
+  hackernews:   { name: 'Hacker News',  url: 'https://news.ycombinator.com/rss' },
+  arstechnica:  { name: 'Ars Technica', url: 'https://feeds.arstechnica.com/arstechnica/index' },
+  theverge:     { name: 'The Verge',    url: 'https://www.theverge.com/rss/index.xml' },
+  pitchfork:    { name: 'Pitchfork',    url: 'https://pitchfork.com/rss/news/feed.irs' },
+  rollingstone: { name: 'Rolling Stone', url: 'https://www.rollingstone.com/feed/' },
+};
+
+const NEWS_CACHE_DURATION = 5 * 60 * 1000;
+const sourceCache = {};
+
+function extractText(val) {
+  if (!val) return '';
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number') return String(val);
+  if (val['#text']) return String(val['#text']);
+  return '';
+}
+
+function extractAtomLink(link) {
+  if (!link) return '';
+  if (typeof link === 'string') return link;
+  if (Array.isArray(link)) {
+    const alt = link.find(l => l['@_rel'] === 'alternate' || !l['@_rel']);
+    return alt ? (alt['@_href'] || '') : (link[0]?.['@_href'] || '');
+  }
+  return link['@_href'] || '';
+}
+
+async function fetchSourceItems(sourceId) {
+  const source = SOURCES[sourceId];
+  if (!source) return [];
+
+  const now = Date.now();
+  const cached = sourceCache[sourceId];
+  if (cached && (now - cached.timestamp) < NEWS_CACHE_DURATION) return cached.items;
+
+  try {
+    const response = await fetch(source.url, { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const xmlText = await response.text();
+    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
+    const result = parser.parse(xmlText);
+
+    let items = [];
+
+    // RSS 2.0
+    const channel = result.rss?.channel;
+    if (channel) {
+      const raw = Array.isArray(channel.item) ? channel.item : (channel.item ? [channel.item] : []);
+      items = raw.slice(0, 15).map(item => ({
+        title: extractText(item.title),
+        link: extractText(item.link) || extractText(item.guid),
+        description: extractText(item.description).replace(/<[^>]*>/g, '').substring(0, 200),
+        pubDate: extractText(item.pubDate),
+        source: source.name,
+        sourceId,
+      }));
+    }
+
+    // Atom
+    if (!items.length) {
+      const feed = result.feed;
+      if (feed) {
+        const raw = Array.isArray(feed.entry) ? feed.entry : (feed.entry ? [feed.entry] : []);
+        items = raw.slice(0, 15).map(item => ({
+          title: extractText(item.title),
+          link: extractAtomLink(item.link),
+          description: (extractText(item.summary) || extractText(item.content)).replace(/<[^>]*>/g, '').substring(0, 200),
+          pubDate: extractText(item.published) || extractText(item.updated),
+          source: source.name,
+          sourceId,
+        }));
+      }
+    }
+
+    sourceCache[sourceId] = { items, timestamp: now };
+    return items;
+  } catch (err) {
+    console.error(`Failed to fetch ${sourceId}:`, err.message);
+    return sourceCache[sourceId]?.items || [];
+  }
+}
 
 const SECRET_KEY = process.env.SECRET_KEY;
 
@@ -304,60 +391,84 @@ router.get('/updates', async (req, res) => {
   }
 });
 
-// Get news feed (public endpoint, cached)
-router.get('/news', async (req, res) => {
-  const now = Date.now();
+// GET /news/sources — list all available news sources
+router.get('/news/sources', (req, res) => {
+  res.json(Object.entries(SOURCES).map(([id, { name }]) => ({ id, name })));
+});
 
-  // Return cached data if still valid
-  if (newsCache.data && (now - newsCache.timestamp) < NEWS_CACHE_DURATION) {
-    return res.status(200).json(newsCache.data);
+// GET /news/preferences — return user's enabled source IDs
+router.get('/news/preferences', authenticateToken, async (req, res) => {
+  let client;
+  try {
+    client = await getClient();
+    const result = await client.query(
+      'SELECT enabled_sources FROM user_news_preferences WHERE user_id = $1',
+      [req.user.id]
+    );
+    const enabled = result.rowCount > 0 ? JSON.parse(result.rows[0].enabled_sources) : ['npr'];
+    res.json({ enabled });
+  } catch (err) {
+    console.error('Error fetching news preferences:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// PUT /news/preferences — save user's enabled source IDs
+router.put('/news/preferences', authenticateToken, async (req, res) => {
+  const { enabled } = req.body;
+  if (!Array.isArray(enabled)) return res.status(400).json({ message: 'Invalid payload' });
+
+  const valid = enabled.filter(id => SOURCES[id]);
+  let client;
+  try {
+    client = await getClient();
+    await client.query(
+      `INSERT INTO user_news_preferences (user_id, enabled_sources)
+       VALUES ($1, $2)
+       ON DUPLICATE KEY UPDATE enabled_sources = $2, updated_at = NOW()`,
+      [req.user.id, JSON.stringify(valid)]
+    );
+    res.json({ enabled: valid });
+  } catch (err) {
+    console.error('Error saving news preferences:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// GET /news — fetch aggregated news from user's enabled sources
+router.get('/news', authenticateToken, async (req, res) => {
+  let enabledSources = ['npr'];
+  let client;
+  try {
+    client = await getClient();
+    const result = await client.query(
+      'SELECT enabled_sources FROM user_news_preferences WHERE user_id = $1',
+      [req.user.id]
+    );
+    if (result.rowCount > 0) enabledSources = JSON.parse(result.rows[0].enabled_sources);
+  } catch { /* fall back to npr */ } finally {
+    if (client) client.release();
   }
 
   try {
-    const response = await fetch(NEWS_RSS_URL);
-    if (!response.ok) {
-      throw new Error('Failed to fetch news feed');
-    }
+    const results = await Promise.allSettled(enabledSources.map(fetchSourceItems));
+    const items = results
+      .filter(r => r.status === 'fulfilled')
+      .flatMap(r => r.value)
+      .sort((a, b) => {
+        const ta = a.pubDate ? new Date(a.pubDate).getTime() : 0;
+        const tb = b.pubDate ? new Date(b.pubDate).getTime() : 0;
+        return tb - ta;
+      })
+      .slice(0, 50);
 
-    const xmlText = await response.text();
-    const parser = new XMLParser({
-      ignoreAttributes: false,
-      attributeNamePrefix: '@_'
-    });
-    const result = parser.parse(xmlText);
-
-    // Extract items from RSS feed
-    const channel = result.rss?.channel;
-    if (!channel) {
-      throw new Error('Invalid RSS format');
-    }
-
-    const items = (channel.item || []).slice(0, 20).map(item => ({
-      title: item.title || '',
-      link: item.link || '',
-      description: item.description?.replace(/<[^>]*>/g, '').substring(0, 200) || '',
-      pubDate: item.pubDate || '',
-      source: 'NPR'
-    }));
-
-    const data = {
-      title: channel.title || 'News',
-      items,
-      lastUpdated: new Date().toISOString()
-    };
-
-    // Update cache
-    newsCache = { data, timestamp: now };
-
-    res.status(200).json(data);
+    res.json({ items, lastUpdated: new Date().toISOString() });
   } catch (err) {
     console.error('Error fetching news:', err);
-
-    // Return stale cache if available
-    if (newsCache.data) {
-      return res.status(200).json(newsCache.data);
-    }
-
     res.status(500).json({ message: 'Failed to fetch news' });
   }
 });
