@@ -2,7 +2,7 @@
   <main class="collections-page page-container">
 
     <div class="page-header">
-      <h1>Collections</h1>
+      <h1>Artist Showcase</h1>
       <button class="btn-primary" @click="openCreate">+ New Collection</button>
     </div>
 
