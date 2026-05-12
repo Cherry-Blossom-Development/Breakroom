@@ -3,8 +3,8 @@
 
     <div class="page-header">
       <div class="header-left">
-        <RouterLink :to="route.query.from === 'profile' ? '/profile/billing' : '/collections'" class="back-link">
-          {{ route.query.from === 'profile' ? '← Billing' : '← Collections' }}
+        <RouterLink :to="navFrom === 'profile' ? '/profile/billing' : '/collections'" class="back-link">
+          {{ navFrom === 'profile' ? '← Billing' : '← Collections' }}
         </RouterLink>
         <h1>Payment Setup</h1>
         <p class="page-desc">
@@ -190,6 +190,9 @@ const subscribing = ref(false)
 const portaling = ref(false)
 const subscribeSuccess = ref(false)
 
+// Preserve ?from=profile across the Stripe redirect round-trip via sessionStorage
+const navFrom = ref(route.query.from || sessionStorage.getItem('billing_nav_from') || '')
+
 async function fetchStatus() {
   try {
     const res = await authFetch('/api/billing/connect/status')
@@ -242,6 +245,7 @@ async function startSubscribe() {
       if (data.already_subscribed) {
         await fetchPlan()
       } else if (data.url) {
+        if (navFrom.value) sessionStorage.setItem('billing_nav_from', navFrom.value)
         window.location.href = data.url
         return
       }
@@ -279,6 +283,7 @@ onMounted(async () => {
   // Returning from Stripe subscription checkout
   if (route.query.stripe === 'subscribed') {
     subscribeSuccess.value = true
+    sessionStorage.removeItem('billing_nav_from')
     await fetchPlan()
   }
 })
