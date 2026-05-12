@@ -33,6 +33,7 @@ services:
       # backend URL accessible from frontend
       VITE_API_BASE_URL: ${VITE_API_BASE_URL}
       VITE_ALLOWED_HOST: ${VITE_ALLOWED_HOST}
+      VITE_STRIPE_PUBLISHABLE_KEY: ${VITE_STRIPE_PUBLISHABLE_KEY}
 
     # start command for non-prod environment
     command: sh -c "npm install && npm run dev"

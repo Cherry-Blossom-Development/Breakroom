@@ -272,6 +272,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/collections/orders',
+      name: 'collectionsOrders',
+      component: () => import('../views/CollectionsOrdersPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/g/:galleryUrl',
       name: 'publicGallery',
       component: () => import('../views/PublicGalleryPage.vue'),

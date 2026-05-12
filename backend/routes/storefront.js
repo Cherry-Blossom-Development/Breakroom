@@ -3,10 +3,31 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
+const { sendMail } = require('../utilities/aws-ses-email');
 
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
+
+let _stripe = null;
+function getStripe() {
+  if (!_stripe) {
+    if (!process.env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY is not set');
+    _stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+  }
+  return _stripe;
+}
+
+async function getSellerFeePercent(userId, client) {
+  const result = await client.query(
+    `SELECT status, expires_at FROM user_subscriptions WHERE user_id = $1`,
+    [userId]
+  );
+  if (result.rowCount === 0) return 5;
+  const sub = result.rows[0];
+  const active = sub.status === 'active' && (!sub.expires_at || new Date(sub.expires_at) > new Date());
+  return active ? 0 : 5;
+}
 
 const authenticate = async (req, res, next) => {
   try {
@@ -204,6 +225,195 @@ router.put('/', authenticate, async (req, res) => {
     res.json({ message: 'Saved' });
   } catch (err) {
     console.error('Failed to save storefront:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// ─── Checkout ────────────────────────────────────────────────────────────────
+
+// POST /api/storefront/public/:storeUrl/items/:itemId/checkout/intent  (no auth)
+router.post('/public/:storeUrl/items/:itemId/checkout/intent', async (req, res) => {
+  const { buyer_name, buyer_email, ship_to_name, ship_to_address1, ship_to_address2,
+          ship_to_city, ship_to_state, ship_to_zip, ship_to_country } = req.body;
+
+  if (!buyer_name || !buyer_email || !ship_to_name || !ship_to_address1 ||
+      !ship_to_city || !ship_to_state || !ship_to_zip) {
+    return res.status(400).json({ message: 'All required fields must be filled in.' });
+  }
+
+  const country = ship_to_country || 'US';
+  let client;
+  try {
+    client = await getClient();
+
+    // Resolve store → seller
+    const storeResult = await client.query(
+      'SELECT user_id FROM user_storefront WHERE store_url = $1',
+      [req.params.storeUrl]
+    );
+    if (storeResult.rowCount === 0) return res.status(404).json({ message: 'Store not found' });
+    const sellerUserId = storeResult.rows[0].user_id;
+
+    // Fetch item — must be available and belong to this store
+    const itemResult = await client.query(
+      `SELECT ci.id, ci.name, ci.price_cents, ci.shipping_cost_cents
+       FROM collection_items ci
+       JOIN user_collections uc ON ci.collection_id = uc.id
+       WHERE ci.id = $1 AND uc.user_id = $2 AND ci.is_available = 1`,
+      [req.params.itemId, sellerUserId]
+    );
+    if (itemResult.rowCount === 0) return res.status(404).json({ message: 'Item not available' });
+    const item = itemResult.rows[0];
+
+    if (!item.price_cents) return res.status(400).json({ message: 'Item has no price set' });
+
+    // Prevent duplicate checkouts (30-min lock)
+    const lockCheck = await client.query(
+      `SELECT id FROM orders
+       WHERE collection_item_id = $1 AND status = 'pending_payment'
+       AND created_at > DATE_SUB(NOW(), INTERVAL 30 MINUTE)`,
+      [item.id]
+    );
+    if (lockCheck.rowCount > 0) {
+      return res.status(409).json({ message: 'This item is currently being purchased. Please try again in a few minutes.' });
+    }
+
+    // Seller must have Stripe Connect
+    const connectResult = await client.query(
+      'SELECT stripe_account_id FROM user_stripe_connect WHERE user_id = $1 AND onboarding_complete = 1',
+      [sellerUserId]
+    );
+    if (connectResult.rowCount === 0) {
+      return res.status(400).json({ message: 'Seller has not completed payment setup' });
+    }
+    const stripeAccountId = connectResult.rows[0].stripe_account_id;
+
+    const itemPriceCents = item.price_cents;
+    const shippingCostCents = item.shipping_cost_cents || 0;
+    const totalCents = itemPriceCents + shippingCostCents;
+
+    const feePercent = await getSellerFeePercent(sellerUserId, client);
+    const platformFeeCents = Math.round(totalCents * feePercent / 100);
+
+    const paymentIntent = await getStripe().paymentIntents.create({
+      amount: totalCents,
+      currency: 'usd',
+      application_fee_amount: platformFeeCents,
+      transfer_data: { destination: stripeAccountId },
+      metadata: { item_id: String(item.id), seller_user_id: String(sellerUserId), buyer_email, buyer_name }
+    });
+
+    const orderResult = await client.query(
+      `INSERT INTO orders
+         (collection_item_id, seller_user_id, buyer_name, buyer_email,
+          ship_to_name, ship_to_address1, ship_to_address2, ship_to_city,
+          ship_to_state, ship_to_zip, ship_to_country,
+          item_price_cents, shipping_cost_cents, platform_fee_cents, total_cents,
+          stripe_payment_intent_id, stripe_connected_account_id, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'pending_payment')`,
+      [item.id, sellerUserId, buyer_name, buyer_email,
+       ship_to_name, ship_to_address1, ship_to_address2 || null, ship_to_city,
+       ship_to_state, ship_to_zip, country,
+       itemPriceCents, shippingCostCents, platformFeeCents, totalCents,
+       paymentIntent.id, stripeAccountId]
+    );
+
+    // Store order_id back in PI metadata for webhook lookup
+    await getStripe().paymentIntents.update(paymentIntent.id, {
+      metadata: { ...paymentIntent.metadata, order_id: String(orderResult.insertId) }
+    });
+
+    res.json({
+      client_secret: paymentIntent.client_secret,
+      order_id: orderResult.insertId,
+      item_price_cents: itemPriceCents,
+      shipping_cost_cents: shippingCostCents,
+      total_cents: totalCents,
+    });
+  } catch (err) {
+    console.error('Failed to create checkout intent:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// ─── Seller order management ──────────────────────────────────────────────────
+
+// GET /api/storefront/orders  (authenticated)
+router.get('/orders', authenticate, async (req, res) => {
+  let client;
+  try {
+    client = await getClient();
+    const result = await client.query(
+      `SELECT o.id, o.status, o.buyer_name, o.buyer_email,
+              o.ship_to_name, o.ship_to_address1, o.ship_to_address2,
+              o.ship_to_city, o.ship_to_state, o.ship_to_zip, o.ship_to_country,
+              o.item_price_cents, o.shipping_cost_cents, o.platform_fee_cents, o.total_cents,
+              o.tracking_number, o.tracking_carrier, o.shipped_at,
+              o.created_at, o.updated_at,
+              ci.name AS item_name, ci.image_path AS item_image
+       FROM orders o
+       JOIN collection_items ci ON o.collection_item_id = ci.id
+       WHERE o.seller_user_id = $1
+       ORDER BY o.created_at DESC`,
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Failed to fetch orders:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// PUT /api/storefront/orders/:id/ship  (authenticated)
+router.put('/orders/:id/ship', authenticate, async (req, res) => {
+  const { tracking_number, tracking_carrier } = req.body;
+  let client;
+  try {
+    client = await getClient();
+    const result = await client.query(
+      `UPDATE orders
+       SET status = 'shipped', tracking_number = $1, tracking_carrier = $2,
+           shipped_at = NOW(), updated_at = NOW()
+       WHERE id = $3 AND seller_user_id = $4 AND status IN ('paid','processing')`,
+      [tracking_number || null, tracking_carrier || null, req.params.id, req.user.id]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Order not found or not ready to ship' });
+    }
+
+    // Send tracking email to buyer
+    const orderResult = await client.query(
+      `SELECT o.buyer_name, o.buyer_email, ci.name AS item_name
+       FROM orders o JOIN collection_items ci ON o.collection_item_id = ci.id
+       WHERE o.id = $1`,
+      [req.params.id]
+    );
+    if (orderResult.rowCount > 0) {
+      const o = orderResult.rows[0];
+      const trackingLine = tracking_number
+        ? `<p>Tracking: <strong>${tracking_carrier || ''} ${tracking_number}</strong></p>`
+        : '';
+      await sendMail(
+        o.buyer_email,
+        'noreply@prosaurus.com',
+        `Your order has shipped: ${o.item_name}`,
+        `<p>Hi ${o.buyer_name},</p>
+         <p>Great news — your order of <strong>${o.item_name}</strong> has shipped!</p>
+         ${trackingLine}
+         <p>Thank you for your purchase.</p>
+         <p>— Prosaurus</p>`
+      );
+    }
+
+    res.json({ message: 'Marked as shipped' });
+  } catch (err) {
+    console.error('Failed to mark as shipped:', err);
     res.status(500).json({ message: 'Server error' });
   } finally {
     if (client) client.release();

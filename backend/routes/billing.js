@@ -3,6 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
+const { sendMail } = require('../utilities/aws-ses-email');
 
 require('dotenv').config();
 
@@ -361,6 +362,75 @@ async function handleStripeWebhook(req, res) {
          SET status = 'expired', expires_at = $1, updated_at = NOW()
          WHERE platform_subscription_id = $2 AND platform = 'stripe'`,
         [expiresAt, data.id]
+      );
+    }
+
+    else if (event.type === 'payment_intent.succeeded') {
+      client = await getClient();
+      const orderResult = await client.query(
+        `SELECT o.*, ci.name AS item_name,
+                u.email AS seller_email, u.first_name AS seller_first
+         FROM orders o
+         JOIN collection_items ci ON o.collection_item_id = ci.id
+         JOIN users u ON o.seller_user_id = u.id
+         WHERE o.stripe_payment_intent_id = $1`,
+        [data.id]
+      );
+      if (orderResult.rowCount === 0) return;
+      const order = orderResult.rows[0];
+
+      await client.query(
+        `UPDATE orders SET status = 'paid', updated_at = NOW() WHERE id = $1`,
+        [order.id]
+      );
+      await client.query(
+        `UPDATE collection_items SET is_available = 0 WHERE id = $1`,
+        [order.collection_item_id]
+      );
+
+      const fmt = cents => `$${(cents / 100).toFixed(2)}`;
+      const addr = `${order.ship_to_address1}${order.ship_to_address2 ? ', ' + order.ship_to_address2 : ''}, ${order.ship_to_city}, ${order.ship_to_state} ${order.ship_to_zip}, ${order.ship_to_country}`;
+
+      await sendMail(
+        order.seller_email,
+        'noreply@prosaurus.com',
+        `New order: ${order.item_name}`,
+        `<p>Hi ${order.seller_first || 'there'},</p>
+         <p>You have a new order on Prosaurus!</p>
+         <table style="border-collapse:collapse;width:100%;max-width:480px">
+           <tr><td style="padding:6px 0;color:#666">Item</td><td><strong>${order.item_name}</strong></td></tr>
+           <tr><td style="padding:6px 0;color:#666">Amount</td><td>${fmt(order.item_price_cents)} + ${fmt(order.shipping_cost_cents)} shipping</td></tr>
+           <tr><td style="padding:6px 0;color:#666">Buyer</td><td>${order.buyer_name} &lt;${order.buyer_email}&gt;</td></tr>
+           <tr><td style="padding:6px 0;color:#666">Ship to</td><td>${order.ship_to_name}<br>${addr}</td></tr>
+         </table>
+         <p>Log in to <a href="https://www.prosaurus.com/collections/orders">Prosaurus</a> to manage this order.</p>
+         <p>— Prosaurus</p>`
+      );
+
+      await sendMail(
+        order.buyer_email,
+        'noreply@prosaurus.com',
+        `Order confirmed: ${order.item_name}`,
+        `<p>Hi ${order.buyer_name},</p>
+         <p>Your order has been confirmed. Here's a summary:</p>
+         <table style="border-collapse:collapse;width:100%;max-width:480px">
+           <tr><td style="padding:6px 0;color:#666">Item</td><td><strong>${order.item_name}</strong></td></tr>
+           <tr><td style="padding:6px 0;color:#666">Item price</td><td>${fmt(order.item_price_cents)}</td></tr>
+           <tr><td style="padding:6px 0;color:#666">Shipping</td><td>${fmt(order.shipping_cost_cents)}</td></tr>
+           <tr><td style="padding:6px 0;color:#666;font-weight:bold">Total</td><td><strong>${fmt(order.total_cents)}</strong></td></tr>
+           <tr><td style="padding:6px 0;color:#666">Ship to</td><td>${order.ship_to_name}<br>${addr}</td></tr>
+         </table>
+         <p>The seller will ship your item and you'll receive a tracking number by email.</p>
+         <p>— Prosaurus</p>`
+      );
+    }
+
+    else if (event.type === 'payment_intent.payment_failed') {
+      client = await getClient();
+      await client.query(
+        `UPDATE orders SET status = 'cancelled', updated_at = NOW()
+         WHERE stripe_payment_intent_id = $1 AND status = 'pending_payment'`,
+        [data.id]
       );
     }
   } catch (err) {
