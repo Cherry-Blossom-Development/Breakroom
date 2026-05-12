@@ -204,7 +204,7 @@ onUnmounted(() => {
             :to="shortcut.url"
             class="shortcut-link"
           >
-            {{ shortcut.name }}
+            {{ shortcut.url === '/collections' ? 'Artist Showcase' : shortcut.name }}
           </RouterLink>
         </div>
         <button class="add-block-btn" @click="showAddModal = true">
@@ -232,7 +232,7 @@ onUnmounted(() => {
             :to="shortcut.url"
             class="mobile-menu-item"
           >
-            {{ shortcut.name }}
+            {{ shortcut.url === '/collections' ? 'Artist Showcase' : shortcut.name }}
           </RouterLink>
         </div>
       </div>
