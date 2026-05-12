@@ -3,7 +3,9 @@
 
     <div class="page-header">
       <div class="header-left">
-        <RouterLink to="/collections" class="back-link">← Collections</RouterLink>
+        <RouterLink :to="route.query.from === 'profile' ? '/profile/billing' : '/collections'" class="back-link">
+          {{ route.query.from === 'profile' ? '← Billing' : '← Collections' }}
+        </RouterLink>
         <h1>Payment Setup</h1>
         <p class="page-desc">
           Connect a Stripe account to receive payments from your store sales.

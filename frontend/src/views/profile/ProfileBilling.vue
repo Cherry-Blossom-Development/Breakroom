@@ -6,11 +6,18 @@
       if you want to sell artwork without a platform fee, or need extra session storage.
     </p>
 
+    <div v-if="plan" class="current-plan-banner" :class="plan.subscribed ? 'banner--pro' : 'banner--free'">
+      <span class="current-plan-label">Your current plan</span>
+      <span class="current-plan-name">{{ plan.subscribed ? 'Pro' : 'Free' }}</span>
+      <span class="current-plan-detail">{{ plan.subscribed ? '0% platform fee on sales' : '5% platform fee on sales' }}</span>
+    </div>
+
     <div class="tiers">
       <!-- Free Tier -->
-      <div class="tier-card">
+      <div class="tier-card" :class="{ 'tier-card--current': plan && !plan.subscribed }">
         <div class="tier-header">
           <span class="tier-badge free">Free</span>
+          <span v-if="plan && !plan.subscribed" class="current-tag">Current</span>
           <div class="tier-price">$0 <span class="per">/&nbsp;month</span></div>
         </div>
         <ul class="feature-list">
@@ -33,10 +40,11 @@
       </div>
 
       <!-- Pro Tier -->
-      <div class="tier-card pro">
+      <div class="tier-card pro" :class="{ 'tier-card--current': plan && plan.subscribed }">
         <div class="tier-header">
           <span class="tier-badge pro">Pro</span>
-          <div class="tier-price">$3.99 <span class="per">/&nbsp;month</span></div>
+          <span v-if="plan && plan.subscribed" class="current-tag current-tag--pro">Current</span>
+          <div v-else class="tier-price">$3.99 <span class="per">/&nbsp;month</span></div>
         </div>
         <ul class="feature-list">
           <li><span class="check">✓</span> Everything in Free</li>
@@ -45,7 +53,9 @@
           <li><span class="check pro-check">✓</span> <strong>Extra storage</strong> on Sessions</li>
         </ul>
         <div class="pro-cta">
-          <router-link to="/collections/payment-setup" class="upgrade-btn">Manage subscription</router-link>
+          <router-link to="/collections/payment-setup?from=profile" class="upgrade-btn">
+            {{ plan && plan.subscribed ? 'Manage subscription' : 'Upgrade to Pro — $3.99/mo' }}
+          </router-link>
         </div>
       </div>
     </div>
@@ -101,6 +111,22 @@
   </section>
 </template>
 
+<script setup>
+import { ref, onMounted } from 'vue'
+import { authFetch } from '@/utilities/authFetch'
+
+const plan = ref(null)
+
+onMounted(async () => {
+  try {
+    const res = await authFetch('/api/billing/plan')
+    if (res.ok) plan.value = await res.json()
+  } catch {
+    // non-fatal — page still renders without the banner
+  }
+})
+</script>
+
 <style scoped>
 .billing-page {
   max-width: 760px;
@@ -110,6 +136,68 @@
   color: var(--color-text-secondary);
   line-height: 1.7;
   margin: 0 0 28px;
+}
+
+/* ── Current plan banner ── */
+.current-plan-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  border-radius: 10px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.current-plan-banner.banner--free {
+  background: var(--color-background-soft);
+  border: 1px solid var(--color-border);
+}
+
+.current-plan-banner.banner--pro {
+  background: rgba(107, 70, 193, 0.07);
+  border: 1px solid rgba(107, 70, 193, 0.3);
+}
+
+.current-plan-label {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.current-plan-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.banner--pro .current-plan-name { color: #6b46c1; }
+
+.current-plan-detail {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+.current-tag {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: rgba(0,0,0,0.07);
+  color: var(--color-text-secondary);
+}
+
+.current-tag--pro {
+  background: rgba(107, 70, 193, 0.12);
+  color: #6b46c1;
+}
+
+.tier-card--current {
+  box-shadow: 0 0 0 2px currentColor;
 }
 
 /* ── Tier cards ── */
