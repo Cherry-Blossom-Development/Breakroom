@@ -141,6 +141,7 @@ router.post('/subscribe', authenticate, async (req, res) => {
     const customerId = await getOrCreateStripeCustomer(req.user.id, req.user.handle, client);
     const baseUrl = process.env.CORS_ORIGIN;
 
+    const from = req.body?.from ? `&from=${encodeURIComponent(req.body.from)}` : '';
     const session = await getStripe().checkout.sessions.create({
       customer: customerId,
       mode: 'subscription',
@@ -156,8 +157,8 @@ router.post('/subscribe', authenticate, async (req, res) => {
         },
         quantity: 1
       }],
-      success_url: `${baseUrl}/collections/payment-setup?stripe=subscribed`,
-      cancel_url:  `${baseUrl}/collections/payment-setup`
+      success_url: `${baseUrl}/collections/payment-setup?stripe=subscribed${from}`,
+      cancel_url:  `${baseUrl}/collections/payment-setup${from ? '?' + from.slice(1) : ''}`
     });
 
     res.json({ url: session.url });

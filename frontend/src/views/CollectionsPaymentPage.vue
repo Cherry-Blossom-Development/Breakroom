@@ -176,7 +176,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { authFetch } from '@/utilities/authFetch'
 
@@ -190,8 +190,7 @@ const subscribing = ref(false)
 const portaling = ref(false)
 const subscribeSuccess = ref(false)
 
-// Preserve ?from=profile across the Stripe redirect round-trip via sessionStorage
-const navFrom = ref(route.query.from || sessionStorage.getItem('billing_nav_from') || '')
+const navFrom = computed(() => route.query.from || '')
 
 async function fetchStatus() {
   try {
@@ -239,13 +238,16 @@ async function startSubscribe() {
   if (subscribing.value) return
   subscribing.value = true
   try {
-    const res = await authFetch('/api/billing/subscribe', { method: 'POST' })
+    const res = await authFetch('/api/billing/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: navFrom.value || undefined }),
+    })
     if (res.ok) {
       const data = await res.json()
       if (data.already_subscribed) {
         await fetchPlan()
       } else if (data.url) {
-        if (navFrom.value) sessionStorage.setItem('billing_nav_from', navFrom.value)
         window.location.href = data.url
         return
       }
@@ -283,7 +285,6 @@ onMounted(async () => {
   // Returning from Stripe subscription checkout
   if (route.query.stripe === 'subscribed') {
     subscribeSuccess.value = true
-    sessionStorage.removeItem('billing_nav_from')
     await fetchPlan()
   }
 })
