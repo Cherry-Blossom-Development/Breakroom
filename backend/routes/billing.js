@@ -59,9 +59,22 @@ async function getOrCreateStripeCustomer(userId, handle, client) {
     'SELECT stripe_customer_id FROM user_stripe_customers WHERE user_id = $1',
     [userId]
   );
-  if (existing.rowCount > 0) return existing.rows[0].stripe_customer_id;
 
-  // Fetch email for the customer record
+  if (existing.rowCount > 0) {
+    const customerId = existing.rows[0].stripe_customer_id;
+    try {
+      await getStripe().customers.retrieve(customerId);
+      return customerId;
+    } catch (err) {
+      if (err.code === 'resource_missing') {
+        // Stale ID from a different Stripe environment (e.g. test→live switch) — discard it
+        await client.query('DELETE FROM user_stripe_customers WHERE user_id = $1', [userId]);
+      } else {
+        throw err;
+      }
+    }
+  }
+
   const userResult = await client.query(
     'SELECT email FROM users WHERE id = $1',
     [userId]
