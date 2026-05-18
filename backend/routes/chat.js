@@ -175,6 +175,36 @@ router.get('/rooms/unread-summary', authenticateToken, async (req, res) => {
   }
 });
 
+// Most recent message from each joined room (for Chat Summary "all done" state)
+router.get('/rooms/recent', authenticateToken, async (req, res) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      `SELECT cr.id AS room_id, cr.name AS room_name,
+              cm.id AS message_id, cm.message, cm.handle, cm.created_at
+       FROM chat_rooms cr
+       JOIN users_rooms ur ON cr.id = ur.room_id
+           AND ur.user_id = $1
+           AND ur.accepted = true
+       JOIN chat_messages cm ON cm.id = (
+           SELECT id FROM chat_messages
+           WHERE room_id = cr.id AND is_hidden = false
+           ORDER BY created_at DESC
+           LIMIT 1
+       )
+       WHERE cr.is_active = true
+       ORDER BY cm.created_at ASC`,
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching recent room messages:', err);
+    res.status(500).json({ message: 'Failed to fetch recent messages' });
+  } finally {
+    client.release();
+  }
+});
+
 // Self-join a discoverable room
 router.post('/rooms/:roomId/join', authenticateToken, async (req, res) => {
   const { roomId } = req.params;

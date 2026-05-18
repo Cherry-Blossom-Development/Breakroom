@@ -1,9 +1,12 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
 import { user } from '@/stores/user.js'
+import { chat } from '@/stores/chat.js'
 
-const emit = defineEmits(['new-message'])
+const emit = defineEmits(['new-message', 'all-done', 'resumed'])
+const router = useRouter()
 
 // ── State ────────────────────────────────────────────────────────────────────
 
@@ -17,6 +20,8 @@ const sending      = ref(false)
 const error        = ref(null)
 const messagesEl   = ref(null)
 const inputEl      = ref(null)
+const recentRooms  = ref([])   // [{ room_id, room_name, message, handle, created_at }]
+const loadingRecent = ref(false)
 let socket = null
 
 // ── Derived ──────────────────────────────────────────────────────────────────
@@ -39,19 +44,42 @@ const firstUnreadIdx = computed(() => {
 // ── Data loading ─────────────────────────────────────────────────────────────
 
 async function fetchQueue() {
+  emit('resumed')
   loading.value = true
   error.value = null
+  recentRooms.value = []
   try {
     const res = await fetch('/api/chat/rooms/unread-summary', { credentials: 'include' })
     if (!res.ok) throw new Error('Failed to load')
     const data = await res.json()
     queue.value = data
     queueIndex.value = 0
-    if (data.length > 0) await loadMessages(data[0])
+    if (data.length > 0) {
+      await loadMessages(data[0])
+    } else {
+      await fetchRecentRooms()
+      emit('all-done')
+    }
   } catch (e) {
     error.value = e.message
   } finally {
     loading.value = false
+  }
+}
+
+async function fetchRecentRooms() {
+  loadingRecent.value = true
+  try {
+    const res = await fetch('/api/chat/rooms/recent', { credentials: 'include' })
+    if (res.ok) {
+      recentRooms.value = await res.json()
+      await nextTick()
+      if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+    }
+  } catch (e) {
+    // silently fail — list just stays empty
+  } finally {
+    loadingRecent.value = false
   }
 }
 
@@ -90,9 +118,11 @@ async function goNext() {
     joinRoom(next.id)
     await loadMessages(next)
   } else {
-    // Exhausted the queue — show "no new messages"
+    // Exhausted the queue — show recent messages from all rooms
     queue.value = []
     messages.value = []
+    await fetchRecentRooms()
+    emit('all-done')
   }
 }
 
@@ -197,6 +227,13 @@ function cleanupSocket() {
   socket = null
 }
 
+// ── Navigation ───────────────────────────────────────────────────────────────
+
+async function openRoom(roomId) {
+  await chat.joinRoom(roomId)
+  router.push({ name: 'chat' })
+}
+
 // ── Formatting ───────────────────────────────────────────────────────────────
 
 function formatTime(iso) {
@@ -230,14 +267,31 @@ onUnmounted(() => {
       <button class="csw-refresh-btn" @click="fetchQueue">Retry</button>
     </div>
 
-    <!-- No new messages -->
-    <div v-else-if="allDone" class="csw-center csw-done">
-      <svg class="csw-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-        <polyline points="20 6 9 17 4 12"/>
-      </svg>
-      <span>No New Messages</span>
-      <button class="csw-refresh-btn" @click="fetchQueue">Refresh</button>
-    </div>
+    <!-- No new messages — show recent message from each room -->
+    <template v-else-if="allDone">
+      <div v-if="loadingRecent" class="csw-center">
+        <span class="csw-spinner"></span>
+      </div>
+      <div v-else ref="messagesEl" class="csw-messages">
+        <div v-if="recentRooms.length === 0" class="csw-no-msgs">No messages in any room yet.</div>
+        <div v-for="item in recentRooms" :key="item.room_id" class="csw-recent-item">
+          <div class="csw-recent-meta">
+            <span class="csw-room-name"># {{ item.room_name }}</span>
+            <span class="csw-msg-time">{{ formatTime(item.created_at) }}</span>
+          </div>
+          <div class="csw-recent-body">
+            <div class="csw-recent-text">
+              <span class="csw-msg-handle">{{ item.handle }}</span>
+              <p class="csw-msg-text">{{ item.message }}</p>
+            </div>
+            <button class="csw-open-btn" @click="openRoom(item.room_id)">Open →</button>
+          </div>
+        </div>
+      </div>
+      <div class="csw-footer csw-footer--done">
+        <button class="csw-refresh-btn csw-refresh-full" @click="fetchQueue">↺ Check for New Messages</button>
+      </div>
+    </template>
 
     <!-- Active chat view -->
     <template v-else-if="currentRoom">
@@ -496,4 +550,63 @@ onUnmounted(() => {
   border: 1px solid var(--color-border);
 }
 .csw-btn--next:hover { background: var(--color-background-hover); }
+
+/* ── Recent rooms list (all-done state) ── */
+.csw-recent-item {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--color-background-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.csw-recent-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.csw-recent-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.csw-recent-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.csw-recent-text .csw-msg-text {
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.csw-open-btn {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.6;
+}
+.csw-open-btn:hover { background: var(--color-accent-light); }
+
+.csw-footer--done {
+  justify-content: center;
+}
+
+.csw-refresh-full {
+  flex: 1;
+  text-align: center;
+  border-radius: 6px;
+}
 </style>
