@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
 import { user } from '@/stores/user.js'
@@ -78,10 +78,18 @@ async function fetchRecentRooms() {
     // silently fail — list just stays empty
   } finally {
     loadingRecent.value = false
+  }
+}
+
+// Scroll to bottom once the all-done view is fully rendered.
+// Can't scroll inline in fetchRecentRooms because allDone is still false
+// (loading is true) when fetchRecentRooms is called from fetchQueue.
+watch([allDone, loadingRecent], async ([done, isLoading]) => {
+  if (done && !isLoading) {
     await nextTick()
     if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
   }
-}
+})
 
 function totalUnreadCount() {
   return recentRooms.value.reduce((sum, r) => sum + (parseInt(r.unread_count) || 0), 0)
@@ -245,6 +253,10 @@ function formatTime(iso) {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+function formatRecentTime(iso) {
+  return new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
 // ── Lifecycle ────────────────────────────────────────────────────────────────
 
 onMounted(async () => {
@@ -290,7 +302,7 @@ onUnmounted(() => {
               <span class="csw-room-name"># {{ item.room_name }}</span>
               <span v-if="item.unread_count > 0" class="csw-unread-badge">{{ item.unread_count }} new</span>
             </div>
-            <span class="csw-msg-time">{{ formatTime(item.created_at) }}</span>
+            <span class="csw-msg-time">{{ formatRecentTime(item.created_at) }}</span>
           </div>
           <div class="csw-recent-body">
             <div class="csw-recent-text">
