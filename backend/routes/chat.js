@@ -146,6 +146,35 @@ router.get('/rooms/discoverable', authenticateToken, async (req, res) => {
   }
 });
 
+// Rooms with unread messages (for the Chat Summary widget)
+router.get('/rooms/unread-summary', authenticateToken, async (req, res) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      `SELECT cr.id, cr.name, ur.last_read_at,
+              COUNT(cm.id) AS unread_count,
+              MAX(cm.created_at) AS latest_unread_at
+       FROM chat_rooms cr
+       JOIN users_rooms ur ON cr.id = ur.room_id
+           AND ur.user_id = $1
+           AND ur.accepted = true
+       JOIN chat_messages cm ON cm.room_id = cr.id
+           AND cm.is_hidden = false
+           AND cm.created_at > COALESCE(ur.last_read_at, '1970-01-01 00:00:00')
+       WHERE cr.is_active = true
+       GROUP BY cr.id, cr.name, ur.last_read_at
+       ORDER BY MAX(cm.created_at) ASC`,
+      [req.user.id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching unread summary:', err);
+    res.status(500).json({ message: 'Failed to fetch unread summary' });
+  } finally {
+    client.release();
+  }
+});
+
 // Self-join a discoverable room
 router.post('/rooms/:roomId/join', authenticateToken, async (req, res) => {
   const { roomId } = req.params;

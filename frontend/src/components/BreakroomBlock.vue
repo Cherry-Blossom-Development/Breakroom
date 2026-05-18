@@ -6,6 +6,7 @@ import CalendarWidget from './CalendarWidget.vue'
 import WeatherWidget from './WeatherWidget.vue'
 import NewsWidget from './NewsWidget.vue'
 import BlogPostsWidget from './BlogPostsWidget.vue'
+import ChatSummaryWidget from './ChatSummaryWidget.vue'
 
 const props = defineProps({
   block: {
@@ -43,6 +44,7 @@ const blockTitle = computed(() => {
   }
   switch (props.block.block_type) {
     case 'chat': return 'Chat'
+    case 'chat_summary': return 'Chat Summary'
     case 'placeholder': return 'Empty'
     case 'updates': return 'Breakroom Updates'
     case 'calendar': return 'Calendar'
@@ -97,6 +99,9 @@ const blockTitle = computed(() => {
 
       <!-- Blog Posts block -->
       <BlogPostsWidget v-else-if="block.block_type === 'blog'" />
+
+      <!-- Chat Summary block -->
+      <ChatSummaryWidget v-else-if="block.block_type === 'chat_summary'" @new-message="onNewMessage" />
 
       <!-- Unknown block type -->
       <div v-else class="unknown-content">

@@ -40,7 +40,8 @@ const widgetTypes = [
   { value: 'calendar', label: 'Calendar/Time', desc: 'Date and time display', w: 1, h: 2 },
   { value: 'weather', label: 'Weather', desc: 'Current weather conditions', w: 1, h: 2 },
   { value: 'news', label: 'News', desc: 'NPR news headlines', w: 2, h: 2 },
-  { value: 'blog', label: 'Blog Posts', desc: 'Your recent blog posts', w: 3, h: 2 }
+  { value: 'blog', label: 'Blog Posts', desc: 'Your recent blog posts', w: 3, h: 2 },
+  { value: 'chat_summary', label: 'Chat Summary', desc: 'Browse and reply to unread messages across all chats', w: 2, h: 2 }
 ]
 
 // Default sizes for block types
