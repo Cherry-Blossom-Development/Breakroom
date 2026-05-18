@@ -58,7 +58,7 @@ async function fetchQueue() {
       await loadMessages(data[0])
     } else {
       await fetchRecentRooms()
-      emit('all-done')
+      emit('all-done', totalUnreadCount())
     }
   } catch (e) {
     error.value = e.message
@@ -81,6 +81,10 @@ async function fetchRecentRooms() {
   } finally {
     loadingRecent.value = false
   }
+}
+
+function totalUnreadCount() {
+  return recentRooms.value.reduce((sum, r) => sum + (parseInt(r.unread_count) || 0), 0)
 }
 
 async function loadMessages(room) {
@@ -119,10 +123,11 @@ async function goNext() {
     await loadMessages(next)
   } else {
     // Exhausted the queue — show recent messages from all rooms
+    loadingRecent.value = true  // prevent empty-list flash before fetch starts
     queue.value = []
     messages.value = []
     await fetchRecentRooms()
-    emit('all-done')
+    emit('all-done', totalUnreadCount())
   }
 }
 
@@ -274,9 +279,17 @@ onUnmounted(() => {
       </div>
       <div v-else ref="messagesEl" class="csw-messages">
         <div v-if="recentRooms.length === 0" class="csw-no-msgs">No messages in any room yet.</div>
-        <div v-for="item in recentRooms" :key="item.room_id" class="csw-recent-item">
+        <div
+          v-for="item in recentRooms"
+          :key="item.room_id"
+          class="csw-recent-item"
+          :class="{ 'csw-recent-item--unread': item.unread_count > 0 }"
+        >
           <div class="csw-recent-meta">
-            <span class="csw-room-name"># {{ item.room_name }}</span>
+            <div class="csw-recent-room-row">
+              <span class="csw-room-name"># {{ item.room_name }}</span>
+              <span v-if="item.unread_count > 0" class="csw-unread-badge">{{ item.unread_count }} new</span>
+            </div>
             <span class="csw-msg-time">{{ formatTime(item.created_at) }}</span>
           </div>
           <div class="csw-recent-body">
@@ -559,6 +572,30 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.csw-recent-item--unread {
+  background: var(--color-accent-light, rgba(66,153,225,0.08));
+  border-left: 3px solid var(--color-accent);
+  padding-left: 6px;
+}
+
+.csw-recent-room-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.csw-unread-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: var(--color-accent);
+  color: #fff;
+  border-radius: 10px;
+  padding: 1px 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .csw-recent-meta {

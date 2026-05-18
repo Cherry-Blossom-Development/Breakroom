@@ -108,7 +108,7 @@ const blockTitle = computed(() => {
       <ChatSummaryWidget
         v-else-if="block.block_type === 'chat_summary'"
         @new-message="onNewMessage"
-        @all-done="headerExtra = 'Nothing New'"
+        @all-done="(n) => headerExtra = n > 0 ? `${n} new message${n !== 1 ? 's' : ''}` : 'Nothing New'"
         @resumed="headerExtra = ''"
       />
 

@@ -175,13 +175,14 @@ router.get('/rooms/unread-summary', authenticateToken, async (req, res) => {
   }
 });
 
-// Most recent message from each joined room (for Chat Summary "all done" state)
+// Most recent message from each joined room, with unread count (for Chat Summary "all done" state)
 router.get('/rooms/recent', authenticateToken, async (req, res) => {
   const client = await getClient();
   try {
     const result = await client.query(
       `SELECT cr.id AS room_id, cr.name AS room_name,
-              cm.id AS message_id, cm.message, cm.handle, cm.created_at
+              cm.id AS message_id, cm.message, cm.handle, cm.created_at,
+              COUNT(unread.id) AS unread_count
        FROM chat_rooms cr
        JOIN users_rooms ur ON cr.id = ur.room_id
            AND ur.user_id = $1
@@ -192,7 +193,11 @@ router.get('/rooms/recent', authenticateToken, async (req, res) => {
            ORDER BY created_at DESC
            LIMIT 1
        )
+       LEFT JOIN chat_messages unread ON unread.room_id = cr.id
+           AND unread.is_hidden = false
+           AND unread.created_at > COALESCE(ur.last_read_at, '1970-01-01 00:00:00')
        WHERE cr.is_active = true
+       GROUP BY cr.id, cr.name, cm.id, cm.message, cm.handle, cm.created_at
        ORDER BY cm.created_at ASC`,
       [req.user.id]
     );
