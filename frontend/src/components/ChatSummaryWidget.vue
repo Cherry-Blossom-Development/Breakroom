@@ -73,13 +73,13 @@ async function fetchRecentRooms() {
     const res = await fetch('/api/chat/rooms/recent', { credentials: 'include' })
     if (res.ok) {
       recentRooms.value = await res.json()
-      await nextTick()
-      if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
     }
   } catch (e) {
     // silently fail — list just stays empty
   } finally {
     loadingRecent.value = false
+    await nextTick()
+    if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
   }
 }
 
