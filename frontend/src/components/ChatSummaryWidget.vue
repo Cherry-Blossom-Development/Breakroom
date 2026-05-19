@@ -45,6 +45,8 @@ const firstUnreadIdx = computed(() => {
 
 async function fetchQueue() {
   emit('resumed')
+  // Leave all rooms we joined for the all-done view before resetting state
+  recentRooms.value.forEach(r => leaveRoom(r.room_id))
   loading.value = true
   error.value = null
   recentRooms.value = []
@@ -81,13 +83,14 @@ async function fetchRecentRooms() {
   }
 }
 
-// Scroll to bottom once the all-done view is fully rendered.
-// Can't scroll inline in fetchRecentRooms because allDone is still false
+// Scroll to bottom and join all room sockets once the all-done view renders.
+// Can't do this inline in fetchRecentRooms because allDone is still false
 // (loading is true) when fetchRecentRooms is called from fetchQueue.
 watch([allDone, loadingRecent], async ([done, isLoading]) => {
   if (done && !isLoading) {
     await nextTick()
     if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+    joinAllRecentRooms()
   }
 })
 
@@ -202,19 +205,50 @@ function leaveRoom(roomId) {
   if (roomId && socket?.connected) socket.emit('leave_room', roomId)
 }
 
+function joinAllRecentRooms() {
+  if (!socket?.connected) return
+  recentRooms.value.forEach(r => socket.emit('join_room', r.room_id))
+}
+
 function setupSocket() {
   const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
   socket = io(baseUrl, { withCredentials: true, autoConnect: true })
 
   socket.on('connect', () => {
-    if (currentRoom.value) socket.emit('join_room', currentRoom.value.id)
+    if (currentRoom.value) {
+      socket.emit('join_room', currentRoom.value.id)
+    } else if (allDone.value) {
+      joinAllRecentRooms()
+    }
   })
 
   socket.on('new_message', async (data) => {
+    // All-done view: update the matching room in the recent list
+    if (allDone.value) {
+      const roomIdx = recentRooms.value.findIndex(r => r.room_id === data.roomId)
+      if (roomIdx !== -1) {
+        const updated = {
+          ...recentRooms.value[roomIdx],
+          message: data.message.message,
+          handle: data.message.handle,
+          created_at: data.message.created_at,
+          unread_count: (parseInt(recentRooms.value[roomIdx].unread_count) || 0) + 1
+        }
+        recentRooms.value.splice(roomIdx, 1)
+        recentRooms.value.push(updated)
+      }
+      if (data.message.handle !== user.username) {
+        emit('new-message', { roomId: data.roomId })
+      }
+      emit('all-done', totalUnreadCount())
+      await nextTick()
+      if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+      return
+    }
+
     if (!currentRoom.value || data.roomId !== currentRoom.value.id) return
     if (messages.value.some(m => m.id === data.message.id)) return
     messages.value.push(data.message)
-    // If the message is from someone else, notify parent to flash header
     if (data.message.handle !== user.username) {
       emit('new-message', { roomId: data.roomId })
     }
@@ -236,6 +270,7 @@ function setupSocket() {
 
 function cleanupSocket() {
   leaveRoom(currentRoom.value?.id)
+  recentRooms.value.forEach(r => leaveRoom(r.room_id))
   socket?.disconnect()
   socket = null
 }
