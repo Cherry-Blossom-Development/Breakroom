@@ -1,66 +1,88 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { io } from 'socket.io-client'
+import LoadingSpinner from './LoadingSpinner.vue'
+import FlagDialog from './FlagDialog.vue'
 import { user } from '@/stores/user.js'
+import { moderationStore } from '@/stores/moderation.js'
 import { chat } from '@/stores/chat.js'
 
-const emit = defineEmits(['new-message', 'all-done', 'resumed'])
-const router = useRouter()
+const emit = defineEmits(['new-message'])
 
 // ── State ────────────────────────────────────────────────────────────────────
 
-const queue        = ref([])   // [{ id, name, last_read_at, unread_count }]
-const queueIndex   = ref(0)
-const messages     = ref([])
-const newMessage   = ref('')
-const loading      = ref(true)
-const loadingMsgs  = ref(false)
-const sending      = ref(false)
-const error        = ref(null)
-const messagesEl   = ref(null)
-const inputEl      = ref(null)
-const recentRooms  = ref([])   // [{ room_id, room_name, message, handle, created_at }]
-const loadingRecent = ref(false)
+// rooms sorted oldest-last-message → newest-last-message (left = old, right = new)
+const rooms          = ref([])
+const currentRoomId  = ref(null)
+const messages       = ref([])
+const newMessage     = ref('')
+const typingUsers    = ref([])
+const loading        = ref(true)
+const loadingMsgs    = ref(false)
+const error          = ref(null)
+const messagesEl     = ref(null)
+const imageInput     = ref(null)
+const videoInput     = ref(null)
+const attachBtnRef   = ref(null)
+const messageInputEl = ref(null)
+const uploadingImage = ref(false)
+const uploadingVideo = ref(false)
+const showAttachMenu = ref(false)
+const attachMenuStyle = ref({})
+const hasOlderMessages = ref(false)
+const isLoadingOlderMessages = ref(false)
+const oldestMessageDate = ref(null)
+const isPrepending   = ref(false)
+const isMuted        = ref(false)
+const flashingMessageIds = ref(new Set())
+const rightGlowing   = ref(false)
+
+const flaggingMessageId  = ref(null)
+const editingMessageId   = ref(null)
+const editText           = ref('')
+const deletingMessageId  = ref(null)
+const openMenuId         = ref(null)
+
+// @mention state
+const mentionQuery   = ref('')
+const mentionResults = ref([])
+const mentionActive  = ref(false)
+const mentionIndex   = ref(0)
+let mentionDebounce = null
+
 let socket = null
+let typingTimeout = null
+let glowTimer = null
+let muteTimeout = null
 
 // ── Derived ──────────────────────────────────────────────────────────────────
 
-const currentRoom = computed(() => queue.value[queueIndex.value] ?? null)
-const allDone     = computed(() => !loading.value && queue.value.length === 0)
-const posLabel    = computed(() =>
-  queue.value.length > 0 ? `${queueIndex.value + 1} of ${queue.value.length}` : ''
+const currentRoom = computed(() =>
+  rooms.value.find(r => r.room_id === currentRoomId.value) ?? null
 )
-
-// Index of the first message that arrived after last_read_at (where the divider goes)
-const firstUnreadIdx = computed(() => {
-  const room = currentRoom.value
-  if (!room) return -1
-  if (!room.last_read_at) return 0
-  const cutoff = new Date(room.last_read_at)
-  return messages.value.findIndex(m => new Date(m.created_at) > cutoff)
-})
+const currentIdx = computed(() =>
+  rooms.value.findIndex(r => r.room_id === currentRoomId.value)
+)
+const canLeft  = computed(() => currentIdx.value > 0)
+const canRight = computed(() => currentIdx.value < rooms.value.length - 1)
+const posLabel = computed(() =>
+  rooms.value.length > 0 ? `${currentIdx.value + 1} / ${rooms.value.length}` : ''
+)
 
 // ── Data loading ─────────────────────────────────────────────────────────────
 
-async function fetchQueue() {
-  emit('resumed')
-  // Leave all rooms we joined for the all-done view before resetting state
-  recentRooms.value.forEach(r => leaveRoom(r.room_id))
+async function fetchRooms() {
   loading.value = true
   error.value = null
-  recentRooms.value = []
   try {
-    const res = await fetch('/api/chat/rooms/unread-summary', { credentials: 'include' })
-    if (!res.ok) throw new Error('Failed to load')
-    const data = await res.json()
-    queue.value = data
-    queueIndex.value = 0
+    const res = await fetch('/api/chat/rooms/recent', { credentials: 'include' })
+    if (!res.ok) throw new Error('Failed to load rooms')
+    const data = await res.json()  // ASC by last-message time — left=oldest, right=newest
+    rooms.value = data
     if (data.length > 0) {
-      await loadMessages(data[0])
-    } else {
-      await fetchRecentRooms()
-      emit('all-done', totalUnreadCount())
+      // Default to the most-recently-active room (rightmost)
+      currentRoomId.value = data[data.length - 1].room_id
+      await loadMessages(currentRoomId.value)
     }
   } catch (e) {
     error.value = e.message
@@ -69,628 +91,866 @@ async function fetchQueue() {
   }
 }
 
-async function fetchRecentRooms() {
-  loadingRecent.value = true
-  try {
-    const res = await fetch('/api/chat/rooms/recent', { credentials: 'include' })
-    if (res.ok) {
-      recentRooms.value = await res.json()
-    }
-  } catch (e) {
-    // silently fail — list just stays empty
-  } finally {
-    loadingRecent.value = false
-  }
-}
-
-// Scroll to bottom and join all room sockets once the all-done view renders.
-// Can't do this inline in fetchRecentRooms because allDone is still false
-// (loading is true) when fetchRecentRooms is called from fetchQueue.
-watch([allDone, loadingRecent], async ([done, isLoading]) => {
-  if (done && !isLoading) {
-    await nextTick()
-    if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
-    joinAllRecentRooms()
-  }
-})
-
-function totalUnreadCount() {
-  return recentRooms.value.reduce((sum, r) => sum + (parseInt(r.unread_count) || 0), 0)
-}
-
-async function loadMessages(room) {
+async function loadMessages(roomId) {
   loadingMsgs.value = true
   messages.value = []
+  typingUsers.value = []
+  hasOlderMessages.value = false
+  isLoadingOlderMessages.value = false
+  oldestMessageDate.value = null
   try {
-    const res = await fetch(`/api/chat/rooms/${room.id}/messages?limit=20`, { credentials: 'include' })
-    if (res.ok) {
-      const data = await res.json()
-      messages.value = data.messages ?? []
-      await nextTick()
-      scrollToUnread()
-    }
+    const res = await fetch(`/api/chat/rooms/${roomId}/messages?limit=50`, { credentials: 'include' })
+    if (!res.ok) throw new Error('Failed to load messages')
+    const data = await res.json()
+    messages.value = data.messages ?? []
+    hasOlderMessages.value = data.hasMore ?? false
+    oldestMessageDate.value = messages.value.length > 0 ? messages.value[0].created_at : null
+    scrollToBottom()
+  } catch (e) {
+    error.value = e.message
   } finally {
     loadingMsgs.value = false
   }
 }
 
-// ── Actions ──────────────────────────────────────────────────────────────────
-
-async function markRead() {
-  if (!currentRoom.value) return
-  await fetch(`/api/chat/rooms/${currentRoom.value.id}/mark-read`, {
-    method: 'POST', credentials: 'include'
-  }).catch(() => {})
-}
-
-async function goNext() {
-  await markRead()
-  leaveRoom(currentRoom.value?.id)
-
-  if (queueIndex.value < queue.value.length - 1) {
-    queueIndex.value++
-    const next = queue.value[queueIndex.value]
-    joinRoom(next.id)
-    await loadMessages(next)
-  } else {
-    // Exhausted the queue — show recent messages from all rooms
-    loadingRecent.value = true  // prevent empty-list flash before fetch starts
-    queue.value = []
-    messages.value = []
-    await fetchRecentRooms()
-    emit('all-done', totalUnreadCount())
+async function fetchOlderMessages() {
+  if (isLoadingOlderMessages.value || !hasOlderMessages.value || !oldestMessageDate.value) return
+  const roomId = currentRoomId.value
+  isLoadingOlderMessages.value = true
+  try {
+    const res = await fetch(
+      `/api/chat/rooms/${roomId}/messages?limit=50&before=${encodeURIComponent(oldestMessageDate.value)}`,
+      { credentials: 'include' }
+    )
+    if (!res.ok) throw new Error('Failed to load older messages')
+    const data = await res.json()
+    hasOlderMessages.value = data.hasMore ?? false
+    if (data.messages?.length > 0) {
+      oldestMessageDate.value = data.messages[0].created_at
+      messages.value = [...data.messages, ...messages.value]
+    }
+  } finally {
+    isLoadingOlderMessages.value = false
   }
 }
 
-async function sendMessage() {
-  const text = newMessage.value.trim()
-  if (!text || !currentRoom.value || sending.value) return
-  sending.value = true
-  newMessage.value = ''
+async function fetchMuteState(roomId) {
   try {
-    const res = await fetch(`/api/chat/rooms/${currentRoom.value.id}/messages`, {
-      method: 'POST',
+    const res = await fetch(`/api/chat/rooms/${roomId}/mute`, { credentials: 'include' })
+    if (res.ok) isMuted.value = (await res.json()).muted
+  } catch {}
+}
+
+// ── Carousel navigation ───────────────────────────────────────────────────────
+
+async function goLeft() {
+  if (!canLeft.value) return
+  const room = rooms.value[currentIdx.value - 1]
+  currentRoomId.value = room.room_id
+  await loadMessages(room.room_id)
+  await fetchMuteState(room.room_id)
+}
+
+async function goRight() {
+  if (!canRight.value) return
+  const room = rooms.value[currentIdx.value + 1]
+  currentRoomId.value = room.room_id
+  await loadMessages(room.room_id)
+  await fetchMuteState(room.room_id)
+}
+
+// ── Actions ───────────────────────────────────────────────────────────────────
+
+const isOwnMessage = (handle) => handle === user.username
+
+const startEdit = (msg) => {
+  editingMessageId.value = msg.id
+  editText.value = msg.message
+  deletingMessageId.value = null
+}
+const cancelEdit = () => { editingMessageId.value = null; editText.value = '' }
+
+async function saveEdit(messageId) {
+  const text = editText.value.trim()
+  if (!text) return
+  try {
+    const res = await fetch(`/api/chat/rooms/${currentRoomId.value}/messages/${messageId}`, {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: JSON.stringify({ message: text })
     })
-    if (res.ok) {
-      const data = await res.json()
-      messages.value.push(data.message)
-      await markRead()
-      await nextTick()
-      scrollToBottom()
-    } else {
-      newMessage.value = text   // restore on failure
-    }
-  } catch {
-    newMessage.value = text
-  } finally {
-    sending.value = false
-    inputEl.value?.focus()
-  }
+    if (!res.ok) throw new Error('Failed to edit message')
+    cancelEdit()
+  } catch (err) { error.value = err.message }
 }
 
-function handleKeydown(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault()
-    sendMessage()
-  }
+async function confirmDelete(messageId) {
+  deletingMessageId.value = null
+  try {
+    const res = await fetch(`/api/chat/rooms/${currentRoomId.value}/messages/${messageId}`, {
+      method: 'DELETE', credentials: 'include'
+    })
+    if (!res.ok) throw new Error('Failed to delete message')
+  } catch (err) { error.value = err.message }
 }
 
-// ── Scroll helpers ───────────────────────────────────────────────────────────
-
-function scrollToUnread() {
-  if (!messagesEl.value) return
-  const divider = messagesEl.value.querySelector('.unread-divider')
-  if (divider) {
-    divider.scrollIntoView({ block: 'nearest' })
-    messagesEl.value.scrollTop = Math.max(0, messagesEl.value.scrollTop - 12)
+async function blockUser(msg) {
+  if (!msg.user_id) return
+  if (moderationStore.isBlocked(msg.user_id)) {
+    const res = await fetch(`/api/moderation/block/${msg.user_id}`, { method: 'DELETE', credentials: 'include' })
+    if (res.ok) moderationStore.removeBlock(msg.user_id)
   } else {
-    scrollToBottom()
+    const res = await fetch(`/api/moderation/block/${msg.user_id}`, { method: 'POST', credentials: 'include' })
+    if (res.ok) moderationStore.addBlock(msg.user_id)
   }
 }
 
-function scrollToBottom() {
-  if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+async function toggleMute() {
+  const newMuted = !isMuted.value
+  try {
+    const res = await fetch(`/api/chat/rooms/${currentRoomId.value}/mute`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ muted: newMuted })
+    })
+    if (res.ok) isMuted.value = newMuted
+  } catch {}
 }
 
-// ── Socket ───────────────────────────────────────────────────────────────────
-
-function joinRoom(roomId) {
-  if (socket?.connected) socket.emit('join_room', roomId)
+async function sendMessage() {
+  if (mentionActive.value) return
+  const text = newMessage.value.trim()
+  if (!text || !currentRoomId.value) return
+  newMessage.value = ''
+  if (socket?.connected) {
+    socket.emit('typing_stop', currentRoomId.value)
+    socket.emit('send_message', { roomId: currentRoomId.value, message: text })
+  } else {
+    try {
+      const res = await fetch(`/api/chat/rooms/${currentRoomId.value}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ message: text })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (!messages.value.some(m => m.id === data.message.id)) {
+          messages.value.push(data.message)
+          scrollToBottom()
+        }
+      }
+    } catch {}
+  }
 }
 
-function leaveRoom(roomId) {
-  if (roomId && socket?.connected) socket.emit('leave_room', roomId)
+const toggleMsgMenu = (id) => { openMenuId.value = openMenuId.value === id ? null : id }
+const closeMsgMenu  = (e) => { if (!e.target.closest('.msg-menu-wrapper')) openMenuId.value = null }
+
+// ── Attachments ───────────────────────────────────────────────────────────────
+
+const toggleAttachMenu = () => {
+  if (!showAttachMenu.value && attachBtnRef.value) {
+    const rect = attachBtnRef.value.getBoundingClientRect()
+    attachMenuStyle.value = {
+      position: 'fixed',
+      bottom: `${window.innerHeight - rect.top + 4}px`,
+      left: `${rect.left}px`,
+      zIndex: '9999'
+    }
+  }
+  showAttachMenu.value = !showAttachMenu.value
 }
 
-function joinAllRecentRooms() {
-  if (!socket?.connected) return
-  recentRooms.value.forEach(r => socket.emit('join_room', r.room_id))
+async function onImageSelected(event) {
+  const file = event.target.files[0]
+  if (!file) return
+  uploadingImage.value = true
+  const formData = new FormData()
+  formData.append('image', file)
+  try {
+    const res = await fetch(`/api/chat/rooms/${currentRoomId.value}/image`, {
+      method: 'POST', credentials: 'include', body: formData
+    })
+    if (res.ok && (!socket?.connected)) {
+      const data = await res.json()
+      if (!messages.value.some(m => m.id === data.message.id)) {
+        messages.value.push(data.message)
+        scrollToBottom()
+      }
+    }
+  } finally { uploadingImage.value = false; event.target.value = '' }
 }
+
+async function onVideoSelected(event) {
+  const file = event.target.files[0]
+  if (!file) return
+  uploadingVideo.value = true
+  const formData = new FormData()
+  formData.append('video', file)
+  try {
+    const res = await fetch(`/api/chat/rooms/${currentRoomId.value}/video`, {
+      method: 'POST', credentials: 'include', body: formData
+    })
+    if (res.ok && (!socket?.connected)) {
+      const data = await res.json()
+      if (!messages.value.some(m => m.id === data.message.id)) {
+        messages.value.push(data.message)
+        scrollToBottom()
+      }
+    }
+  } finally { uploadingVideo.value = false; event.target.value = '' }
+}
+
+// ── @mention ──────────────────────────────────────────────────────────────────
+
+const closeMention = () => {
+  mentionActive.value = false; mentionResults.value = []; mentionQuery.value = ''; mentionIndex.value = 0
+}
+const selectMention = (u) => {
+  if (!u) return
+  const atPos = newMessage.value.lastIndexOf('@')
+  newMessage.value = newMessage.value.substring(0, atPos) + '@' + u.handle + ' '
+  closeMention()
+  nextTick(() => messageInputEl.value?.focus())
+}
+const handleMentionKeydown = (e) => {
+  if (!mentionActive.value) return
+  if (e.key === 'ArrowDown') { e.preventDefault(); mentionIndex.value = (mentionIndex.value + 1) % mentionResults.value.length }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); mentionIndex.value = (mentionIndex.value - 1 + mentionResults.value.length) % mentionResults.value.length }
+  else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); selectMention(mentionResults.value[mentionIndex.value]) }
+  else if (e.key === 'Escape') closeMention()
+}
+const onInput = () => {
+  if (socket?.connected) {
+    socket.emit('typing_start', currentRoomId.value)
+    if (typingTimeout) clearTimeout(typingTimeout)
+    typingTimeout = setTimeout(() => socket?.connected && socket.emit('typing_stop', currentRoomId.value), 2000)
+  }
+  const val = newMessage.value
+  const atPos = val.lastIndexOf('@')
+  if (atPos !== -1) {
+    const after = val.substring(atPos + 1)
+    if (/^\w{0,30}$/.test(after)) {
+      mentionQuery.value = after; mentionIndex.value = 0
+      clearTimeout(mentionDebounce)
+      mentionDebounce = setTimeout(async () => {
+        mentionResults.value = await chat.searchMentions(after)
+        mentionActive.value = mentionResults.value.length > 0
+      }, after.length === 0 ? 0 : 150)
+      return
+    }
+  }
+  closeMention()
+}
+
+// ── Scroll ────────────────────────────────────────────────────────────────────
+
+const scrollToBottom = () => {
+  nextTick(() => setTimeout(() => {
+    if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+  }, 50))
+}
+
+const handleScroll = async () => {
+  if (!messagesEl.value || !hasOlderMessages.value || isLoadingOlderMessages.value) return
+  if (messagesEl.value.scrollTop > 100) return
+  const prevScrollHeight = messagesEl.value.scrollHeight
+  isPrepending.value = true
+  await fetchOlderMessages()
+  await nextTick()
+  messagesEl.value.scrollTop = messagesEl.value.scrollHeight - prevScrollHeight
+  isPrepending.value = false
+}
+
+// ── Glow ──────────────────────────────────────────────────────────────────────
+
+function triggerRightGlow() {
+  if (glowTimer) clearTimeout(glowTimer)
+  rightGlowing.value = true
+  glowTimer = setTimeout(() => { rightGlowing.value = false; glowTimer = null }, 2000)
+}
+
+// ── Socket ────────────────────────────────────────────────────────────────────
 
 function setupSocket() {
   const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
   socket = io(baseUrl, { withCredentials: true, autoConnect: true })
 
   socket.on('connect', () => {
-    if (currentRoom.value) {
-      socket.emit('join_room', currentRoom.value.id)
-    } else if (allDone.value) {
-      joinAllRecentRooms()
-    }
+    rooms.value.forEach(r => socket.emit('join_room', r.room_id))
   })
 
-  socket.on('new_message', async (data) => {
-    // All-done view: update the matching room in the recent list
-    if (allDone.value) {
-      const roomIdx = recentRooms.value.findIndex(r => r.room_id === data.roomId)
-      if (roomIdx !== -1) {
-        const updated = {
-          ...recentRooms.value[roomIdx],
-          message: data.message.message,
-          handle: data.message.handle,
-          created_at: data.message.created_at,
-          unread_count: (parseInt(recentRooms.value[roomIdx].unread_count) || 0) + 1
-        }
-        recentRooms.value.splice(roomIdx, 1)
-        recentRooms.value.push(updated)
-      }
-      if (data.message.handle !== user.username) {
-        emit('new-message', { roomId: data.roomId })
-      }
-      emit('all-done', totalUnreadCount())
-      await nextTick()
-      if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
-      return
+  socket.on('new_message', (data) => {
+    const roomIdx = rooms.value.findIndex(r => r.room_id === data.roomId)
+    if (roomIdx === -1) return
+
+    const wasAtEnd = roomIdx === rooms.value.length - 1
+    const isCurrent = data.roomId === currentRoomId.value
+
+    // Re-sort: move this room to the rightmost position
+    const updatedRoom = { ...rooms.value[roomIdx], created_at: data.message.created_at }
+    const newRooms = rooms.value.filter((_, i) => i !== roomIdx)
+    newRooms.push(updatedRoom)
+    rooms.value = newRooms
+
+    // Glow the right arrow if a different room moved up in the order
+    if (!isCurrent && !wasAtEnd) {
+      triggerRightGlow()
     }
 
-    if (!currentRoom.value || data.roomId !== currentRoom.value.id) return
-    if (messages.value.some(m => m.id === data.message.id)) return
-    messages.value.push(data.message)
-    if (data.message.handle !== user.username) {
-      emit('new-message', { roomId: data.roomId })
+    if (isCurrent) {
+      if (!messages.value.some(m => m.id === data.message.id)) {
+        messages.value.push(data.message)
+        scrollToBottom()
+        if (data.message.handle !== user.username) {
+          flashingMessageIds.value = new Set([...flashingMessageIds.value, data.message.id])
+          setTimeout(() => {
+            flashingMessageIds.value = new Set([...flashingMessageIds.value].filter(id => id !== data.message.id))
+          }, 2000)
+        }
+      }
     }
-    await nextTick()
-    scrollToBottom()
+
+    if (data.message.handle !== user.username) emit('new-message')
   })
 
   socket.on('message_edited', (data) => {
-    if (!currentRoom.value || data.roomId !== currentRoom.value.id) return
+    if (data.roomId !== currentRoomId.value) return
     const idx = messages.value.findIndex(m => m.id === data.message.id)
     if (idx !== -1) messages.value[idx] = data.message
   })
 
   socket.on('message_deleted', (data) => {
-    if (!currentRoom.value || data.roomId !== currentRoom.value.id) return
+    if (data.roomId !== currentRoomId.value) return
     messages.value = messages.value.filter(m => m.id !== data.messageId)
+  })
+
+  socket.on('user_typing', (data) => {
+    if (data.roomId !== currentRoomId.value) return
+    if (data.user !== user.username && !typingUsers.value.includes(data.user)) typingUsers.value.push(data.user)
+  })
+
+  socket.on('user_stopped_typing', (data) => {
+    if (data.roomId !== currentRoomId.value) return
+    typingUsers.value = typingUsers.value.filter(u => u !== data.user)
   })
 }
 
 function cleanupSocket() {
-  leaveRoom(currentRoom.value?.id)
-  recentRooms.value.forEach(r => leaveRoom(r.room_id))
-  socket?.disconnect()
-  socket = null
+  if (typingTimeout) clearTimeout(typingTimeout)
+  if (socket) {
+    rooms.value.forEach(r => socket.emit('leave_room', r.room_id))
+    socket.disconnect()
+    socket = null
+  }
 }
 
-// ── Navigation ───────────────────────────────────────────────────────────────
+// ── Formatting ────────────────────────────────────────────────────────────────
 
-async function openRoom(roomId) {
-  await chat.joinRoom(roomId)
-  router.push({ name: 'chat' })
+const formatTime = (ts) => {
+  const d = new Date(ts), now = new Date()
+  const isToday = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  return isToday ? time : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}`
+}
+const getImageUrl = (p) => p ? `/api/uploads/${p}` : null
+const getVideoUrl = (p) => p ? `/api/uploads/${p}` : null
+const renderMessage = (text) => {
+  if (!text) return ''
+  return text.replace(/@(\w+)/g, '<span class="mention-highlight">@$1</span>')
 }
 
-// ── Formatting ───────────────────────────────────────────────────────────────
-
-function formatTime(iso) {
-  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-}
-
-function formatRecentTime(iso) {
-  return new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-}
-
-// ── Lifecycle ────────────────────────────────────────────────────────────────
+// ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 onMounted(async () => {
-  await fetchQueue()
+  await fetchRooms()
+  if (currentRoomId.value) await fetchMuteState(currentRoomId.value)
   setupSocket()
+  await nextTick()
+  messagesEl.value?.addEventListener('scroll', handleScroll)
+  document.addEventListener('click', closeMsgMenu)
 })
 
 onUnmounted(() => {
+  document.removeEventListener('click', closeMsgMenu)
+  messagesEl.value?.removeEventListener('scroll', handleScroll)
+  if (glowTimer) clearTimeout(glowTimer)
   cleanupSocket()
 })
 </script>
 
 <template>
-  <div class="csw">
+  <div class="chat-widget">
 
-    <!-- Loading -->
-    <div v-if="loading" class="csw-center">
-      <span class="csw-spinner"></span>
-      Loading…
+    <div v-if="loading" class="loading">
+      <LoadingSpinner size="small" /> Loading rooms…
     </div>
 
-    <!-- Error -->
-    <div v-else-if="error" class="csw-center csw-error">
-      {{ error }}
-      <button class="csw-refresh-btn" @click="fetchQueue">Retry</button>
-    </div>
+    <div v-else-if="error" class="error">{{ error }}</div>
 
-    <!-- No new messages — show recent message from each room -->
-    <template v-else-if="allDone">
-      <div v-if="loadingRecent" class="csw-center">
-        <span class="csw-spinner"></span>
-      </div>
-      <div v-else ref="messagesEl" class="csw-messages">
-        <div v-if="recentRooms.length === 0" class="csw-no-msgs">No messages in any room yet.</div>
-        <div
-          v-for="item in recentRooms"
-          :key="item.room_id"
-          class="csw-recent-item"
-          :class="{ 'csw-recent-item--unread': item.unread_count > 0 }"
-        >
-          <div class="csw-recent-meta">
-            <div class="csw-recent-room-row">
-              <span class="csw-room-name"># {{ item.room_name }}</span>
-              <span v-if="item.unread_count > 0" class="csw-unread-badge">{{ item.unread_count }} new</span>
-            </div>
-            <span class="csw-msg-time">{{ formatRecentTime(item.created_at) }}</span>
-          </div>
-          <div class="csw-recent-body">
-            <div class="csw-recent-text">
-              <span class="csw-msg-handle">{{ item.handle }}</span>
-              <p class="csw-msg-text">{{ item.message }}</p>
-            </div>
-            <button class="csw-open-btn" @click="openRoom(item.room_id)">Open →</button>
-          </div>
-        </div>
-      </div>
-      <div class="csw-footer csw-footer--done">
-        <button class="csw-refresh-btn csw-refresh-full" @click="fetchQueue">↺ Check for New Messages</button>
-      </div>
+    <template v-else-if="rooms.length === 0">
+      <div class="loading">No chat rooms available.</div>
     </template>
 
-    <!-- Active chat view -->
-    <template v-else-if="currentRoom">
+    <template v-else>
 
-      <!-- Room sub-header -->
-      <div class="csw-subheader">
-        <span class="csw-room-name"># {{ currentRoom.name }}</span>
-        <span class="csw-position">{{ posLabel }}</span>
+      <!-- Carousel sub-header -->
+      <div class="ccw-nav">
+        <button
+          class="ccw-arrow"
+          :disabled="!canLeft"
+          @click="goLeft"
+          title="Previous room (older)"
+        >‹</button>
+        <span class="ccw-room-name"># {{ currentRoom?.room_name ?? '…' }}</span>
+        <span class="ccw-pos">{{ posLabel }}</span>
+        <button
+          class="ccw-arrow"
+          :class="{ 'ccw-arrow--glow': rightGlowing }"
+          :disabled="!canRight"
+          @click="goRight"
+          title="Next room (newer)"
+        >›</button>
       </div>
 
       <!-- Messages -->
-      <div ref="messagesEl" class="csw-messages">
-        <div v-if="loadingMsgs" class="csw-center">
-          <span class="csw-spinner"></span>
+      <div v-if="loadingMsgs" class="loading">
+        <LoadingSpinner size="small" /> Loading…
+      </div>
+
+      <template v-else>
+        <div ref="messagesEl" class="messages">
+          <div v-if="isLoadingOlderMessages" class="loading-older">
+            <span class="loading-spinner"></span> Loading older messages…
+          </div>
+          <div v-else-if="hasOlderMessages" class="load-more-btn-wrapper">
+            <button class="load-more-btn" @click="handleScroll">↑ Load older messages</button>
+          </div>
+
+          <div v-if="messages.length === 0" class="no-messages">
+            No messages yet. Start the conversation!
+          </div>
+
+          <div
+            v-for="msg in messages"
+            :key="msg.id"
+            class="message"
+            :class="{ 'message-flash': flashingMessageIds.has(msg.id) }"
+          >
+            <div class="message-header">
+              <RouterLink :to="`/user/${msg.handle}`" class="username">{{ msg.handle }}</RouterLink>
+              <div class="msg-header-right">
+                <span class="time">{{ formatTime(msg.created_at) }}</span>
+                <div class="msg-menu-wrapper" @click.stop>
+                  <button class="msg-menu-btn" @click="toggleMsgMenu(msg.id)" title="Message options">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+                  </button>
+                  <div v-if="openMenuId === msg.id" class="msg-dropdown">
+                    <template v-if="isOwnMessage(msg.handle)">
+                      <button v-if="msg.message" class="msg-dropdown-item" @click="startEdit(msg); openMenuId = null">Edit</button>
+                      <button class="msg-dropdown-item danger" @click="deletingMessageId = msg.id; openMenuId = null">Delete</button>
+                    </template>
+                    <template v-else>
+                      <button class="msg-dropdown-item danger" @click="flaggingMessageId = msg.id; openMenuId = null">Report</button>
+                      <button class="msg-dropdown-item danger" @click="blockUser(msg); openMenuId = null">{{ moderationStore.isBlocked(msg.user_id) ? 'Unblock User' : 'Block User' }}</button>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-if="deletingMessageId === msg.id" class="delete-confirm-bar">
+              Delete this message?
+              <button @click="confirmDelete(msg.id)" class="delete-confirm-yes">Yes, delete</button>
+              <button @click="deletingMessageId = null" class="delete-confirm-no">Cancel</button>
+            </div>
+            <div v-if="msg.image_path" class="message-image">
+              <a :href="getImageUrl(msg.image_path)" target="_blank">
+                <img :src="getImageUrl(msg.image_path)" alt="Shared image" />
+              </a>
+            </div>
+            <div v-if="msg.video_path" class="message-video">
+              <video controls :src="getVideoUrl(msg.video_path)">Your browser does not support video.</video>
+            </div>
+            <div v-if="msg.message" class="message-content">
+              <template v-if="editingMessageId === msg.id">
+                <input v-model="editText" @keyup.enter="saveEdit(msg.id)" @keyup.escape="cancelEdit" class="edit-input" maxlength="1000" autofocus />
+                <div class="edit-actions">
+                  <button @click="saveEdit(msg.id)" class="edit-save-btn">Save</button>
+                  <button @click="cancelEdit" class="edit-cancel-btn">Cancel</button>
+                </div>
+              </template>
+              <template v-else><span v-html="renderMessage(msg.message)"></span></template>
+            </div>
+            <FlagDialog
+              :visible="flaggingMessageId === msg.id"
+              content-type="chat_message"
+              :content-id="msg.id"
+              @close="flaggingMessageId = null"
+              @flagged="flaggingMessageId = null"
+            />
+          </div>
         </div>
-        <template v-else>
-          <div v-if="messages.length === 0" class="csw-no-msgs">No messages yet.</div>
-          <template v-for="(msg, idx) in messages" :key="msg.id">
-            <!-- Unread divider -->
-            <div v-if="idx === firstUnreadIdx" class="unread-divider">
-              <span>New Messages</span>
-            </div>
-            <div class="csw-msg" :class="{ 'csw-msg--new': idx >= firstUnreadIdx && firstUnreadIdx !== -1 }">
-              <span class="csw-msg-handle">{{ msg.handle }}</span>
-              <span class="csw-msg-time">{{ formatTime(msg.created_at) }}</span>
-              <p class="csw-msg-text">{{ msg.message }}</p>
-            </div>
-          </template>
-        </template>
-      </div>
 
-      <!-- Input footer -->
-      <div class="csw-footer">
-        <input
-          ref="inputEl"
-          v-model="newMessage"
-          class="csw-input"
-          type="text"
-          placeholder="Reply…"
-          maxlength="4000"
-          :disabled="sending"
-          @keydown="handleKeydown"
-        />
-        <button
-          class="csw-btn csw-btn--send"
-          :disabled="!newMessage.trim() || sending"
-          @click="sendMessage"
-        >Send</button>
-        <button
-          class="csw-btn csw-btn--next"
-          @click="goNext"
-        >Next →</button>
-      </div>
+        <div v-if="typingUsers.length > 0" class="typing-indicator">
+          {{ typingUsers.join(', ') }} {{ typingUsers.length === 1 ? 'is' : 'are' }} typing…
+        </div>
+
+        <div class="input-wrapper">
+          <div v-if="showAttachMenu" class="attach-menu" :style="attachMenuStyle">
+            <button type="button" class="attach-option" @click="imageInput.click(); showAttachMenu = false" :disabled="uploadingImage">
+              <span class="attach-icon">🖼️</span><span>Image</span>
+            </button>
+            <button type="button" class="attach-option" @click="videoInput.click(); showAttachMenu = false" :disabled="uploadingVideo">
+              <span class="attach-icon">🎬</span><span>Video</span>
+            </button>
+          </div>
+          <form class="input-area" @submit.prevent="sendMessage">
+            <input ref="imageInput" type="file" accept="image/*" class="hidden-input" @change="onImageSelected" />
+            <input ref="videoInput" type="file" accept="video/*" class="hidden-input" @change="onVideoSelected" />
+            <button ref="attachBtnRef" type="button" class="attach-btn" @click="toggleAttachMenu" :class="{ active: showAttachMenu }" title="Add attachment">
+              <span v-if="uploadingImage || uploadingVideo" class="uploading">…</span>
+              <span v-else class="plus-icon">+</span>
+            </button>
+            <div class="mention-dropdown" v-if="mentionActive && mentionResults.length > 0">
+              <div
+                v-for="(u, i) in mentionResults" :key="u.id"
+                class="mention-option" :class="{ active: i === mentionIndex }"
+                @mousedown.prevent="selectMention(u)"
+              >
+                <span class="mention-option-handle">@{{ u.handle }}</span>
+                <span v-if="u.first_name || u.last_name" class="mention-option-name">{{ u.first_name }} {{ u.last_name }}</span>
+              </div>
+            </div>
+            <input
+              ref="messageInputEl"
+              v-model="newMessage"
+              type="text"
+              placeholder="Type a message…"
+              maxlength="2000"
+              @keydown="handleMentionKeydown"
+              @input="onInput"
+              @focus="showAttachMenu = false"
+              @blur="closeMention"
+            />
+            <button type="submit" class="send-btn" :disabled="!newMessage.trim()">Send</button>
+            <button type="button" class="mute-btn" :class="{ muted: isMuted }" @click="toggleMute" :title="isMuted ? 'Unmute this room' : 'Mute this room'">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <template v-if="isMuted">
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                  <path d="M18.63 13A17.9 17.9 0 0 1 18 8"/>
+                  <path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/>
+                  <path d="M18 8a6 6 0 0 0-9.33-5"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </template>
+                <template v-else>
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                </template>
+              </svg>
+            </button>
+          </form>
+        </div>
+      </template>
     </template>
-
   </div>
 </template>
 
 <style scoped>
-.csw {
+/* ── Base (same as ChatWidget) ── */
+.chat-widget {
   height: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-  font-size: 0.88rem;
+  background: var(--color-background-soft);
 }
 
-/* ── Centred states ── */
-.csw-center {
+.loading, .error {
   flex: 1;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: var(--color-text-muted, var(--color-text-light));
+  color: var(--color-text-light);
+  font-size: 0.9rem;
   padding: 20px;
+}
+.error { color: var(--color-error); }
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.no-messages {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-light);
+  font-size: 0.85rem;
   text-align: center;
 }
 
-.csw-error { color: var(--color-error); }
-
-.csw-check {
-  width: 36px;
-  height: 36px;
-  color: var(--color-accent);
-  stroke: var(--color-accent);
+.message {
+  background: var(--color-background-card);
+  padding: var(--card-padding-compact);
+  border-radius: var(--card-radius-sm);
+  box-shadow: var(--shadow-sm);
 }
 
-.csw-done {
-  color: var(--color-text-secondary);
+.message-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
 }
 
-.csw-spinner {
-  display: inline-block;
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--color-border);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: csw-spin 0.7s linear infinite;
-}
-
-@keyframes csw-spin { to { transform: rotate(360deg); } }
-
-.csw-refresh-btn {
-  margin-top: 4px;
-  background: none;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  color: var(--color-text-secondary);
-  padding: 5px 14px;
-  font-size: 0.82rem;
-  cursor: pointer;
-}
-.csw-refresh-btn:hover { background: var(--color-background-hover); }
-
-/* ── Sub-header ── */
-.csw-subheader {
+.msg-header-right {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.username {
+  font-weight: 600;
+  font-size: 0.8rem;
+  color: var(--color-link);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.username:hover { text-decoration: underline; }
+
+.time {
+  font-size: 0.7rem;
+  color: var(--color-text-light);
+  white-space: nowrap;
+}
+
+.msg-menu-wrapper { position: relative; }
+.msg-menu-btn {
+  background: none; border: none; padding: 1px 2px; cursor: pointer;
+  color: var(--color-text-muted); opacity: 0; line-height: 1;
+  display: inline-flex; align-items: center; border-radius: 3px; transition: opacity 0.15s;
+}
+.message:hover .msg-menu-btn { opacity: 0.45; }
+.msg-menu-btn:hover { opacity: 1 !important; background: var(--color-background-hover); }
+
+.msg-dropdown {
+  position: absolute; right: 0; top: calc(100% + 2px);
+  background: var(--color-background-card); border: 1px solid var(--color-border);
+  border-radius: 8px; box-shadow: var(--shadow-lg); min-width: 110px; z-index: 100; overflow: hidden;
+}
+.msg-dropdown-item {
+  display: block; width: 100%; padding: 7px 12px; background: none; border: none;
+  text-align: left; font-size: 0.82em; color: var(--color-text); cursor: pointer; white-space: nowrap;
+}
+.msg-dropdown-item:hover { background: var(--color-background-hover); }
+.msg-dropdown-item.danger { color: var(--color-error, #ff3b30); }
+.msg-dropdown-item.danger:hover { background: var(--color-error-bg, rgba(255,59,48,0.08)); }
+
+.delete-confirm-bar {
+  display: flex; align-items: center; gap: 6px; font-size: 0.75em;
+  color: var(--color-error, #ff3b30); margin-bottom: 4px; flex-wrap: wrap;
+}
+.delete-confirm-yes {
+  padding: 1px 8px; background: var(--color-error, #ff3b30); color: white;
+  border: none; border-radius: 4px; cursor: pointer; font-size: 0.9em;
+}
+.delete-confirm-yes:hover { opacity: 0.85; }
+.delete-confirm-no {
+  padding: 1px 8px; background: none; border: 1px solid var(--color-border);
+  border-radius: 4px; cursor: pointer; font-size: 0.9em; color: var(--color-text);
+}
+.delete-confirm-no:hover { background: var(--color-background-hover); }
+
+.edit-input {
+  width: 100%; padding: 4px 8px; border: 1px solid var(--color-accent);
+  border-radius: 6px; font-size: inherit; background: var(--color-background-input);
+  color: var(--color-text); outline: none; box-sizing: border-box;
+}
+.edit-actions { display: flex; gap: 6px; margin-top: 4px; }
+.edit-save-btn {
+  padding: 2px 10px; background: var(--color-accent); color: white;
+  border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em;
+}
+.edit-save-btn:hover { background: var(--color-accent-hover); }
+.edit-cancel-btn {
+  padding: 2px 10px; background: none; border: 1px solid var(--color-border);
+  border-radius: 4px; cursor: pointer; font-size: 0.85em; color: var(--color-text);
+}
+.edit-cancel-btn:hover { background: var(--color-background-hover); }
+
+.message-content { font-size: 0.85rem; color: var(--color-text); word-wrap: break-word; }
+
+.message-image { margin: 6px 0; }
+.message-image img { max-width: 100%; max-height: 300px; border-radius: 4px; cursor: pointer; }
+.message-image a { display: block; }
+
+.message-video { margin: 6px 0; }
+.message-video video { max-width: 100%; max-height: 200px; border-radius: 4px; }
+
+.hidden-input { display: none; }
+
+.typing-indicator {
+  padding: 4px 10px; font-size: 0.75rem; color: var(--color-text-light);
+  font-style: italic; background: var(--color-background-hover);
+}
+
+.input-wrapper {
+  position: relative; background: var(--color-background-card); border-top: 1px solid var(--color-border);
+}
+.input-area {
+  display: flex; gap: 6px; padding: 8px; align-items: center; position: relative;
+}
+.input-area input[type="text"] {
+  flex: 1; min-width: 0; padding: 8px 10px; border: 1px solid var(--color-border);
+  border-radius: 4px; font-size: 0.85rem; background: var(--color-background-input); color: var(--color-text);
+}
+.input-area input[type="text"]:focus { outline: none; border-color: var(--color-accent); }
+
+.attach-btn {
+  width: 32px; height: 32px; padding: 0; background: var(--color-button-secondary);
+  color: var(--color-text); border: none; border-radius: 50%; cursor: pointer;
+  font-size: 1.2em; font-weight: 300; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: transform 0.2s ease, background-color 0.2s ease;
+}
+.attach-btn:hover:not(:disabled) { background: var(--color-button-secondary-hover); }
+.attach-btn.active { background: var(--color-accent); color: white; transform: rotate(45deg); }
+.attach-btn:disabled { background: var(--color-button-disabled); cursor: not-allowed; }
+
+.send-btn {
+  padding: 8px 12px; background: var(--color-accent); color: white; border: none;
+  border-radius: 4px; cursor: pointer; font-size: 0.85rem; font-weight: 500; flex-shrink: 0;
+}
+.send-btn:hover:not(:disabled) { background: var(--color-accent-hover); }
+.send-btn:disabled { background: var(--color-button-disabled); cursor: not-allowed; }
+
+.mute-btn {
+  background: none; border: none; cursor: pointer; padding: 4px 6px;
+  color: var(--color-text-muted); border-radius: 4px; display: flex; align-items: center;
+  flex-shrink: 0; transition: color 0.15s;
+}
+.mute-btn:hover { color: var(--color-text-secondary); }
+.mute-btn.muted { color: #e53e3e; }
+
+.attach-menu {
+  background: var(--color-background-card); border: 1px solid var(--color-border);
+  border-radius: 8px; box-shadow: var(--shadow-lg); padding: 6px; display: flex; gap: 6px; margin-bottom: 6px;
+}
+.attach-option {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 14px;
+  background: var(--color-background-soft); border: none; border-radius: 6px; cursor: pointer;
+  color: var(--color-text); font-size: 0.75rem; transition: background-color 0.15s ease;
+}
+.attach-option:hover:not(:disabled) { background: var(--color-background-hover); }
+.attach-option:disabled { opacity: 0.5; cursor: not-allowed; }
+.attach-icon { font-size: 1.2em; }
+
+.loading-older {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px; font-size: 0.75rem; color: var(--color-text-muted);
+}
+.loading-spinner {
+  display: inline-block; width: 12px; height: 12px; border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent); border-radius: 50%; animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.load-more-btn-wrapper { display: flex; justify-content: center; padding: 6px 0; }
+.load-more-btn {
+  background: none; border: 1px solid var(--color-border); border-radius: 12px;
+  padding: 3px 12px; font-size: 0.75em; color: var(--color-text-muted); cursor: pointer;
+}
+.load-more-btn:hover { background: var(--color-background-mute); color: var(--color-text); }
+
+.mention-dropdown {
+  position: absolute; bottom: 100%; left: 0; right: 0;
+  background: var(--color-background-card); border: 1px solid var(--color-border);
+  border-radius: 8px; box-shadow: var(--shadow-lg); overflow: hidden; z-index: 20; margin-bottom: 4px;
+}
+.mention-option {
+  display: flex; align-items: center; gap: 8px; padding: 7px 12px; cursor: pointer; font-size: 0.82rem;
+}
+.mention-option:hover, .mention-option.active { background: var(--color-background-hover); }
+.mention-option-handle { font-weight: 600; color: var(--color-accent); }
+.mention-option-name { color: var(--color-text-muted); font-size: 0.78rem; }
+
+@keyframes msg-flash {
+  0%   { background-color: rgba(236, 201, 75, 0.35); }
+  100% { background-color: transparent; }
+}
+.message-flash { animation: msg-flash 2s ease-out forwards; border-radius: 4px; }
+
+:deep(.mention-highlight) {
+  background: rgba(99, 91, 255, 0.12); color: #6355e8;
+  border-radius: 3px; padding: 1px 4px; font-weight: 600;
+}
+
+/* ── Carousel nav ── */
+.ccw-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
   background: var(--color-background-soft);
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
 
-.csw-room-name {
-  font-weight: 600;
-  color: var(--color-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.csw-position {
-  font-size: 0.78rem;
-  color: var(--color-text-muted, var(--color-text-light));
-  white-space: nowrap;
-  margin-left: 8px;
-}
-
-/* ── Messages ── */
-.csw-messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.csw-no-msgs {
-  color: var(--color-text-muted, var(--color-text-light));
-  text-align: center;
-  padding: 20px 0;
-}
-
-/* Unread divider */
-.unread-divider {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 6px 0 4px;
-  flex-shrink: 0;
-}
-.unread-divider::before,
-.unread-divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--color-accent);
-  opacity: 0.5;
-}
-.unread-divider span {
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--color-accent);
-  white-space: nowrap;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-/* Individual message */
-.csw-msg {
-  padding: 5px 8px;
-  border-radius: 6px;
-  background: var(--color-background-soft);
-  line-height: 1.4;
-}
-.csw-msg--new {
-  background: var(--color-accent-light, rgba(var(--color-accent-rgb, 66,153,225), 0.08));
-}
-
-.csw-msg-handle {
-  font-weight: 600;
-  color: var(--color-text);
-  margin-right: 6px;
-}
-.csw-msg-time {
-  font-size: 0.75rem;
-  color: var(--color-text-muted, var(--color-text-light));
-}
-.csw-msg-text {
-  margin: 2px 0 0;
-  color: var(--color-text);
-  word-break: break-word;
-}
-
-/* ── Footer ── */
-.csw-footer {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-top: 1px solid var(--color-border);
-  background: var(--color-background-card);
-  flex-shrink: 0;
-}
-
-.csw-input {
-  flex: 1;
-  min-width: 0;
-  padding: 6px 10px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  font-size: 0.88rem;
-  background: var(--color-background-input, var(--color-background));
-  color: var(--color-text);
-  outline: none;
-}
-.csw-input:focus { border-color: var(--color-accent); }
-
-.csw-btn {
-  padding: 6px 10px;
-  border: none;
-  border-radius: 6px;
-  font-size: 0.82rem;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.csw-btn--send {
-  background: var(--color-accent);
-  color: #fff;
-}
-.csw-btn--send:hover:not(:disabled) { opacity: 0.88; }
-.csw-btn--send:disabled { opacity: 0.45; cursor: not-allowed; }
-
-.csw-btn--next {
-  background: var(--color-button-secondary, var(--color-background-soft));
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
-}
-.csw-btn--next:hover { background: var(--color-background-hover); }
-
-/* ── Recent rooms list (all-done state) ── */
-.csw-recent-item {
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: var(--color-background-soft);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.csw-recent-item--unread {
-  background: var(--color-accent-light, rgba(66,153,225,0.08));
-  border-left: 3px solid var(--color-accent);
-  padding-left: 6px;
-}
-
-.csw-recent-room-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.csw-unread-badge {
-  font-size: 0.68rem;
-  font-weight: 700;
-  background: var(--color-accent);
-  color: #fff;
-  border-radius: 10px;
-  padding: 1px 6px;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.csw-recent-meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.csw-recent-body {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-.csw-recent-text {
-  flex: 1;
-  min-width: 0;
-}
-
-.csw-recent-text .csw-msg-text {
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.csw-open-btn {
-  flex-shrink: 0;
+.ccw-arrow {
   background: none;
   border: 1px solid var(--color-border);
   border-radius: 4px;
-  color: var(--color-accent);
-  font-size: 0.75rem;
-  font-weight: 600;
-  padding: 2px 7px;
-  cursor: pointer;
-  white-space: nowrap;
-  line-height: 1.6;
-}
-.csw-open-btn:hover { background: var(--color-accent-light); }
-
-.csw-footer--done {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
   justify-content: center;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  color: var(--color-text);
+  flex-shrink: 0;
+  transition: background-color 0.15s;
+}
+.ccw-arrow:hover:not(:disabled) { background: var(--color-background-hover); }
+.ccw-arrow:disabled { opacity: 0.3; cursor: default; }
+
+@keyframes arrow-glow {
+  0%   { background-color: rgba(236, 201, 75, 0.7); border-color: rgba(236, 201, 75, 0.9); }
+  100% { background-color: transparent; border-color: var(--color-border); }
+}
+.ccw-arrow--glow {
+  animation: arrow-glow 2s ease-out forwards;
 }
 
-.csw-refresh-full {
+.ccw-room-name {
   flex: 1;
-  text-align: center;
-  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ccw-pos {
+  font-size: 0.75rem;
+  color: var(--color-text-light);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 </style>

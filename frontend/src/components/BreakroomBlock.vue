@@ -21,9 +21,6 @@ const props = defineProps({
 
 const emit = defineEmits(['remove', 'toggle'])
 
-// Extra label shown on the right of the header (used by Chat Summary "all done" state)
-const headerExtra = ref('')
-
 // Flash the block header yellow briefly when a new chat message arrives
 const headerFlashing = ref(false)
 let flashTimer = null
@@ -47,7 +44,7 @@ const blockTitle = computed(() => {
   }
   switch (props.block.block_type) {
     case 'chat': return 'Chat'
-    case 'chat_summary': return 'Chat Summary'
+    case 'chat_summary': return 'Chat Carousel'
     case 'placeholder': return 'Empty'
     case 'updates': return 'Breakroom Updates'
     case 'calendar': return 'Calendar'
@@ -66,7 +63,6 @@ const blockTitle = computed(() => {
         &times;
       </button>
       <span class="block-title">{{ blockTitle }}</span>
-      <span v-if="headerExtra" class="header-extra">{{ headerExtra }}</span>
       <div class="block-actions">
         <button class="expand-btn" :class="{ rotated: expanded }" title="Expand/Collapse">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
@@ -104,12 +100,10 @@ const blockTitle = computed(() => {
       <!-- Blog Posts block -->
       <BlogPostsWidget v-else-if="block.block_type === 'blog'" />
 
-      <!-- Chat Summary block -->
+      <!-- Chat Carousel block -->
       <ChatSummaryWidget
         v-else-if="block.block_type === 'chat_summary'"
         @new-message="onNewMessage"
-        @all-done="(n) => headerExtra = n > 0 ? `${n} new message${n !== 1 ? 's' : ''}` : 'Nothing New'"
-        @resumed="headerExtra = ''"
       />
 
       <!-- Unknown block type -->
@@ -176,14 +170,6 @@ const blockTitle = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
-}
-
-.header-extra {
-  font-size: 0.75rem;
-  color: var(--color-header-text);
-  opacity: 0.7;
-  white-space: nowrap;
-  flex-shrink: 0;
 }
 
 .block-actions {
