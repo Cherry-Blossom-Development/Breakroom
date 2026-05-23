@@ -182,7 +182,7 @@ router.get('/:id/items', authenticate, async (req, res) => {
 
     const result = await client.query(
       `SELECT id, name, description, image_path, display_order,
-              price_cents, is_available, shipping_cost_cents,
+              price_cents, is_available, in_gallery, shipping_cost_cents,
               weight_oz, length_in, width_in, height_in,
               created_at, updated_at
        FROM collection_items WHERE collection_id = $1 ORDER BY display_order ASC, created_at ASC`,
@@ -210,6 +210,7 @@ router.post('/:id/items', authenticate, upload.single('image'), async (req, res)
   const widthIn          = req.body.width_in     ? parseFloat(req.body.width_in)     : null;
   const heightIn         = req.body.height_in    ? parseFloat(req.body.height_in)    : null;
   const isAvailable      = req.body.is_available === 'true' ? 1 : 0;
+  const inGallery        = req.body.in_gallery === 'false' ? 0 : 1;
 
   let client;
   try {
@@ -231,14 +232,14 @@ router.post('/:id/items', authenticate, upload.single('image'), async (req, res)
     const insert = await client.query(
       `INSERT INTO collection_items
          (collection_id, user_id, name, description, image_path,
-          price_cents, is_available, shipping_cost_cents, weight_oz, length_in, width_in, height_in)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+          price_cents, is_available, in_gallery, shipping_cost_cents, weight_oz, length_in, width_in, height_in)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
       [id, req.user.id, name.trim(), description || null, s3Key,
-       priceCents, isAvailable, shippingCents, weightOz, lengthIn, widthIn, heightIn]
+       priceCents, isAvailable, inGallery, shippingCents, weightOz, lengthIn, widthIn, heightIn]
     );
     const result = await client.query(
       `SELECT id, name, description, image_path, display_order,
-              price_cents, is_available, shipping_cost_cents,
+              price_cents, is_available, in_gallery, shipping_cost_cents,
               weight_oz, length_in, width_in, height_in,
               created_at, updated_at
        FROM collection_items WHERE id = $1`,
@@ -266,6 +267,7 @@ router.put('/:id/items/:itemId', authenticate, upload.single('image'), async (re
   const widthIn          = req.body.width_in     ? parseFloat(req.body.width_in)     : null;
   const heightIn         = req.body.height_in    ? parseFloat(req.body.height_in)    : null;
   const isAvailable      = req.body.is_available === 'true' ? 1 : 0;
+  const inGallery        = req.body.in_gallery === 'false' ? 0 : 1;
 
   let client;
   try {
@@ -295,16 +297,16 @@ router.put('/:id/items/:itemId', authenticate, upload.single('image'), async (re
     await client.query(
       `UPDATE collection_items SET
          name = $1, description = $2, image_path = $3,
-         price_cents = $4, is_available = $5, shipping_cost_cents = $6,
-         weight_oz = $7, length_in = $8, width_in = $9, height_in = $10
-       WHERE id = $11`,
+         price_cents = $4, is_available = $5, in_gallery = $6, shipping_cost_cents = $7,
+         weight_oz = $8, length_in = $9, width_in = $10, height_in = $11
+       WHERE id = $12`,
       [name.trim(), description || null, s3Key,
-       priceCents, isAvailable, shippingCents,
+       priceCents, isAvailable, inGallery, shippingCents,
        weightOz, lengthIn, widthIn, heightIn, itemId]
     );
     const result = await client.query(
       `SELECT id, name, description, image_path, display_order,
-              price_cents, is_available, shipping_cost_cents,
+              price_cents, is_available, in_gallery, shipping_cost_cents,
               weight_oz, length_in, width_in, height_in,
               created_at, updated_at
        FROM collection_items WHERE id = $1`,

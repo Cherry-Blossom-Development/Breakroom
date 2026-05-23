@@ -131,7 +131,7 @@ router.get('/public/:storeUrl/collection/:collectionId', async (req, res) => {
       `SELECT id, name, description, image_path, price_cents, shipping_cost_cents,
               weight_oz, length_in, width_in, height_in
        FROM collection_items
-       WHERE collection_id = $1 AND is_available = 1
+       WHERE collection_id = $1 AND in_gallery = 1
        ORDER BY display_order ASC, created_at ASC`,
       [req.params.collectionId]
     );

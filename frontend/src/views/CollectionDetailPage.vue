@@ -46,6 +46,7 @@
               <span class="availability-badge" :class="item.is_available ? 'badge-listed' : 'badge-unlisted'">
                 {{ item.is_available ? 'Listed' : 'Unlisted' }}
               </span>
+              <span v-if="!item.in_gallery" class="availability-badge badge-hidden">Hidden</span>
             </div>
             <div v-if="item.description" class="item-desc">{{ item.description }}</div>
             <div class="item-meta-row">
@@ -120,6 +121,24 @@
             style="display:none"
             @change="onFileChange"
           />
+        </div>
+
+        <!-- Visibility -->
+        <div class="section-divider">
+          <span class="section-label">Visibility</span>
+        </div>
+
+        <div class="form-group form-group--toggle-row">
+          <div>
+            <label class="form-label" style="margin-bottom:2px">Show in gallery</label>
+            <span class="form-hint" style="margin-top:0">Display this item on your public storefront</span>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" v-model="form.in_gallery" />
+            <span class="toggle-track">
+              <span class="toggle-thumb"></span>
+            </span>
+          </label>
         </div>
 
         <!-- Pricing -->
@@ -281,6 +300,7 @@ const emptyForm = () => ({
   description: '',
   price: '',
   is_available: false,
+  in_gallery: true,
   shipping_cost: '',
   weight_oz: '',
   length_in: '',
@@ -336,6 +356,7 @@ function openEdit(item) {
     description: item.description || '',
     price: centsToDisplay(item.price_cents),
     is_available: !!item.is_available,
+    in_gallery: item.in_gallery !== 0,
     shipping_cost: centsToDisplay(item.shipping_cost_cents),
     weight_oz: item.weight_oz ?? '',
     length_in: item.length_in ?? '',
@@ -375,6 +396,7 @@ async function save() {
     fd.append('name', form.value.name.trim())
     fd.append('description', form.value.description)
     fd.append('is_available', String(form.value.is_available))
+    fd.append('in_gallery', String(form.value.in_gallery))
     if (form.value.price !== '') fd.append('price', form.value.price)
     if (form.value.shipping_cost !== '') fd.append('shipping_cost', form.value.shipping_cost)
     if (form.value.weight_oz !== '') fd.append('weight_oz', form.value.weight_oz)
@@ -573,6 +595,11 @@ onMounted(() => {
   color: var(--color-text-secondary);
 }
 
+.badge-hidden {
+  background: rgba(229, 62, 62, 0.1);
+  color: #c53030;
+}
+
 .item-desc {
   font-size: 0.82rem;
   color: var(--color-text-secondary);
@@ -709,6 +736,13 @@ onMounted(() => {
 .form-group { margin-bottom: 16px; }
 .form-group--grow { flex: 1; }
 .form-group--toggle { flex-shrink: 0; }
+
+.form-group--toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
 
 .form-label {
   display: block;
