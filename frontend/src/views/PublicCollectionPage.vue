@@ -26,8 +26,7 @@
           v-for="item in data.items"
           :key="item.id"
           class="item-card"
-          :class="{ 'has-price': item.price_cents != null }"
-          @click="item.price_cents != null ? openPurchase(item) : null"
+          @click="openItem(item)"
         >
           <div class="item-image-wrap">
             <img
@@ -43,7 +42,7 @@
                 <polyline points="21 15 16 10 5 21"/>
               </svg>
             </div>
-            <div v-if="item.price_cents != null" class="buy-overlay">View &amp; Buy</div>
+            <div class="buy-overlay">{{ item.is_available ? 'View & Buy' : 'View' }}</div>
           </div>
           <div class="item-body">
             <div class="item-name">{{ item.name }}</div>
@@ -59,6 +58,25 @@
         </div>
       </div>
     </main>
+
+    <!-- ── View-only lightbox ── -->
+    <Teleport to="body">
+      <div v-if="viewModal.open" class="modal-backdrop" @click.self="viewModal.open = false">
+        <div class="modal modal-lightbox">
+          <button class="modal-close lightbox-close" @click="viewModal.open = false">✕</button>
+          <img
+            v-if="viewModal.item?.image_path"
+            :src="`/api/uploads/${viewModal.item.image_path}`"
+            :alt="viewModal.item?.name"
+            class="lightbox-image"
+          />
+          <div class="lightbox-info">
+            <div class="lightbox-name">{{ viewModal.item?.name }}</div>
+            <div v-if="viewModal.item?.description" class="lightbox-desc">{{ viewModal.item?.description }}</div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- ── Purchase modal ── -->
     <Teleport to="body">
@@ -233,6 +251,18 @@ async function fetchCollection() {
 }
 
 onMounted(fetchCollection)
+
+// ── View-only lightbox ───────────────────────────────────────────────────────
+const viewModal = reactive({ open: false, item: null })
+
+function openItem(item) {
+  if (item.is_available) {
+    openPurchase(item)
+  } else {
+    viewModal.item = item
+    viewModal.open = true
+  }
+}
 
 // ── Purchase modal ────────────────────────────────────────────────────────────
 const modal = reactive({
@@ -430,7 +460,7 @@ async function submitPayment() {
   transition: box-shadow 0.15s, transform 0.15s;
 }
 
-.item-card.has-price { cursor: pointer; }
+.item-card { cursor: pointer; }
 
 .item-card:hover {
   box-shadow: 0 6px 24px rgba(0,0,0,0.1);
@@ -470,7 +500,7 @@ async function submitPayment() {
   opacity: 0;
   transition: opacity 0.18s;
 }
-.item-card.has-price:hover .buy-overlay { opacity: 1; }
+.item-card:hover .buy-overlay { opacity: 1; }
 
 .item-body { padding: 14px 16px 18px; }
 .item-name { font-size: 1rem; font-weight: 600; color: inherit; margin-bottom: 6px; }
@@ -701,6 +731,58 @@ async function submitPayment() {
   transition: background 0.15s;
 }
 .btn-secondary:hover { background: #e8e8e8; }
+
+/* ── Lightbox ── */
+.modal-lightbox {
+  max-width: 720px;
+  padding: 0;
+  overflow: hidden;
+  position: relative;
+  background: #111;
+}
+
+.lightbox-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+}
+.lightbox-close:hover { background: rgba(0,0,0,0.8); color: #fff; }
+
+.lightbox-image {
+  width: 100%;
+  max-height: 65vh;
+  object-fit: contain;
+  display: block;
+  background: #111;
+}
+
+.lightbox-info {
+  padding: 18px 20px 22px;
+  background: #fff;
+}
+
+.lightbox-name {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #222;
+  margin-bottom: 6px;
+}
+
+.lightbox-desc {
+  font-size: 0.9rem;
+  color: #555;
+  line-height: 1.6;
+}
 
 @media (max-width: 600px) {
   .collection-content { padding: 28px 20px 60px; }

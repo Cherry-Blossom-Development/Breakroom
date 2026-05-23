@@ -128,7 +128,7 @@ router.get('/public/:storeUrl/collection/:collectionId', async (req, res) => {
 
     // Fetch available items only
     const itemResult = await client.query(
-      `SELECT id, name, description, image_path, price_cents, shipping_cost_cents,
+      `SELECT id, name, description, image_path, price_cents, is_available, shipping_cost_cents,
               weight_oz, length_in, width_in, height_in
        FROM collection_items
        WHERE collection_id = $1 AND in_gallery = 1
