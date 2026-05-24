@@ -303,6 +303,7 @@ function handleNavClick() {
           <RouterLink to="/admin/test-results" class="admin-item" @click="handleNavClick">Test Results</RouterLink>
           <RouterLink to="/admin/features" class="admin-item" @click="handleNavClick">Features</RouterLink>
           <RouterLink to="/admin/moderation" class="admin-item" @click="handleNavClick">Moderation</RouterLink>
+          <RouterLink to="/admin/impersonate" class="admin-item" @click="handleNavClick">Impersonate</RouterLink>
         </div>
       </div>
 

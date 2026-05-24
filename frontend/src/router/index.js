@@ -13,6 +13,7 @@ import AdminSystemEmails from '@/views/admin/AdminSystemEmails.vue'
 import AdminTestResults from '@/views/admin/AdminTestResults.vue'
 import AdminFeatures from '@/views/admin/AdminFeatures.vue'
 import AdminModeration from '@/views/admin/AdminModeration.vue'
+import AdminImpersonate from '@/views/admin/AdminImpersonate.vue'
 
 //Profile views
 import ProfileLayout from '@/views/profile/ProfileLayout.vue'
@@ -76,7 +77,8 @@ const router = createRouter({
         {path: 'system-emails', component: AdminSystemEmails},
         {path: 'test-results', component: AdminTestResults},
         {path: 'features', component: AdminFeatures},
-        {path: 'moderation', component: AdminModeration}
+        {path: 'moderation', component: AdminModeration},
+        {path: 'impersonate', component: AdminImpersonate}
       ]
     },
     {

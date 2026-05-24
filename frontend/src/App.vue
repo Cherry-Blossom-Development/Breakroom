@@ -34,6 +34,31 @@ const sidebarOpen = ref(false)
 const isAdmin = ref(false)
 const showSupport = ref(false)
 
+// Impersonation banner
+const impersonatedUser = ref(localStorage.getItem('impersonatedUser'))
+
+watch(impersonatedUser, (val) => {
+  document.body.classList.toggle('has-impersonation-banner', !!val)
+}, { immediate: true })
+
+async function stopImpersonation() {
+  const adminToken = localStorage.getItem('adminToken')
+  if (!adminToken) return
+  try {
+    await fetch('/api/admin/impersonate/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ adminToken }),
+    })
+  } catch {}
+  localStorage.removeItem('adminToken')
+  localStorage.removeItem('impersonatedUser')
+  impersonatedUser.value = null
+  await user.fetchUser()
+  router.push('/breakroom')
+}
+
 async function checkAdminPermission() {
   if (!user.username) {
     isAdmin.value = false
@@ -177,6 +202,12 @@ setInterval(() => {
 
   <!-- Logged-in: sidebar + bottom bar navigation -->
   <template v-if="user.username && !route.meta.publicLayout">
+    <!-- Impersonation banner -->
+    <div v-if="impersonatedUser" class="impersonation-banner">
+      <span>⚠ Admin impersonation of <strong>{{ impersonatedUser }}</strong> — all actions are real</span>
+      <button class="impersonation-stop" @click="stopImpersonation">Stop Impersonating</button>
+    </div>
+
     <AppSidebar
       :is-admin="isAdmin"
       :visible="sidebarOpen"
@@ -249,6 +280,43 @@ body {
 }
 
 /* ============================================
+   IMPERSONATION BANNER
+   ============================================ */
+
+.impersonation-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1100;
+  background: #ecc94b;
+  color: #744210;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 8px 16px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-align: center;
+  flex-wrap: wrap;
+}
+
+.impersonation-stop {
+  background: #744210;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 4px 12px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+.impersonation-stop:hover { opacity: 0.85; }
+
+/* ============================================
    LOGGED-IN LAYOUT
    ============================================ */
 
@@ -283,6 +351,19 @@ body {
     color: var(--color-header-text);
     padding: 0 12px;
     z-index: 998;
+  }
+}
+
+/* Push content down when impersonation banner is visible */
+.has-impersonation-banner .app-content {
+  padding-top: 40px;
+}
+@media (max-width: 768px) {
+  .has-impersonation-banner .app-content {
+    padding-top: 88px;
+  }
+  .has-impersonation-banner .tablet-top-bar {
+    top: 40px;
   }
 }
 
