@@ -81,10 +81,33 @@
     <!-- ── Purchase modal ── -->
     <Teleport to="body">
       <div v-if="modal.open" class="modal-backdrop" @click.self="closeModal">
-        <div class="modal">
+        <div class="modal" :class="{ 'modal-lightbox': modal.step === 0 }">
+
+          <!-- Step 0: Preview (lightbox-style with Buy Now) -->
+          <template v-if="modal.step === 0">
+            <button class="modal-close lightbox-close" @click="closeModal">✕</button>
+            <img
+              v-if="modal.item?.image_path"
+              :src="`/api/uploads/${modal.item.image_path}`"
+              :alt="modal.item?.name"
+              class="lightbox-image"
+            />
+            <div class="lightbox-info">
+              <div class="lightbox-name">{{ modal.item?.name }}</div>
+              <div v-if="modal.item?.description" class="lightbox-desc">{{ modal.item?.description }}</div>
+              <div class="lightbox-price-row">
+                <span class="lightbox-price">${{ (modal.item?.price_cents / 100).toFixed(2) }}</span>
+                <span v-if="modal.item?.shipping_cost_cents" class="lightbox-shipping"> + ${{ (modal.item.shipping_cost_cents / 100).toFixed(2) }} shipping</span>
+                <span v-else class="lightbox-shipping"> · Free shipping</span>
+              </div>
+            </div>
+            <div class="modal-footer lightbox-footer">
+              <button class="btn-primary btn-buy-now" @click="modal.step = 1">Buy Now</button>
+            </div>
+          </template>
 
           <!-- Step 1: Shipping info -->
-          <template v-if="modal.step === 1">
+          <template v-else-if="modal.step === 1">
             <div class="modal-header">
               <div class="modal-item-preview">
                 <img v-if="modal.item?.image_path" :src="`/api/uploads/${modal.item.image_path}`" :alt="modal.item.name" class="modal-thumb" />
@@ -157,6 +180,7 @@
 
           <!-- Step 2: Payment -->
           <template v-else-if="modal.step === 2">
+
             <div class="modal-header">
               <h2 class="modal-title">Payment</h2>
               <button class="modal-close" @click="closeModal">✕</button>
@@ -292,7 +316,7 @@ let cardElement = null
 
 function openPurchase(item) {
   modal.item = item
-  modal.step = 1
+  modal.step = 0
   modal.error = null
   modal.loading = false
   modal.intentData = null
@@ -782,6 +806,39 @@ async function submitPayment() {
   font-size: 0.9rem;
   color: #555;
   line-height: 1.6;
+  margin-bottom: 8px;
+}
+
+.lightbox-price-row {
+  margin-top: 8px;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.lightbox-price {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #222;
+}
+
+.lightbox-shipping {
+  font-size: 0.82rem;
+  color: #777;
+}
+
+.lightbox-footer {
+  border-top: none;
+  padding: 12px 20px 20px;
+  background: #fff;
+}
+
+.btn-buy-now {
+  width: 100%;
+  padding: 13px;
+  font-size: 1rem;
+  border-radius: 10px;
 }
 
 @media (max-width: 600px) {
