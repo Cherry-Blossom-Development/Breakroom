@@ -47,7 +47,7 @@
           <div class="item-body">
             <div class="item-name">{{ item.name }}</div>
             <div v-if="item.description" class="item-desc">{{ item.description }}</div>
-            <div class="item-price-row">
+            <div v-if="item.is_available" class="item-price-row">
               <span v-if="item.price_cents != null" class="item-price">${{ (item.price_cents / 100).toFixed(2) }}</span>
               <span v-if="item.shipping_cost_cents != null" class="item-shipping">
                 + ${{ (item.shipping_cost_cents / 100).toFixed(2) }} shipping
