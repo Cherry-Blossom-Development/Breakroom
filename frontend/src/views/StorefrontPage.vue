@@ -72,6 +72,17 @@
           />
         </div>
 
+        <!-- Background color -->
+        <div class="form-group">
+          <label class="form-label">Background Color</label>
+          <p class="form-hint">Sets the background color of your public store page.</p>
+          <div class="color-row">
+            <input v-model="backgroundColor" type="color" class="color-swatch" />
+            <div class="color-preview" :style="{ backgroundColor }"></div>
+            <span class="color-value">{{ backgroundColor }}</span>
+          </div>
+        </div>
+
         <!-- Section builder -->
         <div class="form-group">
           <label class="form-label">Page Sections</label>
@@ -169,6 +180,7 @@ const savedAt = ref(null)
 const storeUrl = ref('')
 const pageTitle = ref('')
 const contentBody = ref('')
+const backgroundColor = ref('#ffffff')
 const sections = ref(DEFAULT_SECTIONS.map(s => ({ ...s })))
 
 const urlChecking = ref(false)
@@ -231,8 +243,9 @@ async function fetchStorefront() {
         contentBody.value = data.content || ''
         savedAt.value = formatDate(data.updated_at)
         if (storeUrl.value) urlAvailable.value = true
-        if (data.settings && data.settings.sections) {
-          sections.value = data.settings.sections
+        if (data.settings) {
+          if (data.settings.sections) sections.value = data.settings.sections
+          if (data.settings.background_color) backgroundColor.value = data.settings.background_color
         }
       }
     }
@@ -254,7 +267,7 @@ async function save() {
         store_url: storeUrl.value,
         page_title: pageTitle.value,
         content: contentBody.value,
-        settings: { sections: sections.value }
+        settings: { sections: sections.value, background_color: backgroundColor.value }
       })
     })
     if (res.ok) {
@@ -425,6 +438,38 @@ onBeforeUnmount(() => clearTimeout(urlCheckTimer))
 .form-input:focus {
   outline: none;
   border-color: var(--color-link);
+}
+
+/* ---- Color picker ---- */
+.color-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.color-swatch {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 2px;
+  cursor: pointer;
+  background: none;
+  flex-shrink: 0;
+}
+
+.color-preview {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.color-value {
+  font-size: 0.88rem;
+  font-family: monospace;
+  color: var(--color-text-secondary);
 }
 
 /* ---- Section Builder ---- */

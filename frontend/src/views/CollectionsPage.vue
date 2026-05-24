@@ -131,7 +131,7 @@
           />
         </div>
 
-        <div class="form-group">
+        <div v-if="showBgColor" class="form-group">
           <label class="form-label">Background Color</label>
           <div class="color-row">
             <input v-model="form.background_color" type="color" class="color-swatch" />
@@ -174,7 +174,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import { authFetch } from '@/utilities/authFetch'
 
@@ -185,6 +185,11 @@ const showModal = ref(false)
 const editing = ref(null)
 const saving = ref(false)
 const form = ref({ name: '', background_color: '#ffffff' })
+
+// Hide background color when this is/will be the only collection
+const showBgColor = computed(() =>
+  (editing.value ? collections.value.length : collections.value.length + 1) > 1
+)
 
 const showDeleteConfirm = ref(false)
 const deletingCollection = ref(null)
