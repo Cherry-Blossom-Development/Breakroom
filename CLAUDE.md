@@ -1,11 +1,39 @@
-# Breakroom Project - Claude Context
+# Prosaurus Project - Claude Context
 
 ## Project Overview
-Breakroom is a full-stack web application with:
+Prosaurus is a full-stack web application with:
 - **Frontend**: Vue 3 + Vite (port 5173)
 - **Backend**: Express.js + Node 24 (port 3000)
 - **Database**: MariaDB (migrated from PostgreSQL)
 - **Reverse Proxy**: Host nginx (not Docker)
+
+Note: Prosaurus is the new name for the project.  it was originally called 'Breakroom' but we changed it because we did not own the breakroom.com domain.  Now, when we say 'Breakroom' we are only referring to the main page of the prosaurus.com website (or mobile app)
+
+## Environments
+
+Five environments exist across all clients (Web, Android, iPhone):
+
+| # | Name | Where Hosted | Backend URL | Database |
+|---|------|--------------|-------------|----------|
+| 1 | **Production** | EC2 | https://www.prosaurus.com | breakroom (EC2) |
+| 2 | **Dev** | EC2 | https://dev.prosaurus.com | breakroom-dev (EC2) |
+| 3a | **Local/Dev** | Dev machine | https://local.prosaurus.com | breakroom-dev (EC2) |
+| 3b | **Local/Prod** | Dev machine | https://local.prosaurus.com | breakroom (EC2, production) |
+| 4 | **Test** | Dev machine | https://local.prosaurus.com | breakroom_test (generated, isolated) |
+
+**Notes:**
+- **Local/Prod (3b)** is the most commonly used environment during active development — local code hitting the production database
+- **Local/Dev (3a)** is for testing changes against dev-tier data without touching production
+- **Test (4)** uses a freshly seeded, deterministic database so automated tests produce consistent results
+- Environments 3a, 3b, and 4 run on the current dev machine (Windows PC or Mac)
+
+### Redis
+
+Currently one Redis instance on EC2 (44.225.148.34:6379) with key prefix isolation:
+- `prod` prefix — Production environment
+- `dev` prefix — Dev environment and local development
+
+**Open question:** Whether separate Redis instances are needed per environment for true isolation, or whether prefix-based isolation on a shared instance is sufficient.
 
 ## Recent Changes (Dec 28, 2025)
 
@@ -196,13 +224,11 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ### Step 6: Build & Deploy from Dev Machine
 
-**On dev machine (local VM):**
+**From dev machine (run from the Breakroom project root):**
 
 ```bash
-cd /home/hakr49/breakroom
-
-# Build frontend using Docker (if npm not installed locally)
-docker run --rm -v $(pwd)/frontend:/app -w /app node:24.2.0-alpine sh -c "npm install && npm run build"
+# Build frontend (MSYS_NO_PATHCONV=1 needed on Windows/Git Bash)
+MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/frontend:/app" -w /app node:24.2.0-alpine sh -c "npm install && npm run build"
 
 # Push backend image to Docker Hub
 docker login
@@ -211,7 +237,7 @@ docker push dallascaley/breakroom-backend:latest
 # Copy frontend dist files to EC2
 scp -i ~/.ssh/Hostgator-Key-1.pem -r frontend/dist/* ec2-user@44.225.148.34:/var/www/prosaurus.com/
 
-# Copy docker-compose and env files to EC2
+# Copy docker-compose and env files to EC2 (only needed when they change)
 scp -i ~/.ssh/Hostgator-Key-1.pem docker-compose.ec2.yml ec2-user@44.225.148.34:~/
 scp -i ~/.ssh/Hostgator-Key-1.pem .env.production ec2-user@44.225.148.34:~/.env
 ```
@@ -267,10 +293,10 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ### Redeploying Updates
 
-**From dev machine:**
+**From dev machine (run from the Breakroom project root):**
 ```bash
-# Rebuild frontend
-docker run --rm -v $(pwd)/frontend:/app -w /app node:24.2.0-alpine sh -c "npm install && npm run build"
+# Rebuild frontend (MSYS_NO_PATHCONV=1 needed on Windows/Git Bash)
+MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/frontend:/app" -w /app node:24.2.0-alpine sh -c "npm install && npm run build"
 
 # Copy to EC2
 scp -i ~/.ssh/Hostgator-Key-1.pem -r frontend/dist/* ec2-user@44.225.148.34:/var/www/prosaurus.com/
