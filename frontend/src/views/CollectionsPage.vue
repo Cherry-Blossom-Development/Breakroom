@@ -87,7 +87,17 @@
 
     <!-- Collections list -->
     <section class="collections-section">
-      <h2 class="section-label">Your Collections</h2>
+      <div class="collections-section-header">
+        <h2 class="section-label">Your Collections</h2>
+        <button
+          v-if="collections.length > 1"
+          class="btn-reorder"
+          :class="{ active: reordering }"
+          @click="toggleReorder"
+        >
+          {{ reordering ? 'Done' : 'Reorder' }}
+        </button>
+      </div>
 
       <div v-if="loading" class="loading-state">Loading...</div>
 
@@ -96,22 +106,50 @@
         <button class="btn-primary" @click="openCreate">Create your first collection</button>
       </div>
 
-      <div v-else class="collections-grid">
-        <div v-for="col in collections" :key="col.id" class="collection-card">
-          <div
-            class="card-preview"
-            :style="{ backgroundColor: col.settings?.background_color || '#f5f5f5' }"
-          ></div>
-          <div class="card-body">
-            <RouterLink :to="`/collections/${col.id}`" class="card-name">{{ col.name }}</RouterLink>
-            <div class="card-actions">
-              <RouterLink :to="`/collections/${col.id}`" class="btn-sm">Manage →</RouterLink>
-              <button class="btn-sm" @click="openEdit(col)">Edit</button>
-              <button class="btn-sm btn-danger" @click="confirmDelete(col)">Delete</button>
+      <template v-else>
+        <!-- Reorder mode: draggable list -->
+        <draggable
+          v-if="reordering"
+          v-model="collections"
+          item-key="id"
+          handle=".drag-handle"
+          class="collections-reorder-list"
+          :animation="150"
+          @end="saveOrder"
+        >
+          <template #item="{ element: col }">
+            <div class="reorder-row">
+              <span class="drag-handle" title="Drag to reorder">
+                <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18">
+                  <circle cx="7" cy="5" r="1.5"/><circle cx="13" cy="5" r="1.5"/>
+                  <circle cx="7" cy="10" r="1.5"/><circle cx="13" cy="10" r="1.5"/>
+                  <circle cx="7" cy="15" r="1.5"/><circle cx="13" cy="15" r="1.5"/>
+                </svg>
+              </span>
+              <div class="reorder-swatch" :style="{ backgroundColor: col.settings?.background_color || '#f5f5f5' }"></div>
+              <span class="reorder-name">{{ col.name }}</span>
+            </div>
+          </template>
+        </draggable>
+
+        <!-- Normal grid -->
+        <div v-else class="collections-grid">
+          <div v-for="col in collections" :key="col.id" class="collection-card">
+            <div
+              class="card-preview"
+              :style="{ backgroundColor: col.settings?.background_color || '#f5f5f5' }"
+            ></div>
+            <div class="card-body">
+              <RouterLink :to="`/collections/${col.id}`" class="card-name">{{ col.name }}</RouterLink>
+              <div class="card-actions">
+                <RouterLink :to="`/collections/${col.id}`" class="btn-sm">Manage →</RouterLink>
+                <button class="btn-sm" @click="openEdit(col)">Edit</button>
+                <button class="btn-sm btn-danger" @click="confirmDelete(col)">Delete</button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </template>
     </section>
 
     <!-- Create / Edit modal -->
@@ -177,10 +215,12 @@
 import { ref, computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import { authFetch } from '@/utilities/authFetch'
+import draggable from 'vuedraggable'
 
 const collections = ref([])
 const loading = ref(true)
 const storefront = ref(null)
+const reordering = ref(false)
 const showModal = ref(false)
 const editing = ref(null)
 const saving = ref(false)
@@ -213,6 +253,22 @@ async function fetchCollections() {
     console.error('Failed to fetch collections:', err)
   } finally {
     loading.value = false
+  }
+}
+
+function toggleReorder() {
+  reordering.value = !reordering.value
+}
+
+async function saveOrder() {
+  try {
+    await authFetch('/api/collections/reorder', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: collections.value.map(c => c.id) })
+    })
+  } catch (err) {
+    console.error('Failed to save collection order:', err)
   }
 }
 
@@ -468,6 +524,84 @@ onMounted(() => {
 /* ---- Collections grid ---- */
 .collections-section {
   margin-bottom: 40px;
+}
+
+.collections-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.collections-section-header .section-label {
+  margin-bottom: 0;
+}
+
+.btn-reorder {
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.btn-reorder:hover,
+.btn-reorder.active {
+  border-color: var(--color-link);
+  color: var(--color-link);
+}
+
+/* ---- Reorder list ---- */
+.collections-reorder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.reorder-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-background-soft, #fff);
+  cursor: default;
+  user-select: none;
+}
+
+.drag-handle {
+  color: var(--color-text-secondary);
+  cursor: grab;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.reorder-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 5px;
+  border: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.reorder-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--color-text);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .loading-state {

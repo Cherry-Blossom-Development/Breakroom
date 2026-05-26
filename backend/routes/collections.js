@@ -57,7 +57,7 @@ router.get('/', authenticate, async (req, res) => {
   try {
     client = await getClient();
     const result = await client.query(
-      'SELECT id, name, settings, created_at, updated_at FROM user_collections WHERE user_id = $1 ORDER BY created_at DESC',
+      'SELECT id, name, settings, created_at, updated_at FROM user_collections WHERE user_id = $1 ORDER BY display_order ASC, created_at DESC',
       [req.user.id]
     );
     res.json(result.rows.map(parseSettings));
@@ -106,6 +106,36 @@ router.post('/', authenticate, async (req, res) => {
     res.status(201).json(parseSettings(result.rows[0]));
   } catch (err) {
     console.error('Failed to create collection:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// PUT /api/collections/reorder
+router.put('/reorder', authenticate, async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ message: 'ids required' });
+
+  let client;
+  try {
+    client = await getClient();
+    const placeholders = ids.map((_, i) => `$${i + 2}`).join(', ');
+    const check = await client.query(
+      `SELECT id FROM user_collections WHERE user_id = $1 AND id IN (${placeholders})`,
+      [req.user.id, ...ids]
+    );
+    if (check.rowCount !== ids.length) return res.status(403).json({ message: 'Invalid collection IDs' });
+
+    for (let i = 0; i < ids.length; i++) {
+      await client.query(
+        'UPDATE user_collections SET display_order = $1 WHERE id = $2 AND user_id = $3',
+        [i, ids[i], req.user.id]
+      );
+    }
+    res.json({ message: 'Reordered' });
+  } catch (err) {
+    console.error('Failed to reorder collections:', err);
     res.status(500).json({ message: 'Server error' });
   } finally {
     if (client) client.release();
