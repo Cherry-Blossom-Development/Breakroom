@@ -77,7 +77,7 @@ router.get('/public/:storeUrl', async (req, res) => {
     let collections = [];
     if (collectionsVisible) {
       const colResult = await client.query(
-        'SELECT id, name, settings FROM user_collections WHERE user_id = $1 ORDER BY created_at ASC',
+        'SELECT id, name, settings FROM user_collections WHERE user_id = $1 ORDER BY display_order ASC, created_at ASC',
         [row.user_id]
       );
       collections = colResult.rows.map(c => {
