@@ -143,18 +143,51 @@ router.put('/reorder', authenticate, async (req, res) => {
 });
 
 // PUT /api/collections/:id
-router.put('/:id', authenticate, async (req, res) => {
+router.put('/:id', authenticate, upload.single('image'), async (req, res) => {
   const { id } = req.params;
-  const { name, settings } = req.body;
+  const name = req.body.name;
   if (!name || !name.trim()) return res.status(400).json({ message: 'Name is required' });
+
+  const backgroundType = req.body.background_type || 'color';
+  const backgroundColor = req.body.background_color || '#ffffff';
+  const backgroundImagePath = req.body.background_image_path || null;
+
   let client;
   try {
     client = await getClient();
-    const result = await client.query(
-      'UPDATE user_collections SET name = $1, settings = $2 WHERE id = $3 AND user_id = $4',
-      [name.trim(), JSON.stringify(settings || {}), id, req.user.id]
+
+    const current = await client.query(
+      'SELECT settings FROM user_collections WHERE id = $1 AND user_id = $2',
+      [id, req.user.id]
     );
-    if (result.affectedRows === 0) return res.status(404).json({ message: 'Collection not found' });
+    if (current.rowCount === 0) return res.status(404).json({ message: 'Collection not found' });
+
+    let currentSettings = {};
+    try { currentSettings = JSON.parse(current.rows[0].settings || '{}'); } catch {}
+
+    let settings = {};
+    const isCustomBg = (key) => key && /\/bg\.[a-zA-Z]+$/.test(key);
+
+    if (backgroundType === 'image') {
+      let bgKey = backgroundImagePath || currentSettings.background_image || null;
+      if (req.file) {
+        const ext = path.extname(req.file.originalname).toLowerCase();
+        const newKey = `collections/${req.user.id}/${id}/bg${ext}`;
+        const s3Upload = await uploadToS3(req.file.buffer, newKey, req.file.mimetype);
+        if (!s3Upload.success) return res.status(500).json({ message: 'Image upload failed' });
+        if (isCustomBg(currentSettings.background_image)) deleteFromS3(currentSettings.background_image).catch(() => {});
+        bgKey = newKey;
+      }
+      settings = { background_type: 'image', background_image: bgKey, background_color: backgroundColor };
+    } else {
+      if (isCustomBg(currentSettings.background_image)) deleteFromS3(currentSettings.background_image).catch(() => {});
+      settings = { background_type: 'color', background_color: backgroundColor };
+    }
+
+    await client.query(
+      'UPDATE user_collections SET name = $1, settings = $2 WHERE id = $3 AND user_id = $4',
+      [name.trim(), JSON.stringify(settings), id, req.user.id]
+    );
     res.json({ message: 'Updated' });
   } catch (err) {
     console.error('Failed to update collection:', err);

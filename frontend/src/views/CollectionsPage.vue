@@ -126,7 +126,7 @@
                   <circle cx="7" cy="15" r="1.5"/><circle cx="13" cy="15" r="1.5"/>
                 </svg>
               </span>
-              <div class="reorder-swatch" :style="{ backgroundColor: col.settings?.background_color || '#f5f5f5' }"></div>
+              <div class="reorder-swatch" :style="cardBgStyle(col)"></div>
               <span class="reorder-name">{{ col.name }}</span>
             </div>
           </template>
@@ -137,13 +137,13 @@
           <div v-for="col in collections" :key="col.id" class="collection-card">
             <div
               class="card-preview"
-              :style="{ backgroundColor: col.settings?.background_color || '#f5f5f5' }"
+              :style="cardBgStyle(col)"
             ></div>
             <div class="card-body">
               <RouterLink :to="`/collections/${col.id}`" class="card-name">{{ col.name }}</RouterLink>
               <div class="card-actions">
-                <RouterLink :to="`/collections/${col.id}`" class="btn-sm">Manage →</RouterLink>
-                <button class="btn-sm" @click="openEdit(col)">Edit</button>
+                <RouterLink :to="`/collections/${col.id}`" class="btn-sm">Items →</RouterLink>
+                <button class="btn-sm" @click="openEdit(col)">Settings</button>
                 <button class="btn-sm btn-danger" @click="confirmDelete(col)">Delete</button>
               </div>
             </div>
@@ -169,14 +169,72 @@
           />
         </div>
 
-        <div v-if="showBgColor" class="form-group">
-          <label class="form-label">Background Color</label>
-          <div class="color-row">
-            <input v-model="form.background_color" type="color" class="color-swatch" />
-            <div class="color-preview" :style="{ backgroundColor: form.background_color }"></div>
-            <span class="color-value">{{ form.background_color }}</span>
+        <template v-if="showBgColor">
+          <div class="form-group">
+            <label class="form-label">Background</label>
+            <div class="bg-type-toggle">
+              <button type="button" class="bg-type-btn" :class="{ active: form.background_type === 'color' }" @click="form.background_type = 'color'">Color</button>
+              <button type="button" class="bg-type-btn" :class="{ active: form.background_type === 'image' }" @click="onBgTypeImage">Image</button>
+            </div>
           </div>
-        </div>
+
+          <div v-if="form.background_type === 'color'" class="form-group">
+            <div class="color-row">
+              <input v-model="form.background_color" type="color" class="color-swatch" />
+              <div class="color-preview" :style="{ backgroundColor: form.background_color }"></div>
+              <span class="color-value">{{ form.background_color }}</span>
+            </div>
+          </div>
+
+          <div v-else class="form-group">
+            <div class="bg-source-tabs">
+              <button type="button" class="bg-source-btn" :class="{ active: form.background_image_source === 'upload' }" @click="form.background_image_source = 'upload'">Upload image</button>
+              <button type="button" class="bg-source-btn" :class="{ active: form.background_image_source === 'existing' }" @click="onBgSourceExisting">From items</button>
+            </div>
+
+            <input ref="bgFileInput" type="file" accept="image/jpeg,image/png,image/gif,image/webp" style="display:none" @change="onBgFileChange" />
+
+            <div v-if="form.background_image_source === 'upload'"
+              class="file-drop"
+              @click="triggerBgFileInput"
+              @dragover.prevent
+              @drop.prevent="onBgDrop"
+            >
+              <template v-if="bgImagePreview">
+                <img :src="bgImagePreview" alt="Background" class="preview-image" />
+                <button class="replace-btn" @click.stop="clearBgImage">Remove</button>
+              </template>
+              <template v-else>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28" class="drop-icon">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <span class="drop-label">Click or drag an image here</span>
+                <span class="drop-hint">JPEG, PNG, GIF, WebP — max 10 MB</span>
+              </template>
+            </div>
+
+            <div v-else>
+              <div v-if="itemsLoading" class="items-pick-state">Loading items…</div>
+              <div v-else-if="collectionItems.length === 0" class="items-pick-state">
+                No item images available. Add images to your items first.
+              </div>
+              <div v-else class="item-pick-grid">
+                <button
+                  v-for="item in collectionItems"
+                  :key="item.id"
+                  type="button"
+                  class="item-pick-thumb"
+                  :class="{ selected: form.background_image_path === item.image_path }"
+                  @click="selectItemImage(item)"
+                >
+                  <img :src="`/api/uploads/${item.image_path}`" :alt="item.name" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </template>
 
         <div class="modal-actions">
           <button class="btn-secondary" @click="closeModal">Cancel</button>
@@ -224,7 +282,13 @@ const reordering = ref(false)
 const showModal = ref(false)
 const editing = ref(null)
 const saving = ref(false)
-const form = ref({ name: '', background_color: '#ffffff' })
+const form = ref({ name: '', background_color: '#ffffff', background_type: 'color', background_image_source: 'upload', background_image_path: null })
+
+const bgImageFile = ref(null)
+const bgImagePreview = ref(null)
+const bgFileInput = ref(null)
+const collectionItems = ref([])
+const itemsLoading = ref(false)
 
 // Hide background color when this is/will be the only collection
 const showBgColor = computed(() =>
@@ -272,41 +336,121 @@ async function saveOrder() {
   }
 }
 
+function cardBgStyle(col) {
+  const s = col.settings || {}
+  if (s.background_type === 'image' && s.background_image) {
+    return { backgroundImage: `url(/api/uploads/${s.background_image})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+  }
+  return { backgroundColor: s.background_color || '#f5f5f5' }
+}
+
 function openCreate() {
   editing.value = null
-  form.value = { name: '', background_color: '#ffffff' }
+  form.value = { name: '', background_color: '#ffffff', background_type: 'color', background_image_source: 'upload', background_image_path: null }
+  clearBgImage()
+  collectionItems.value = []
   showModal.value = true
 }
 
 function openEdit(col) {
   editing.value = col
+  const s = col.settings || {}
+  const isImage = s.background_type === 'image'
   form.value = {
     name: col.name,
-    background_color: col.settings?.background_color || '#ffffff'
+    background_color: s.background_color || '#ffffff',
+    background_type: isImage ? 'image' : 'color',
+    background_image_source: 'upload',
+    background_image_path: isImage ? (s.background_image || null) : null,
   }
+  bgImageFile.value = null
+  bgImagePreview.value = isImage && s.background_image ? `/api/uploads/${s.background_image}` : null
+  collectionItems.value = []
+  itemsLoading.value = false
   showModal.value = true
+  if (isImage) fetchCollectionItems(col.id)
 }
 
 function closeModal() {
   showModal.value = false
   editing.value = null
+  clearBgImage()
+  collectionItems.value = []
+  itemsLoading.value = false
+}
+
+function onBgTypeImage() {
+  form.value.background_type = 'image'
+  if (collectionItems.value.length === 0 && editing.value) fetchCollectionItems(editing.value.id)
+}
+
+function onBgSourceExisting() {
+  form.value.background_image_source = 'existing'
+  if (collectionItems.value.length === 0 && editing.value) fetchCollectionItems(editing.value.id)
+}
+
+function selectItemImage(item) {
+  form.value.background_image_path = item.image_path
+  bgImageFile.value = null
+  if (bgImagePreview.value?.startsWith('blob:')) URL.revokeObjectURL(bgImagePreview.value)
+  bgImagePreview.value = null
+}
+
+function triggerBgFileInput() { bgFileInput.value?.click() }
+function onBgFileChange(e) { const f = e.target.files?.[0]; if (f) setBgImageFile(f) }
+function onBgDrop(e) { const f = e.dataTransfer.files?.[0]; if (f) setBgImageFile(f) }
+
+function setBgImageFile(file) {
+  if (bgImagePreview.value?.startsWith('blob:')) URL.revokeObjectURL(bgImagePreview.value)
+  bgImageFile.value = file
+  bgImagePreview.value = URL.createObjectURL(file)
+  form.value.background_image_path = null
+}
+
+function clearBgImage() {
+  if (bgImagePreview.value?.startsWith('blob:')) URL.revokeObjectURL(bgImagePreview.value)
+  bgImageFile.value = null
+  bgImagePreview.value = null
+  form.value.background_image_path = null
+}
+
+async function fetchCollectionItems(colId) {
+  itemsLoading.value = true
+  try {
+    const res = await authFetch(`/api/collections/${colId}/items`)
+    if (res.ok) {
+      const items = await res.json()
+      collectionItems.value = items.filter(i => i.image_path)
+    }
+  } catch (err) {
+    console.error('Failed to fetch collection items:', err)
+  } finally {
+    itemsLoading.value = false
+  }
 }
 
 async function save() {
   if (!form.value.name.trim() || saving.value) return
   saving.value = true
   try {
-    const body = {
-      name: form.value.name.trim(),
-      settings: { background_color: form.value.background_color }
+    let res
+    if (editing.value) {
+      const fd = new FormData()
+      fd.append('name', form.value.name.trim())
+      fd.append('background_type', form.value.background_type)
+      fd.append('background_color', form.value.background_color)
+      if (form.value.background_type === 'image') {
+        if (bgImageFile.value) fd.append('image', bgImageFile.value)
+        else if (form.value.background_image_path) fd.append('background_image_path', form.value.background_image_path)
+      }
+      res = await authFetch(`/api/collections/${editing.value.id}`, { method: 'PUT', body: fd })
+    } else {
+      res = await authFetch('/api/collections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: form.value.name.trim(), settings: { background_type: 'color', background_color: form.value.background_color } })
+      })
     }
-    const url = editing.value ? `/api/collections/${editing.value.id}` : '/api/collections'
-    const method = editing.value ? 'PUT' : 'POST'
-    const res = await authFetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    })
     if (res.ok) {
       closeModal()
       await fetchCollections()
@@ -808,6 +952,143 @@ onMounted(() => {
   outline: none;
   border-color: var(--color-link);
 }
+
+/* ---- Background type toggle ---- */
+.bg-type-toggle {
+  display: flex;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  overflow: hidden;
+  width: fit-content;
+}
+
+.bg-type-btn {
+  padding: 6px 18px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.bg-type-btn + .bg-type-btn {
+  border-left: 1px solid var(--color-border);
+}
+
+.bg-type-btn.active {
+  background: var(--color-link);
+  color: #fff;
+}
+
+/* ---- Image source tabs ---- */
+.bg-source-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.bg-source-btn {
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.bg-source-btn.active {
+  border-color: var(--color-link);
+  color: var(--color-link);
+}
+
+/* ---- File drop (shared with CollectionDetailPage pattern) ---- */
+.file-drop {
+  border: 2px dashed var(--color-border);
+  border-radius: 8px;
+  padding: 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.file-drop:hover { border-color: var(--color-link); }
+.drop-icon { color: var(--color-text-secondary); }
+
+.drop-label {
+  font-size: 0.9rem;
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.drop-hint {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+.preview-image {
+  max-width: 180px;
+  max-height: 130px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+}
+
+.replace-btn {
+  font-size: 0.82rem;
+  color: var(--color-link);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+/* ---- Item image picker ---- */
+.items-pick-state {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  padding: 14px 0;
+  text-align: center;
+}
+
+.item-pick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.item-pick-thumb {
+  aspect-ratio: 1;
+  border: 2px solid transparent;
+  border-radius: 6px;
+  overflow: hidden;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.item-pick-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.item-pick-thumb:hover { border-color: var(--color-link); }
+.item-pick-thumb.selected { border-color: var(--color-link); box-shadow: 0 0 0 2px var(--color-link); }
 
 .color-row {
   display: flex;

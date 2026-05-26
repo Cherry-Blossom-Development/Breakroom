@@ -75,7 +75,7 @@
                   :key="col.id"
                   :to="`/store/${route.params.storeUrl}/c/${col.id}`"
                   class="collection-card"
-                  :style="{ backgroundColor: col.settings?.background_color || '#f5f5f5' }"
+                  :style="collectionCardStyle(col)"
                 >
                   <span class="collection-name">{{ col.name }}</span>
                   <span class="collection-arrow">→</span>
@@ -283,6 +283,14 @@ const pageStyle = computed(() => {
   const bg = storefront.value?.settings?.background_color
   return bg ? { backgroundColor: bg } : {}
 })
+
+function collectionCardStyle(col) {
+  const s = col.settings || {}
+  if (s.background_type === 'image' && s.background_image) {
+    return { backgroundImage: `url(/api/uploads/${s.background_image})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+  }
+  return { backgroundColor: s.background_color || '#f5f5f5' }
+}
 
 // ── Single-collection inline items ───────────────────────────────────────────
 const collectionItems = ref([])

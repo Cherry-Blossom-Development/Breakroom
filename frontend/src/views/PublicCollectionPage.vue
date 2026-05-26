@@ -250,8 +250,11 @@ const notFound = ref(false)
 const data = ref(null)
 
 const pageStyle = computed(() => {
-  const bg = data.value?.collection?.settings?.background_color
-  return bg ? { backgroundColor: bg } : {}
+  const s = data.value?.collection?.settings || {}
+  if (s.background_type === 'image' && s.background_image) {
+    return { backgroundImage: `url(/api/uploads/${s.background_image})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+  }
+  return s.background_color ? { backgroundColor: s.background_color } : {}
 })
 
 // ── Fetch collection ──────────────────────────────────────────────────────────
