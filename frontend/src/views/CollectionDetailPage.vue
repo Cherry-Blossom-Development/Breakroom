@@ -93,6 +93,15 @@
           />
         </div>
 
+        <div v-if="editing" class="form-group">
+          <label class="form-label">Collection</label>
+          <select v-model="form.collection_id" class="form-select">
+            <option v-for="col in allCollections" :key="col.id" :value="col.id">
+              {{ col.name }}
+            </option>
+          </select>
+        </div>
+
         <div class="form-group">
           <label class="form-label">Image</label>
           <div v-if="editing && editing.image_path && !newImageFile" class="current-image-wrap">
@@ -289,6 +298,7 @@ const collectionId = route.params.id
 
 const collection = ref(null)
 const items = ref([])
+const allCollections = ref([])
 const loading = ref(true)
 
 const showModal = ref(false)
@@ -298,6 +308,7 @@ const saving = ref(false)
 const emptyForm = () => ({
   name: '',
   description: '',
+  collection_id: collectionId,
   price: '',
   is_available: false,
   in_gallery: true,
@@ -330,6 +341,15 @@ async function fetchCollection() {
   }
 }
 
+async function fetchCollections() {
+  try {
+    const res = await authFetch('/api/collections')
+    if (res.ok) allCollections.value = await res.json()
+  } catch (err) {
+    console.error('Failed to fetch collections:', err)
+  }
+}
+
 async function fetchItems() {
   loading.value = true
   try {
@@ -354,6 +374,7 @@ function openEdit(item) {
   form.value = {
     name: item.name,
     description: item.description || '',
+    collection_id: collectionId,
     price: centsToDisplay(item.price_cents),
     is_available: !!item.is_available,
     in_gallery: item.in_gallery !== 0,
@@ -397,6 +418,8 @@ async function save() {
     fd.append('description', form.value.description)
     fd.append('is_available', String(form.value.is_available))
     fd.append('in_gallery', String(form.value.in_gallery))
+    if (editing.value && String(form.value.collection_id) !== String(collectionId))
+      fd.append('new_collection_id', form.value.collection_id)
     if (form.value.price !== '') fd.append('price', form.value.price)
     if (form.value.shipping_cost !== '') fd.append('shipping_cost', form.value.shipping_cost)
     if (form.value.weight_oz !== '') fd.append('weight_oz', form.value.weight_oz)
@@ -450,6 +473,7 @@ async function executeDelete() {
 onMounted(() => {
   fetchCollection()
   fetchItems()
+  fetchCollections()
 })
 </script>
 
@@ -795,6 +819,22 @@ onMounted(() => {
 }
 
 .form-textarea:focus { outline: none; border-color: var(--color-link); }
+
+.form-select {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 0.95rem;
+  color: var(--color-text);
+  background: var(--color-background, #fff);
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  appearance: auto;
+}
+
+.form-select:focus { outline: none; border-color: var(--color-link); }
 
 /* Section dividers */
 .section-divider {

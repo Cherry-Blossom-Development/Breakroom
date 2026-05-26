@@ -258,6 +258,7 @@ router.post('/:id/items', authenticate, upload.single('image'), async (req, res)
 router.put('/:id/items/:itemId', authenticate, upload.single('image'), async (req, res) => {
   const { id, itemId } = req.params;
   const { name, description } = req.body;
+  const newCollectionId = req.body.new_collection_id || null;
   if (!name || !name.trim()) return res.status(400).json({ message: 'Name is required' });
 
   const priceCents       = req.body.price        ? Math.round(parseFloat(req.body.price) * 100)        : null;
@@ -278,6 +279,15 @@ router.put('/:id/items/:itemId', authenticate, upload.single('image'), async (re
     );
     if (col.rowCount === 0) return res.status(404).json({ message: 'Collection not found' });
 
+    const targetCollectionId = (newCollectionId && String(newCollectionId) !== String(id)) ? newCollectionId : id;
+    if (targetCollectionId !== id) {
+      const newCol = await client.query(
+        'SELECT id FROM user_collections WHERE id = $1 AND user_id = $2',
+        [targetCollectionId, req.user.id]
+      );
+      if (newCol.rowCount === 0) return res.status(404).json({ message: 'Target collection not found' });
+    }
+
     const existing = await client.query(
       'SELECT id, image_path FROM collection_items WHERE id = $1 AND collection_id = $2',
       [itemId, id]
@@ -287,7 +297,7 @@ router.put('/:id/items/:itemId', authenticate, upload.single('image'), async (re
     let s3Key = existing.rows[0].image_path;
     if (req.file) {
       const ext = path.extname(req.file.originalname).toLowerCase();
-      const newKey = `collections/${req.user.id}/${id}/item_${Date.now()}${ext}`;
+      const newKey = `collections/${req.user.id}/${targetCollectionId}/item_${Date.now()}${ext}`;
       const upload = await uploadToS3(req.file.buffer, newKey, req.file.mimetype);
       if (!upload.success) return res.status(500).json({ message: 'Image upload failed' });
       if (s3Key) deleteFromS3(s3Key).catch(() => {});
@@ -298,11 +308,12 @@ router.put('/:id/items/:itemId', authenticate, upload.single('image'), async (re
       `UPDATE collection_items SET
          name = $1, description = $2, image_path = $3,
          price_cents = $4, is_available = $5, in_gallery = $6, shipping_cost_cents = $7,
-         weight_oz = $8, length_in = $9, width_in = $10, height_in = $11
-       WHERE id = $12`,
+         weight_oz = $8, length_in = $9, width_in = $10, height_in = $11,
+         collection_id = $12
+       WHERE id = $13`,
       [name.trim(), description || null, s3Key,
        priceCents, isAvailable, inGallery, shippingCents,
-       weightOz, lengthIn, widthIn, heightIn, itemId]
+       weightOz, lengthIn, widthIn, heightIn, targetCollectionId, itemId]
     );
     const result = await client.query(
       `SELECT id, name, description, image_path, display_order,
