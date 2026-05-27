@@ -88,7 +88,7 @@ router.post('/impersonate/:userId', authenticate, checkPermission('admin_access'
     );
 
     res.cookie('jwtToken', token, { ...cookieOptions(), maxAge: 4 * 60 * 60 * 1000 });
-    res.json({ handle: target.handle, displayName: [target.first_name, target.last_name].filter(Boolean).join(' ') || target.handle });
+    res.json({ handle: target.handle, displayName: [target.first_name, target.last_name].filter(Boolean).join(' ') || target.handle, token });
   } catch (err) {
     console.error('Impersonate error:', err);
     res.status(500).json({ message: 'Server error' });
