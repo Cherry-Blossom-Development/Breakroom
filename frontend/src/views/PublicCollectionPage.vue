@@ -251,9 +251,6 @@ const data = ref(null)
 
 const pageStyle = computed(() => {
   const s = data.value?.collection?.settings || {}
-  if (s.background_type === 'image' && s.background_image) {
-    return { backgroundImage: `url(/api/uploads/${s.background_image})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-  }
   return s.background_color ? { backgroundColor: s.background_color } : {}
 })
 

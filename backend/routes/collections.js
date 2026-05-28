@@ -148,9 +148,9 @@ router.put('/:id', authenticate, upload.single('image'), async (req, res) => {
   const name = req.body.name;
   if (!name || !name.trim()) return res.status(400).json({ message: 'Name is required' });
 
-  const backgroundType = req.body.background_type || 'color';
   const backgroundColor = req.body.background_color || '#ffffff';
   const backgroundImagePath = req.body.background_image_path || null;
+  const clearTileImage = req.body.clear_tile_image === 'true';
 
   let client;
   try {
@@ -165,24 +165,28 @@ router.put('/:id', authenticate, upload.single('image'), async (req, res) => {
     let currentSettings = {};
     try { currentSettings = JSON.parse(current.rows[0].settings || '{}'); } catch {}
 
-    let settings = {};
     const isCustomBg = (key) => key && /\/bg\.[a-zA-Z]+$/.test(key);
+    let tileImage = currentSettings.background_image || null;
 
-    if (backgroundType === 'image') {
-      let bgKey = backgroundImagePath || currentSettings.background_image || null;
-      if (req.file) {
-        const ext = path.extname(req.file.originalname).toLowerCase();
-        const newKey = `collections/${req.user.id}/${id}/bg${ext}`;
-        const s3Upload = await uploadToS3(req.file.buffer, newKey, req.file.mimetype);
-        if (!s3Upload.success) return res.status(500).json({ message: 'Image upload failed' });
-        if (isCustomBg(currentSettings.background_image)) deleteFromS3(currentSettings.background_image).catch(() => {});
-        bgKey = newKey;
+    if (req.file) {
+      const ext = path.extname(req.file.originalname).toLowerCase();
+      const newKey = `collections/${req.user.id}/${id}/bg${ext}`;
+      const s3Upload = await uploadToS3(req.file.buffer, newKey, req.file.mimetype);
+      if (!s3Upload.success) return res.status(500).json({ message: 'Image upload failed' });
+      if (isCustomBg(tileImage)) deleteFromS3(tileImage).catch(() => {});
+      tileImage = newKey;
+    } else if (backgroundImagePath) {
+      if (backgroundImagePath !== tileImage && isCustomBg(tileImage)) {
+        deleteFromS3(tileImage).catch(() => {});
       }
-      settings = { background_type: 'image', background_image: bgKey, background_color: backgroundColor };
-    } else {
-      if (isCustomBg(currentSettings.background_image)) deleteFromS3(currentSettings.background_image).catch(() => {});
-      settings = { background_type: 'color', background_color: backgroundColor };
+      tileImage = backgroundImagePath;
+    } else if (clearTileImage) {
+      if (isCustomBg(tileImage)) deleteFromS3(tileImage).catch(() => {});
+      tileImage = null;
     }
+
+    const settings = { background_color: backgroundColor };
+    if (tileImage) settings.background_image = tileImage;
 
     await client.query(
       'UPDATE user_collections SET name = $1, settings = $2 WHERE id = $3 AND user_id = $4',

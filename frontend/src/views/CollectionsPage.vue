@@ -170,15 +170,10 @@
         </div>
 
         <template v-if="showBgColor">
+          <!-- Background color — always shown -->
           <div class="form-group">
-            <label class="form-label">Background</label>
-            <div class="bg-type-toggle">
-              <button type="button" class="bg-type-btn" :class="{ active: form.background_type === 'color' }" @click="form.background_type = 'color'">Color</button>
-              <button type="button" class="bg-type-btn" :class="{ active: form.background_type === 'image' }" @click="onBgTypeImage">Image</button>
-            </div>
-          </div>
-
-          <div v-if="form.background_type === 'color'" class="form-group">
+            <label class="form-label">Background Color</label>
+            <p class="form-hint" style="margin-bottom:8px">Shown as the page background when viewing items in the collection.</p>
             <div class="color-row">
               <input v-model="form.background_color" type="color" class="color-swatch" />
               <div class="color-preview" :style="{ backgroundColor: form.background_color }"></div>
@@ -186,7 +181,11 @@
             </div>
           </div>
 
-          <div v-else class="form-group">
+          <!-- Tile image — always shown -->
+          <div class="form-group">
+            <label class="form-label">Tile Image</label>
+            <p class="form-hint" style="margin-bottom:8px">Image shown on the storefront tile. If none is set, the background color is used instead.</p>
+
             <div class="bg-source-tabs">
               <button type="button" class="bg-source-btn" :class="{ active: form.background_image_source === 'upload' }" @click="form.background_image_source = 'upload'">Upload image</button>
               <button type="button" class="bg-source-btn" :class="{ active: form.background_image_source === 'existing' }" @click="onBgSourceExisting">From items</button>
@@ -201,7 +200,7 @@
               @drop.prevent="onBgDrop"
             >
               <template v-if="bgImagePreview">
-                <img :src="bgImagePreview" alt="Background" class="preview-image" />
+                <img :src="bgImagePreview" alt="Tile image" class="preview-image" />
                 <button class="replace-btn" @click.stop="clearBgImage">Remove</button>
               </template>
               <template v-else>
@@ -282,11 +281,12 @@ const reordering = ref(false)
 const showModal = ref(false)
 const editing = ref(null)
 const saving = ref(false)
-const form = ref({ name: '', background_color: '#ffffff', background_type: 'color', background_image_source: 'upload', background_image_path: null })
+const form = ref({ name: '', background_color: '#ffffff', background_image_source: 'upload', background_image_path: null })
 
 const bgImageFile = ref(null)
 const bgImagePreview = ref(null)
 const bgFileInput = ref(null)
+const tileImageCleared = ref(false)
 const collectionItems = ref([])
 const itemsLoading = ref(false)
 
@@ -338,7 +338,7 @@ async function saveOrder() {
 
 function cardBgStyle(col) {
   const s = col.settings || {}
-  if (s.background_type === 'image' && s.background_image) {
+  if (s.background_image) {
     return { backgroundImage: `url(/api/uploads/${s.background_image})`, backgroundSize: 'cover', backgroundPosition: 'center' }
   }
   return { backgroundColor: s.background_color || '#f5f5f5' }
@@ -346,8 +346,11 @@ function cardBgStyle(col) {
 
 function openCreate() {
   editing.value = null
-  form.value = { name: '', background_color: '#ffffff', background_type: 'color', background_image_source: 'upload', background_image_path: null }
-  clearBgImage()
+  form.value = { name: '', background_color: '#ffffff', background_image_source: 'upload', background_image_path: null }
+  if (bgImagePreview.value?.startsWith('blob:')) URL.revokeObjectURL(bgImagePreview.value)
+  bgImageFile.value = null
+  bgImagePreview.value = null
+  tileImageCleared.value = false
   collectionItems.value = []
   showModal.value = true
 }
@@ -355,33 +358,29 @@ function openCreate() {
 function openEdit(col) {
   editing.value = col
   const s = col.settings || {}
-  const isImage = s.background_type === 'image'
   form.value = {
     name: col.name,
     background_color: s.background_color || '#ffffff',
-    background_type: isImage ? 'image' : 'color',
     background_image_source: 'upload',
-    background_image_path: isImage ? (s.background_image || null) : null,
+    background_image_path: s.background_image || null,
   }
   bgImageFile.value = null
-  bgImagePreview.value = isImage && s.background_image ? `/api/uploads/${s.background_image}` : null
+  bgImagePreview.value = s.background_image ? `/api/uploads/${s.background_image}` : null
+  tileImageCleared.value = false
   collectionItems.value = []
   itemsLoading.value = false
   showModal.value = true
-  if (isImage) fetchCollectionItems(col.id)
 }
 
 function closeModal() {
   showModal.value = false
   editing.value = null
-  clearBgImage()
+  if (bgImagePreview.value?.startsWith('blob:')) URL.revokeObjectURL(bgImagePreview.value)
+  bgImageFile.value = null
+  bgImagePreview.value = null
+  tileImageCleared.value = false
   collectionItems.value = []
   itemsLoading.value = false
-}
-
-function onBgTypeImage() {
-  form.value.background_type = 'image'
-  if (collectionItems.value.length === 0 && editing.value) fetchCollectionItems(editing.value.id)
 }
 
 function onBgSourceExisting() {
@@ -412,6 +411,7 @@ function clearBgImage() {
   bgImageFile.value = null
   bgImagePreview.value = null
   form.value.background_image_path = null
+  tileImageCleared.value = true
 }
 
 async function fetchCollectionItems(colId) {
@@ -437,18 +437,20 @@ async function save() {
     if (editing.value) {
       const fd = new FormData()
       fd.append('name', form.value.name.trim())
-      fd.append('background_type', form.value.background_type)
       fd.append('background_color', form.value.background_color)
-      if (form.value.background_type === 'image') {
-        if (bgImageFile.value) fd.append('image', bgImageFile.value)
-        else if (form.value.background_image_path) fd.append('background_image_path', form.value.background_image_path)
+      if (bgImageFile.value) {
+        fd.append('image', bgImageFile.value)
+      } else if (form.value.background_image_path) {
+        fd.append('background_image_path', form.value.background_image_path)
+      } else if (tileImageCleared.value) {
+        fd.append('clear_tile_image', 'true')
       }
       res = await authFetch(`/api/collections/${editing.value.id}`, { method: 'PUT', body: fd })
     } else {
       res = await authFetch('/api/collections', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: form.value.name.trim(), settings: { background_type: 'color', background_color: form.value.background_color } })
+        body: JSON.stringify({ name: form.value.name.trim(), settings: { background_color: form.value.background_color } })
       })
     }
     if (res.ok) {
@@ -936,6 +938,13 @@ onMounted(() => {
   margin-bottom: 6px;
 }
 
+.form-hint {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  margin: 0;
+  line-height: 1.4;
+}
+
 .form-input {
   width: 100%;
   padding: 9px 12px;
@@ -951,35 +960,6 @@ onMounted(() => {
 .form-input:focus {
   outline: none;
   border-color: var(--color-link);
-}
-
-/* ---- Background type toggle ---- */
-.bg-type-toggle {
-  display: flex;
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  overflow: hidden;
-  width: fit-content;
-}
-
-.bg-type-btn {
-  padding: 6px 18px;
-  font-size: 0.88rem;
-  font-weight: 600;
-  border: none;
-  background: transparent;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-
-.bg-type-btn + .bg-type-btn {
-  border-left: 1px solid var(--color-border);
-}
-
-.bg-type-btn.active {
-  background: var(--color-link);
-  color: #fff;
 }
 
 /* ---- Image source tabs ---- */

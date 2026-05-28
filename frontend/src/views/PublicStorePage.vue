@@ -296,7 +296,7 @@ const collectionGridVars = computed(() => {
 
 function collectionCardStyle(col) {
   const s = col.settings || {}
-  if (s.background_type === 'image' && s.background_image) {
+  if (s.background_image) {
     return { backgroundImage: `url(/api/uploads/${s.background_image})`, backgroundSize: 'cover', backgroundPosition: 'center' }
   }
   return { backgroundColor: s.background_color || '#f5f5f5' }
