@@ -506,7 +506,7 @@ async function submitPayment() {
 }
 
 .store-content {
-  max-width: 960px;
+  width: max(960px, 90vw);
   margin: 0 auto;
   padding: 60px 32px 80px;
 }
@@ -589,7 +589,7 @@ async function submitPayment() {
 
 .collections-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 16px;
 }
 
