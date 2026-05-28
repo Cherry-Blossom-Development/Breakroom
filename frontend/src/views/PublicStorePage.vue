@@ -69,7 +69,7 @@
 
             <!-- Multiple collections: original grid -->
             <template v-else>
-              <div v-if="storefront.collections?.length" class="collections-grid">
+              <div v-if="storefront.collections?.length" class="collections-grid" :style="collectionGridVars">
                 <RouterLink
                   v-for="col in storefront.collections"
                   :key="col.id"
@@ -282,6 +282,16 @@ const storefront = ref(null)
 const pageStyle = computed(() => {
   const bg = storefront.value?.settings?.background_color
   return bg ? { backgroundColor: bg } : {}
+})
+
+const collectionGridVars = computed(() => {
+  const s = storefront.value?.settings || {}
+  const minWidths = { small: '200px', medium: '300px', large: '460px' }
+  const aspects = { portrait: '1 / 1.618', square: '1 / 1', landscape: '1.618 / 1' }
+  return {
+    '--card-min-width': minWidths[s.collections_display_size] || '200px',
+    '--card-aspect': aspects[s.collections_aspect_ratio] || '1.618 / 1'
+  }
 })
 
 function collectionCardStyle(col) {
@@ -589,22 +599,24 @@ async function submitPayment() {
 
 .collections-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(var(--card-min-width, 200px), 1fr));
   gap: 16px;
 }
 
 .collection-card {
   border-radius: 10px;
-  padding: 28px 20px;
+  padding: 20px;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
-  min-height: 100px;
+  aspect-ratio: var(--card-aspect, 1.618 / 1);
   text-decoration: none;
   color: inherit;
   transition: filter 0.15s, box-shadow 0.15s;
   cursor: pointer;
+  background-size: cover;
+  background-position: center;
 }
 
 .collection-card:hover {

@@ -136,7 +136,28 @@
                         style="max-width:360px"
                       />
                     </div>
-                    <p class="form-hint" style="margin-top:8px">
+
+                    <div class="form-group" style="margin-top:14px">
+                      <label class="form-label" style="font-size:0.82rem">Display size</label>
+                      <p class="form-hint" style="margin-bottom:8px">Controls how many collections appear per row.</p>
+                      <div class="option-group">
+                        <button type="button" class="option-btn" :class="{ active: collectionsDisplaySize === 'small' }" @click="collectionsDisplaySize = 'small'">Small</button>
+                        <button type="button" class="option-btn" :class="{ active: collectionsDisplaySize === 'medium' }" @click="collectionsDisplaySize = 'medium'">Medium</button>
+                        <button type="button" class="option-btn" :class="{ active: collectionsDisplaySize === 'large' }" @click="collectionsDisplaySize = 'large'">Large</button>
+                      </div>
+                    </div>
+
+                    <div class="form-group" style="margin-top:14px">
+                      <label class="form-label" style="font-size:0.82rem">Aspect ratio</label>
+                      <p class="form-hint" style="margin-bottom:8px">Shape of each collection card. Portrait and Landscape use the golden ratio.</p>
+                      <div class="option-group">
+                        <button type="button" class="option-btn" :class="{ active: collectionsAspectRatio === 'portrait' }" @click="collectionsAspectRatio = 'portrait'">Portrait</button>
+                        <button type="button" class="option-btn" :class="{ active: collectionsAspectRatio === 'square' }" @click="collectionsAspectRatio = 'square'">Square</button>
+                        <button type="button" class="option-btn" :class="{ active: collectionsAspectRatio === 'landscape' }" @click="collectionsAspectRatio = 'landscape'">Landscape</button>
+                      </div>
+                    </div>
+
+                    <p class="form-hint" style="margin-top:12px">
                       All your collections will appear here automatically. Manage them on the
                       <RouterLink to="/collections">Collections</RouterLink> page.
                     </p>
@@ -182,6 +203,8 @@ const pageTitle = ref('')
 const contentBody = ref('')
 const backgroundColor = ref('#ffffff')
 const sections = ref(DEFAULT_SECTIONS.map(s => ({ ...s })))
+const collectionsDisplaySize = ref('small')
+const collectionsAspectRatio = ref('landscape')
 
 const urlChecking = ref(false)
 const urlAvailable = ref(null)
@@ -246,6 +269,8 @@ async function fetchStorefront() {
         if (data.settings) {
           if (data.settings.sections) sections.value = data.settings.sections
           if (data.settings.background_color) backgroundColor.value = data.settings.background_color
+          if (data.settings.collections_display_size) collectionsDisplaySize.value = data.settings.collections_display_size
+          if (data.settings.collections_aspect_ratio) collectionsAspectRatio.value = data.settings.collections_aspect_ratio
         }
       }
     }
@@ -267,7 +292,12 @@ async function save() {
         store_url: storeUrl.value,
         page_title: pageTitle.value,
         content: contentBody.value,
-        settings: { sections: sections.value, background_color: backgroundColor.value }
+        settings: {
+          sections: sections.value,
+          background_color: backgroundColor.value,
+          collections_display_size: collectionsDisplaySize.value,
+          collections_aspect_ratio: collectionsAspectRatio.value
+        }
       })
     })
     if (res.ok) {
@@ -546,6 +576,35 @@ onBeforeUnmount(() => clearTimeout(urlCheckTimer))
   font-size: 0.8rem;
   color: var(--color-text-secondary);
   font-style: italic;
+}
+
+/* ---- Option group (segmented control) ---- */
+.option-group {
+  display: flex;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+  width: fit-content;
+}
+
+.option-btn {
+  padding: 5px 16px;
+  font-size: 0.84rem;
+  font-weight: 500;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.option-btn + .option-btn {
+  border-left: 1px solid var(--color-border);
+}
+
+.option-btn.active {
+  background: var(--color-link);
+  color: #fff;
 }
 
 /* ---- Buttons ---- */
