@@ -610,7 +610,7 @@ async function submitPayment() {
 .collection-card {
   border-radius: 10px;
   overflow: hidden;
-  border: 1px solid rgba(0,0,0,0.08);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.08);
   text-decoration: none;
   color: inherit;
   display: flex;
@@ -620,7 +620,7 @@ async function submitPayment() {
 }
 
 .collection-card:hover {
-  box-shadow: 0 6px 24px rgba(0,0,0,0.1);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.08), 0 6px 24px rgba(0,0,0,0.1);
   transform: translateY(-2px);
 }
 
