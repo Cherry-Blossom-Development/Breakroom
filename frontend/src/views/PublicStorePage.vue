@@ -629,13 +629,11 @@ async function submitPayment() {
   aspect-ratio: var(--card-aspect, 1.618 / 1);
   background-size: cover;
   background-position: center;
-  border-radius: 10px 10px 0 0;
 }
 
 .collection-body {
   padding: 14px 16px 16px;
   background: #fff;
-  border-radius: 0 0 10px 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
