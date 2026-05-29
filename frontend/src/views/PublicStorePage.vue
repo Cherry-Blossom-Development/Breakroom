@@ -610,7 +610,6 @@ async function submitPayment() {
 .collection-card {
   border-radius: 10px;
   overflow: hidden;
-  border: 1px solid rgba(0,0,0,0.08);
   text-decoration: none;
   color: inherit;
   display: flex;
