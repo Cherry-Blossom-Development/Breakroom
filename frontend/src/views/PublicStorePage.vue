@@ -518,9 +518,11 @@ async function submitPayment() {
 }
 
 .store-content {
-  width: max(960px, 90vw);
+  width: 100%;
+  max-width: max(960px, 90vw);
   margin: 0 auto;
   padding: 60px 32px 80px;
+  box-sizing: border-box;
 }
 
 .store-title {
