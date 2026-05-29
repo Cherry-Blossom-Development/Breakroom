@@ -132,7 +132,7 @@ function goToAuthorProfile() {
         <div class="author-info">
           <h1 class="blog-title">{{ blog.blog_name }}</h1>
           <p class="author-name">by {{ authorName }}</p>
-          <p v-if="blog.author?.bio" class="author-bio">{{ blog.author.bio }}</p>
+          <div v-if="blog.author?.bio" class="author-bio" v-html="blog.author.bio"></div>
         </div>
       </header>
 
