@@ -75,10 +75,12 @@
                   :key="col.id"
                   :to="`/store/${route.params.storeUrl}/c/${col.id}`"
                   class="collection-card"
-                  :style="collectionCardStyle(col)"
                 >
-                  <span class="collection-name">{{ col.name }}</span>
-                  <span class="collection-arrow">→</span>
+                  <div class="collection-image" :style="collectionCardStyle(col)"></div>
+                  <div class="collection-body">
+                    <span class="collection-name">{{ col.name }}</span>
+                    <span class="collection-arrow">→</span>
+                  </div>
                 </RouterLink>
               </div>
               <p v-else class="collections-empty">No collections yet.</p>
@@ -605,34 +607,46 @@ async function submitPayment() {
 
 .collection-card {
   border-radius: 10px;
-  padding: 20px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 12px;
-  aspect-ratio: var(--card-aspect, 1.618 / 1);
+  overflow: hidden;
+  border: 1px solid rgba(0,0,0,0.08);
   text-decoration: none;
   color: inherit;
-  transition: filter 0.15s, box-shadow 0.15s;
+  display: flex;
+  flex-direction: column;
+  transition: box-shadow 0.15s, transform 0.15s;
   cursor: pointer;
+}
+
+.collection-card:hover {
+  box-shadow: 0 6px 24px rgba(0,0,0,0.1);
+  transform: translateY(-2px);
+}
+
+.collection-image {
+  width: 100%;
+  aspect-ratio: var(--card-aspect, 1.618 / 1);
   background-size: cover;
   background-position: center;
 }
 
-.collection-card:hover {
-  filter: brightness(0.95);
-  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+.collection-body {
+  padding: 14px 16px 16px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .collection-name {
   font-size: 1rem;
   font-weight: 600;
-  color: inherit;
+  color: #222;
 }
 
 .collection-arrow {
   font-size: 1.1rem;
-  opacity: 0.6;
+  color: #888;
   flex-shrink: 0;
 }
 
