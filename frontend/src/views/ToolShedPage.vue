@@ -40,8 +40,7 @@ const allTools = {
       name: 'Artist Showcase',
       description: 'List and sell your original artwork and prints directly through Prosaurus.',
       route: '/collections',
-      shortcutName: 'Artist Showcase',
-      featureKey: 'collections'
+      shortcutName: 'Artist Showcase'
     }
   ],
   writer: [
