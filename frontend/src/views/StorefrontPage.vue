@@ -72,8 +72,8 @@
           />
         </div>
 
-        <!-- Background color -->
-        <div class="form-group">
+        <!-- Background color — hidden when a single collection controls the site background -->
+        <div v-if="!isSingleCollection" class="form-group">
           <label class="form-label">Background Color</label>
           <p class="form-hint">Sets the background color of your public store page.</p>
           <div class="color-row">
@@ -205,6 +205,9 @@ const backgroundColor = ref('#ffffff')
 const sections = ref(DEFAULT_SECTIONS.map(s => ({ ...s })))
 const collectionsDisplaySize = ref('small')
 const collectionsAspectRatio = ref('landscape')
+const collectionCount = ref(null)
+
+const isSingleCollection = computed(() => collectionCount.value !== null && collectionCount.value <= 1)
 
 const urlChecking = ref(false)
 const urlAvailable = ref(null)
@@ -319,7 +322,19 @@ function formatDate(isoString) {
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
-onMounted(fetchStorefront)
+async function fetchCollectionCount() {
+  try {
+    const res = await authFetch('/api/collections')
+    if (res.ok) {
+      const data = await res.json()
+      collectionCount.value = Array.isArray(data) ? data.length : (data.collections?.length ?? 0)
+    }
+  } catch (err) {
+    console.error('Failed to fetch collections:', err)
+  }
+}
+
+onMounted(() => { fetchStorefront(); fetchCollectionCount() })
 onBeforeUnmount(() => clearTimeout(urlCheckTimer))
 </script>
 
