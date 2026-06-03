@@ -169,22 +169,27 @@
           />
         </div>
 
-        <template v-if="showBgColor">
-          <!-- Background color — always shown -->
-          <div class="form-group">
-            <label class="form-label">Background Color</label>
-            <p class="form-hint" style="margin-bottom:8px">Shown as the page background when viewing items in the collection.</p>
-            <div class="color-row">
-              <input v-model="form.background_color" type="color" class="color-swatch" />
-              <div class="color-preview" :style="{ backgroundColor: form.background_color }"></div>
-              <span class="color-value">{{ form.background_color }}</span>
-            </div>
+        <!-- Background color -->
+        <div class="form-group">
+          <label class="form-label">Background Color</label>
+          <p class="form-hint" style="margin-bottom:8px">
+            <template v-if="isSingleCollection">Used as the site-wide background color for your showcase.</template>
+            <template v-else>Shown as the page background when viewing items in the collection.</template>
+          </p>
+          <div class="color-row">
+            <input v-model="form.background_color" type="color" class="color-swatch" />
+            <div class="color-preview" :style="{ backgroundColor: form.background_color }"></div>
+            <span class="color-value">{{ form.background_color }}</span>
           </div>
+        </div>
 
-          <!-- Tile image — always shown -->
-          <div class="form-group">
-            <label class="form-label">Tile Image</label>
-            <p class="form-hint" style="margin-bottom:8px">Image shown on the storefront tile. If none is set, the background color is used instead.</p>
+        <!-- Background / tile image -->
+        <div class="form-group">
+          <label class="form-label">{{ isSingleCollection ? 'Background Image' : 'Tile Image' }}</label>
+          <p class="form-hint" style="margin-bottom:8px">
+            <template v-if="isSingleCollection">Used as the site-wide background image for your showcase. If none is set, the background color is used instead.</template>
+            <template v-else>Image shown on the storefront tile. If none is set, the background color is used instead.</template>
+          </p>
 
             <div class="bg-source-tabs">
               <button type="button" class="bg-source-btn" :class="{ active: form.background_image_source === 'upload' }" @click="form.background_image_source = 'upload'">Upload image</button>
@@ -232,8 +237,7 @@
                 </button>
               </div>
             </div>
-          </div>
-        </template>
+        </div>
 
         <div class="modal-actions">
           <button class="btn-secondary" @click="closeModal">Cancel</button>
@@ -290,9 +294,8 @@ const tileImageCleared = ref(false)
 const collectionItems = ref([])
 const itemsLoading = ref(false)
 
-// Hide background color when this is/will be the only collection
-const showBgColor = computed(() =>
-  (editing.value ? collections.value.length : collections.value.length + 1) > 1
+const isSingleCollection = computed(() =>
+  (editing.value ? collections.value.length : collections.value.length + 1) <= 1
 )
 
 const showDeleteConfirm = ref(false)
