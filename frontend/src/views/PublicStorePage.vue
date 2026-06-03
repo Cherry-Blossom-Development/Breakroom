@@ -282,6 +282,14 @@ const notFound = ref(false)
 const storefront = ref(null)
 
 const pageStyle = computed(() => {
+  const collections = storefront.value?.collections
+  if (collections?.length === 1) {
+    const s = collections[0].settings || {}
+    if (s.background_image) {
+      return { backgroundImage: `url(/api/uploads/${s.background_image})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+    }
+    if (s.background_color) return { backgroundColor: s.background_color }
+  }
   const bg = storefront.value?.settings?.background_color
   return bg ? { backgroundColor: bg } : {}
 })
