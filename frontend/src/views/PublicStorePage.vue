@@ -97,15 +97,17 @@
       <div v-if="viewModal.open" class="modal-backdrop" @click.self="viewModal.open = false">
         <div class="modal modal-lightbox">
           <button class="modal-close lightbox-close" @click="viewModal.open = false">✕</button>
-          <img
-            v-if="viewModal.item?.image_path"
-            :src="`/api/uploads/${viewModal.item.image_path}`"
-            :alt="viewModal.item?.name"
-            class="lightbox-image"
-          />
-          <div class="lightbox-info">
-            <div class="lightbox-name">{{ viewModal.item?.name }}</div>
-            <div v-if="viewModal.item?.description" class="lightbox-desc">{{ viewModal.item?.description }}</div>
+          <div class="lightbox-scroll">
+            <img
+              v-if="viewModal.item?.image_path"
+              :src="`/api/uploads/${viewModal.item.image_path}`"
+              :alt="viewModal.item?.name"
+              class="lightbox-image"
+            />
+            <div class="lightbox-info">
+              <div class="lightbox-name">{{ viewModal.item?.name }}</div>
+              <div v-if="viewModal.item?.description" class="lightbox-desc">{{ viewModal.item?.description }}</div>
+            </div>
           </div>
         </div>
       </div>
@@ -119,19 +121,21 @@
           <!-- Step 0: Preview -->
           <template v-if="modal.step === 0">
             <button class="modal-close lightbox-close" @click="closeModal">✕</button>
-            <img
-              v-if="modal.item?.image_path"
-              :src="`/api/uploads/${modal.item.image_path}`"
-              :alt="modal.item?.name"
-              class="lightbox-image"
-            />
-            <div class="lightbox-info">
-              <div class="lightbox-name">{{ modal.item?.name }}</div>
-              <div v-if="modal.item?.description" class="lightbox-desc">{{ modal.item?.description }}</div>
-              <div class="lightbox-price-row">
-                <span class="lightbox-price">${{ (modal.item?.price_cents / 100).toFixed(2) }}</span>
-                <span v-if="modal.item?.shipping_cost_cents" class="lightbox-shipping"> + ${{ (modal.item.shipping_cost_cents / 100).toFixed(2) }} shipping</span>
-                <span v-else class="lightbox-shipping"> · Free shipping</span>
+            <div class="lightbox-scroll">
+              <img
+                v-if="modal.item?.image_path"
+                :src="`/api/uploads/${modal.item.image_path}`"
+                :alt="modal.item?.name"
+                class="lightbox-image"
+              />
+              <div class="lightbox-info">
+                <div class="lightbox-name">{{ modal.item?.name }}</div>
+                <div v-if="modal.item?.description" class="lightbox-desc">{{ modal.item?.description }}</div>
+                <div class="lightbox-price-row">
+                  <span class="lightbox-price">${{ (modal.item?.price_cents / 100).toFixed(2) }}</span>
+                  <span v-if="modal.item?.shipping_cost_cents" class="lightbox-shipping"> + ${{ (modal.item.shipping_cost_cents / 100).toFixed(2) }} shipping</span>
+                  <span v-else class="lightbox-shipping"> · Free shipping</span>
+                </div>
               </div>
             </div>
             <div class="modal-footer lightbox-footer">
@@ -774,6 +778,13 @@ async function submitPayment() {
   font-size: 1rem;
 }
 .lightbox-close:hover { background: rgba(0,0,0,0.8); color: #fff; }
+
+.lightbox-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
 
 .lightbox-image {
   width: 100%;
