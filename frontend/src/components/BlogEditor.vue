@@ -17,6 +17,7 @@ const editorRef = ref(null)
 const imageInput = ref(null)
 const uploadingImage = ref(false)
 const saving = ref(false)
+const savedFeedback = ref(false)
 const error = ref('')
 const postId = ref(props.post?.id || null)
 
@@ -138,6 +139,8 @@ const savePost = async (publish = null) => {
       emit('saved')
     } else {
       emit('draft-saved')
+      savedFeedback.value = true
+      setTimeout(() => { savedFeedback.value = false }, 2000)
     }
   } catch (err) {
     error.value = err.message
@@ -245,8 +248,8 @@ const saveAndPublish = () => savePost(true)
           <button class="btn-secondary" @click="emit('close')" :disabled="saving">
             Cancel
           </button>
-          <button class="btn-draft" @click="saveDraft" :disabled="saving">
-            {{ saving ? 'Saving...' : 'Save' }}
+          <button class="btn-draft" @click="saveDraft" :disabled="saving" :class="{ 'btn-draft--saved': savedFeedback }">
+            {{ saving ? 'Saving...' : savedFeedback ? 'Saved!' : 'Save' }}
           </button>
           <button class="btn-primary" @click="saveAndPublish" :disabled="saving">
             {{ saving ? 'Saving...' : 'Publish' }}
@@ -479,6 +482,11 @@ const saveAndPublish = () => savePost(true)
 
 .btn-draft:hover:not(:disabled) {
   background: var(--color-warning-bg-hover);
+}
+
+.btn-draft--saved {
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .btn-primary {
