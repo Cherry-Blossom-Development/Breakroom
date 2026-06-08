@@ -9,7 +9,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'saved'])
+const emit = defineEmits(['close', 'saved', 'draft-saved'])
 
 const title = ref('')
 const isPublished = ref(false)
@@ -18,6 +18,7 @@ const imageInput = ref(null)
 const uploadingImage = ref(false)
 const saving = ref(false)
 const error = ref('')
+const postId = ref(props.post?.id || null)
 
 // Font options
 const fonts = [
@@ -44,6 +45,7 @@ onMounted(() => {
   if (props.post) {
     title.value = props.post.title || ''
     isPublished.value = props.post.is_published || false
+    postId.value = props.post.id || null
     if (editorRef.value) {
       editorRef.value.innerHTML = props.post.content || ''
     }
@@ -55,6 +57,7 @@ watch(() => props.post, (newPost) => {
   if (newPost) {
     title.value = newPost.title || ''
     isPublished.value = newPost.is_published || false
+    postId.value = newPost.id || null
     if (editorRef.value) {
       editorRef.value.innerHTML = newPost.content || ''
     }
@@ -125,12 +128,17 @@ const savePost = async (publish = null) => {
   const publishStatus = publish !== null ? publish : isPublished.value
 
   try {
-    if (props.post?.id) {
-      await blog.updatePost(props.post.id, title.value, content, publishStatus)
+    if (postId.value) {
+      await blog.updatePost(postId.value, title.value, content, publishStatus)
     } else {
-      await blog.createPost(title.value, content, publishStatus)
+      const newPost = await blog.createPost(title.value, content, publishStatus)
+      postId.value = newPost.id
     }
-    emit('saved')
+    if (publish === true) {
+      emit('saved')
+    } else {
+      emit('draft-saved')
+    }
   } catch (err) {
     error.value = err.message
   } finally {
@@ -238,10 +246,10 @@ const saveAndPublish = () => savePost(true)
             Cancel
           </button>
           <button class="btn-draft" @click="saveDraft" :disabled="saving">
-            {{ saving ? 'Saving...' : 'Save Draft' }}
+            {{ saving ? 'Saving...' : 'Save' }}
           </button>
           <button class="btn-primary" @click="saveAndPublish" :disabled="saving">
-            {{ saving ? 'Saving...' : 'Save & Publish' }}
+            {{ saving ? 'Saving...' : 'Publish' }}
           </button>
         </div>
       </div>

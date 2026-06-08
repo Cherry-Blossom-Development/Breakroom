@@ -72,6 +72,10 @@ const onPostSaved = () => {
   blog.fetchPosts()
 }
 
+const onDraftSaved = () => {
+  blog.fetchPosts()
+}
+
 const formatDate = (dateStr) => {
   const date = new Date(dateStr)
   return date.toLocaleDateString('en-US', {
@@ -101,6 +105,7 @@ const getPreview = (content) => {
       :post="editingPost"
       @close="closeEditor"
       @saved="onPostSaved"
+      @draft-saved="onDraftSaved"
     />
 
     <!-- Settings Modal -->
