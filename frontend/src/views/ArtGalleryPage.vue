@@ -43,6 +43,14 @@ const deletingArtwork = ref(null)
 const showLightbox = ref(false)
 const lightboxArtwork = ref(null)
 
+// Export to Showcase
+const showExportModal = ref(false)
+const exportingArtwork = ref(null)
+const exporting = ref(false)
+const exportError = ref('')
+const exportCollections = ref([])
+const exportCollectionId = ref(null)
+
 const publicGalleryUrl = computed(() => {
   if (!settings.value?.gallery_url) return ''
   return `${window.location.origin}/g/${settings.value.gallery_url}`
@@ -361,6 +369,51 @@ function copyGalleryUrl() {
   successMessage.value = 'Gallery URL copied to clipboard'
   setTimeout(() => successMessage.value = '', 3000)
 }
+
+async function openExportModal(artwork) {
+  exportingArtwork.value = artwork
+  exportError.value = ''
+  exportCollectionId.value = null
+  exportCollections.value = []
+  try {
+    const res = await authFetch('/api/collections')
+    if (res.ok) {
+      exportCollections.value = await res.json()
+      if (exportCollections.value.length > 0) {
+        exportCollectionId.value = exportCollections.value[0].id
+      }
+    }
+  } catch (err) {
+    console.error(err)
+  }
+  showExportModal.value = true
+}
+
+async function exportToShowcase() {
+  if (!exportCollectionId.value || !exportingArtwork.value) return
+  exporting.value = true
+  exportError.value = ''
+  try {
+    const res = await authFetch(`/api/gallery/artworks/${exportingArtwork.value.id}/export-to-showcase`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ collection_id: exportCollectionId.value })
+    })
+    if (res.ok) {
+      showExportModal.value = false
+      successMessage.value = `"${exportingArtwork.value.title}" copied to Showcase`
+      setTimeout(() => successMessage.value = '', 4000)
+    } else {
+      const data = await res.json()
+      exportError.value = data.message || 'Failed to copy to Showcase'
+    }
+  } catch (err) {
+    exportError.value = 'Failed to copy to Showcase'
+    console.error(err)
+  } finally {
+    exporting.value = false
+  }
+}
 </script>
 
 <template>
@@ -493,6 +546,7 @@ function copyGalleryUrl() {
                 {{ artwork.is_published ? 'Published' : 'Draft' }}
               </button>
               <button class="btn-edit" @click="openEditModal(artwork)">Edit</button>
+              <button class="btn-export" @click="openExportModal(artwork)" title="Copy to Artist Showcase">Showcase</button>
               <button class="btn-delete" @click="confirmDelete(artwork)">Delete</button>
             </div>
           </div>
@@ -578,6 +632,37 @@ function copyGalleryUrl() {
           <button class="btn-secondary" @click="showDeleteConfirm = false">Cancel</button>
           <button class="btn-danger" :disabled="saving" @click="deleteArtwork">
             {{ saving ? 'Deleting...' : 'Delete' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export to Showcase Modal -->
+    <div v-if="showExportModal" class="modal-overlay" @click.self="showExportModal = false">
+      <div class="modal">
+        <h3>Copy to Showcase</h3>
+        <p style="color: var(--color-text-secondary); margin: 0 0 20px; line-height: 1.5;">
+          Copy "{{ exportingArtwork?.title }}" to a collection in your Artist Showcase.
+          The original will remain in your gallery.
+        </p>
+        <div class="form-group">
+          <label>Target Collection</label>
+          <div v-if="exportCollections.length === 0" class="export-no-collections">
+            You don't have any collections yet. Create one in the Artist Showcase first.
+          </div>
+          <select v-else v-model="exportCollectionId">
+            <option v-for="col in exportCollections" :key="col.id" :value="col.id">{{ col.name }}</option>
+          </select>
+        </div>
+        <div v-if="exportError" class="message error">{{ exportError }}</div>
+        <div class="modal-actions">
+          <button class="btn-secondary" @click="showExportModal = false">Cancel</button>
+          <button
+            class="btn-primary"
+            :disabled="exporting || !exportCollectionId"
+            @click="exportToShowcase"
+          >
+            {{ exporting ? 'Copying...' : 'Copy to Showcase' }}
           </button>
         </div>
       </div>
@@ -1002,6 +1087,36 @@ function copyGalleryUrl() {
 .btn-delete:hover {
   background: var(--color-error);
   color: white;
+}
+
+.btn-export {
+  background: var(--color-background);
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent) !important;
+}
+
+.btn-export:hover {
+  background: var(--color-accent);
+  color: white;
+}
+
+.form-group select {
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: 1rem;
+  background: var(--color-background);
+  color: var(--color-text);
+  width: 100%;
+  cursor: pointer;
+}
+
+.export-no-collections {
+  padding: 12px;
+  background: var(--color-background-soft);
+  border-radius: 8px;
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
 }
 
 /* Buttons */

@@ -4,7 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
-const { uploadToS3, deleteFromS3 } = require('../utilities/aws-s3');
+const { uploadToS3, deleteFromS3, copyInS3 } = require('../utilities/aws-s3');
 const { extractToken } = require('../utilities/auth');
 
 require('dotenv').config();
@@ -394,6 +394,75 @@ router.put('/:id/items/:itemId', authenticate, upload.single('image'), async (re
   } catch (err) {
     console.error('Failed to update item:', err);
     res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// POST /api/collections/:id/items/:itemId/export-to-gallery
+router.post('/:id/items/:itemId/export-to-gallery', authenticate, async (req, res) => {
+  const { id, itemId } = req.params;
+  let client;
+  try {
+    client = await getClient();
+    const col = await client.query(
+      'SELECT id FROM user_collections WHERE id = $1 AND user_id = $2',
+      [id, req.user.id]
+    );
+    if (col.rowCount === 0) return res.status(404).json({ message: 'Collection not found' });
+
+    const item = await client.query(
+      'SELECT id, name, description, image_path FROM collection_items WHERE id = $1 AND collection_id = $2',
+      [itemId, id]
+    );
+    if (item.rowCount === 0) return res.status(404).json({ message: 'Item not found' });
+
+    // Auto-create gallery settings if needed
+    const existingGallery = await client.query(
+      'SELECT id FROM user_gallery WHERE user_id = $1',
+      [req.user.id]
+    );
+    if (existingGallery.rowCount === 0) {
+      try {
+        await client.query(
+          'INSERT INTO user_gallery (user_id, gallery_url, gallery_name) VALUES ($1, $2, $3)',
+          [req.user.id, req.user.handle, `${req.user.handle}'s Gallery`]
+        );
+      } catch (galleryErr) {
+        if (galleryErr.code === 'ER_DUP_ENTRY') {
+          await client.query(
+            'INSERT INTO user_gallery (user_id, gallery_url, gallery_name) VALUES ($1, $2, $3)',
+            [req.user.id, `${req.user.handle}-${req.user.id}`, `${req.user.handle}'s Gallery`]
+          );
+        } else {
+          throw galleryErr;
+        }
+      }
+    }
+
+    const src = item.rows[0];
+    let newKey = null;
+    if (src.image_path) {
+      const ext = path.extname(src.image_path);
+      newKey = `gallery/${req.user.id}/art_${Date.now()}${ext}`;
+      const copy = await copyInS3(src.image_path, newKey);
+      if (!copy.success) return res.status(500).json({ message: 'Failed to copy image' });
+    }
+
+    const insert = await client.query(
+      `INSERT INTO gallery_artworks (user_id, title, description, image_path, is_published)
+       VALUES ($1, $2, $3, $4, FALSE)`,
+      [req.user.id, src.name, src.description || null, newKey]
+    );
+    const result = await client.query(
+      `SELECT id, title, description, image_path, is_published, created_at, updated_at
+       FROM gallery_artworks WHERE id = $1`,
+      [insert.insertId]
+    );
+    res.status(201).json({ artwork: result.rows[0] });
+  } catch (err) {
+    console.error('Error exporting item to gallery:', err);
+    res.status(500).json({ message: 'Failed to export item' });
   } finally {
     if (client) client.release();
   }

@@ -9,6 +9,10 @@
       <button class="btn-primary" @click="openCreate">+ Add Item</button>
     </div>
 
+    <div v-if="exportMessage" class="export-banner" :class="exportMessageIsError ? 'export-banner--error' : 'export-banner--success'">
+      {{ exportMessage }}
+    </div>
+
     <div v-if="loading" class="loading-state">Loading…</div>
 
     <template v-else>
@@ -58,6 +62,14 @@
             </div>
             <div class="item-actions">
               <button class="btn-sm" @click="openEdit(item)">Edit</button>
+              <button
+                class="btn-sm btn-export"
+                :disabled="exportingItem === item.id"
+                @click="exportToGallery(item)"
+                title="Copy to Art Gallery"
+              >
+                {{ exportingItem === item.id ? '…' : 'Gallery' }}
+              </button>
               <button class="btn-sm btn-danger" @click="confirmDelete(item)">Delete</button>
             </div>
           </div>
@@ -328,6 +340,10 @@ const showDeleteConfirm = ref(false)
 const deletingItem = ref(null)
 const deleting = ref(false)
 
+const exportingItem = ref(null)
+const exportMessage = ref('')
+const exportMessageIsError = ref(false)
+
 function centsToDisplay(cents) {
   return cents != null ? (cents / 100).toFixed(2) : ''
 }
@@ -467,6 +483,33 @@ async function executeDelete() {
     console.error('Failed to delete item:', err)
   } finally {
     deleting.value = false
+  }
+}
+
+async function exportToGallery(item) {
+  if (exportingItem.value) return
+  exportingItem.value = item.id
+  exportMessage.value = ''
+  try {
+    const res = await authFetch(
+      `/api/collections/${collectionId}/items/${item.id}/export-to-gallery`,
+      { method: 'POST' }
+    )
+    if (res.ok) {
+      exportMessageIsError.value = false
+      exportMessage.value = `"${item.name}" copied to Art Gallery`
+      setTimeout(() => exportMessage.value = '', 4000)
+    } else {
+      const data = await res.json()
+      exportMessageIsError.value = true
+      exportMessage.value = data.message || 'Failed to copy to Gallery'
+    }
+  } catch (err) {
+    exportMessageIsError.value = true
+    exportMessage.value = 'Failed to copy to Gallery'
+    console.error(err)
+  } finally {
+    exportingItem.value = null
   }
 }
 
@@ -715,6 +758,33 @@ onMounted(() => {
 }
 
 .btn-danger:hover { background: rgba(229, 62, 62, 0.07); }
+
+.btn-export {
+  border-color: var(--color-link);
+  color: var(--color-link);
+}
+
+.btn-export:hover:not(:disabled) { background: rgba(var(--color-link-rgb, 66, 133, 244), 0.07); }
+.btn-export:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.export-banner {
+  padding: 10px 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-size: 0.9rem;
+}
+
+.export-banner--success {
+  background: rgba(52, 211, 153, 0.1);
+  color: #10b981;
+  border: 1px solid #10b981;
+}
+
+.export-banner--error {
+  background: rgba(239, 68, 68, 0.1);
+  color: #e53e3e;
+  border: 1px solid #e53e3e;
+}
 
 .btn-danger-solid { background: #e53e3e; }
 .btn-danger-solid:hover:not(:disabled) { opacity: 0.87; }

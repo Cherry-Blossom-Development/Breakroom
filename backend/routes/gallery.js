@@ -4,7 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
-const { uploadToS3, deleteFromS3 } = require('../utilities/aws-s3');
+const { uploadToS3, deleteFromS3, copyInS3 } = require('../utilities/aws-s3');
 const { extractToken } = require('../utilities/auth');
 
 require('dotenv').config();
@@ -512,6 +512,55 @@ router.put('/artworks/:id', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Error updating artwork:', err);
     res.status(500).json({ message: 'Failed to update artwork' });
+  } finally {
+    client.release();
+  }
+});
+
+// Export a gallery artwork to Artist Showcase (copy to a collection item)
+router.post('/artworks/:id/export-to-showcase', authenticate, async (req, res) => {
+  const { id } = req.params;
+  const { collection_id } = req.body;
+  if (!collection_id) return res.status(400).json({ message: 'collection_id is required' });
+
+  const client = await getClient();
+  try {
+    const artwork = await client.query(
+      'SELECT id, title, description, image_path FROM gallery_artworks WHERE id = $1 AND user_id = $2',
+      [id, req.user.id]
+    );
+    if (artwork.rowCount === 0) return res.status(404).json({ message: 'Artwork not found' });
+
+    const col = await client.query(
+      'SELECT id FROM user_collections WHERE id = $1 AND user_id = $2',
+      [collection_id, req.user.id]
+    );
+    if (col.rowCount === 0) return res.status(404).json({ message: 'Collection not found' });
+
+    const src = artwork.rows[0];
+    let newKey = null;
+    if (src.image_path) {
+      const ext = path.extname(src.image_path);
+      newKey = `collections/${req.user.id}/${collection_id}/item_${Date.now()}${ext}`;
+      const copy = await copyInS3(src.image_path, newKey);
+      if (!copy.success) return res.status(500).json({ message: 'Failed to copy image' });
+    }
+
+    const insert = await client.query(
+      `INSERT INTO collection_items (collection_id, user_id, name, description, image_path, is_available, in_gallery)
+       VALUES ($1, $2, $3, $4, $5, 0, 1)`,
+      [collection_id, req.user.id, src.title, src.description || null, newKey]
+    );
+    const result = await client.query(
+      `SELECT id, name, description, image_path, display_order, price_cents, is_available, in_gallery,
+              shipping_cost_cents, weight_oz, length_in, width_in, height_in, created_at, updated_at
+       FROM collection_items WHERE id = $1`,
+      [insert.insertId]
+    );
+    res.status(201).json({ item: result.rows[0] });
+  } catch (err) {
+    console.error('Error exporting artwork to showcase:', err);
+    res.status(500).json({ message: 'Failed to export artwork' });
   } finally {
     client.release();
   }

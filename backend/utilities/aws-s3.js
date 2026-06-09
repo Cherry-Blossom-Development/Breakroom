@@ -1,4 +1,4 @@
-const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, CopyObjectCommand } = require('@aws-sdk/client-s3');
 
 const BUCKET_NAME = process.env.S3_BUCKET_NAME || 'breakroom-uploads';
 const BUCKET_REGION = process.env.S3_BUCKET_REGION || process.env.AWS_REGION || 'us-west-2';
@@ -116,9 +116,33 @@ const streamFromS3 = async (key, req, res) => {
   }
 };
 
+/**
+ * Copy an S3 object to a new key within the same bucket
+ * @param {string} sourceKey - Source S3 object key
+ * @param {string} destKey - Destination S3 object key
+ * @returns {Promise<{success: boolean, key?: string, error?: string}>}
+ */
+const copyInS3 = async (sourceKey, destKey) => {
+  try {
+    const command = new CopyObjectCommand({
+      Bucket: BUCKET_NAME,
+      CopySource: `${BUCKET_NAME}/${sourceKey}`,
+      Key: destKey,
+      CacheControl: 'max-age=31536000'
+    });
+    await s3Client.send(command);
+    console.log('S3 copy successful:', sourceKey, '->', destKey);
+    return { success: true, key: destKey };
+  } catch (error) {
+    console.error('S3 copy error:', error.message);
+    return { success: false, error: error.message };
+  }
+};
+
 module.exports = {
   uploadToS3,
   deleteFromS3,
+  copyInS3,
   getS3Url,
   streamFromS3,
   BUCKET_NAME
