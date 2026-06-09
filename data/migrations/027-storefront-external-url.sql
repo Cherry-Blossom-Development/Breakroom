@@ -1,0 +1,2 @@
+ALTER TABLE user_storefront
+  ADD COLUMN external_url VARCHAR(500) NULL DEFAULT NULL;

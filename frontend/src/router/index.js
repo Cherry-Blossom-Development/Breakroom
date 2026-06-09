@@ -262,6 +262,12 @@ const router = createRouter({
       meta: { bareLayout: true },
     },
     {
+      path: '/collections/domain-setup',
+      name: 'collectionsDomainSetup',
+      component: () => import('../views/CustomDomainPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/collections/payment-setup',
       name: 'collectionsPayment',
       component: () => import('../views/CollectionsPaymentPage.vue'),

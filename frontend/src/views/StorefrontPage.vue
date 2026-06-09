@@ -3,7 +3,7 @@
 
     <div class="page-header">
       <div class="header-left">
-        <RouterLink to="/collections" class="back-link">← Collections</RouterLink>
+        <RouterLink to="/collections" class="back-link">← Artist Showcase</RouterLink>
         <h1>Storefront</h1>
         <p class="page-desc">
           Your public-facing landing page. Visitors who arrive at your domain will see this page first.
@@ -70,6 +70,25 @@
             placeholder="e.g. My Art Store"
             maxlength="255"
           />
+        </div>
+
+        <!-- Custom Domain -->
+        <div class="form-group">
+          <label class="form-label" for="external-url">Custom Domain</label>
+          <p class="form-hint">
+            If you've pointed your own domain at this store, enter it here so visitors know where to find you.
+          </p>
+          <input
+            id="external-url"
+            v-model="externalUrl"
+            type="url"
+            class="form-input"
+            placeholder="https://www.myshop.com"
+            maxlength="500"
+          />
+          <RouterLink v-if="!externalUrl" to="/collections/domain-setup" class="domain-setup-link">
+            Don't have one yet? Learn how to use your own domain →
+          </RouterLink>
         </div>
 
         <!-- Background color — hidden when a single collection controls the site background -->
@@ -206,6 +225,7 @@ const sections = ref(DEFAULT_SECTIONS.map(s => ({ ...s })))
 const collectionsDisplaySize = ref('small')
 const collectionsAspectRatio = ref('landscape')
 const collectionCount = ref(null)
+const externalUrl = ref('')
 
 const isSingleCollection = computed(() => collectionCount.value !== null && collectionCount.value <= 1)
 
@@ -269,6 +289,7 @@ async function fetchStorefront() {
         contentBody.value = data.content || ''
         savedAt.value = formatDate(data.updated_at)
         if (storeUrl.value) urlAvailable.value = true
+        externalUrl.value = data.external_url || ''
         if (data.settings) {
           if (data.settings.sections) sections.value = data.settings.sections
           if (data.settings.background_color) backgroundColor.value = data.settings.background_color
@@ -295,6 +316,7 @@ async function save() {
         store_url: storeUrl.value,
         page_title: pageTitle.value,
         content: contentBody.value,
+        external_url: externalUrl.value || null,
         settings: {
           sections: sections.value,
           background_color: backgroundColor.value,
@@ -438,6 +460,15 @@ onBeforeUnmount(() => clearTimeout(urlCheckTimer))
   min-height: 1.1em;
   color: var(--color-text-secondary);
 }
+
+.domain-setup-link {
+  font-size: 0.82rem;
+  color: var(--color-link);
+  text-decoration: none;
+  margin-top: 4px;
+}
+
+.domain-setup-link:hover { text-decoration: underline; }
 
 .url-status.available { color: #2f855a; }
 .url-status.taken { color: #c53030; }

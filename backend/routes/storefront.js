@@ -179,7 +179,7 @@ router.get('/', authenticate, async (req, res) => {
   try {
     client = await getClient();
     const result = await client.query(
-      'SELECT id, store_url, page_title, content, settings, updated_at FROM user_storefront WHERE user_id = $1',
+      'SELECT id, store_url, page_title, content, settings, external_url, updated_at FROM user_storefront WHERE user_id = $1',
       [req.user.id]
     );
     if (result.rowCount === 0) return res.json(null);
@@ -194,7 +194,7 @@ router.get('/', authenticate, async (req, res) => {
 
 // PUT /api/storefront — upsert
 router.put('/', authenticate, async (req, res) => {
-  const { store_url, page_title, content, settings } = req.body;
+  const { store_url, page_title, content, settings, external_url } = req.body;
 
   if (store_url && !SLUG_RE.test(store_url)) {
     return res.status(400).json({ message: 'Invalid store URL format.' });
@@ -216,11 +216,13 @@ router.put('/', authenticate, async (req, res) => {
       }
     }
 
+    const externalUrlValue = external_url && external_url.trim() ? external_url.trim() : null;
+
     await client.query(
-      `INSERT INTO user_storefront (user_id, store_url, page_title, content, settings)
-       VALUES ($1, $2, $3, $4, $5)
-       ON DUPLICATE KEY UPDATE store_url = $2, page_title = $3, content = $4, settings = $5`,
-      [req.user.id, store_url || null, page_title || '', content || '', JSON.stringify(settings || {})]
+      `INSERT INTO user_storefront (user_id, store_url, page_title, content, settings, external_url)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON DUPLICATE KEY UPDATE store_url = $2, page_title = $3, content = $4, settings = $5, external_url = $6`,
+      [req.user.id, store_url || null, page_title || '', content || '', JSON.stringify(settings || {}), externalUrlValue]
     );
     res.json({ message: 'Saved' });
   } catch (err) {
