@@ -151,7 +151,7 @@
 
         <div class="form-group form-group--toggle-row">
           <div>
-            <label class="form-label" style="margin-bottom:2px">Show in gallery</label>
+            <label class="form-label" style="margin-bottom:2px">Show in Artist Showcase store</label>
             <span class="form-hint" style="margin-top:0">Display this item on your public storefront</span>
           </div>
           <label class="toggle">
