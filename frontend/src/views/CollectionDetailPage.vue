@@ -62,14 +62,6 @@
             </div>
             <div class="item-actions">
               <button class="btn-sm" @click="openEdit(item)">Edit</button>
-              <button
-                class="btn-sm btn-export"
-                :disabled="exportingItem === item.id"
-                @click="exportToGallery(item)"
-                title="Copy to Art Gallery"
-              >
-                {{ exportingItem === item.id ? '…' : 'Gallery' }}
-              </button>
               <button class="btn-sm btn-danger" @click="confirmDelete(item)">Delete</button>
             </div>
           </div>
@@ -160,6 +152,16 @@
               <span class="toggle-thumb"></span>
             </span>
           </label>
+        </div>
+
+        <div v-if="editing" class="form-group">
+          <button
+            class="btn-secondary btn-full"
+            :disabled="exportingItem === editing.id"
+            @click="exportToGallery(editing)"
+          >
+            {{ exportingItem === editing.id ? 'Copying…' : 'Copy item to Gallery' }}
+          </button>
         </div>
 
         <!-- Pricing -->
@@ -759,13 +761,12 @@ onMounted(() => {
 
 .btn-danger:hover { background: rgba(229, 62, 62, 0.07); }
 
-.btn-export {
-  border-color: var(--color-link);
-  color: var(--color-link);
+.btn-full {
+  width: 100%;
+  justify-content: center;
 }
 
-.btn-export:hover:not(:disabled) { background: rgba(var(--color-link-rgb, 66, 133, 244), 0.07); }
-.btn-export:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .export-banner {
   padding: 10px 16px;
