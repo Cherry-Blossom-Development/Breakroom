@@ -3,7 +3,7 @@
 
     <div class="page-header">
       <div class="header-left">
-        <RouterLink to="/collections" class="back-link">← Collections</RouterLink>
+        <RouterLink to="/collections" class="back-link">← Artist Showcase</RouterLink>
         <h1>{{ collection?.name || 'Collection' }}</h1>
       </div>
       <button class="btn-primary" @click="openCreate">+ Add Item</button>
