@@ -139,6 +139,8 @@ app.use('/api/bands', bandsRoutes);
 app.use('/api/instruments', instrumentsRoutes);
 app.use('/api/subscriptions', subscriptionsRoutes);
 app.use('/api/shipping', shippingRoutes);
+const emailNannyRoutes = require('./routes/emailnanny');
+app.use('/api/emailnanny', emailNannyRoutes);
 
 // Redirect uploaded file requests to S3
 const handleS3Redirect = (req, res) => {
