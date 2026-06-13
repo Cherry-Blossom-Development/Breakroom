@@ -34,6 +34,9 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
       # Firebase (FCM push notifications)
       FIREBASE_SERVICE_ACCOUNT_JSON: ${FIREBASE_SERVICE_ACCOUNT_JSON}
+      # EmailNanny OAuth proxy
+      EMAILNANNY_CLIENT_ID: ${EMAILNANNY_CLIENT_ID}
+      EMAILNANNY_CLIENT_SECRET: ${EMAILNANNY_CLIENT_SECRET}
     volumes:
       # Mount frontend dist so backend can read index.html for OG tag injection
       - /var/www/prosaurus.com:/app/dist:ro
