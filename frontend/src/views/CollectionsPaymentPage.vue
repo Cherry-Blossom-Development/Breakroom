@@ -88,6 +88,7 @@
             Connect a Stripe account to receive payouts. You'll be taken to Stripe
             to create or link an account — it only takes a few minutes.
           </div>
+          <div v-if="connectError" class="connect-error">{{ connectError }}</div>
         </div>
         <button class="btn-stripe" :disabled="starting" @click="startConnect">
           <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18" style="flex-shrink:0">
@@ -112,6 +113,7 @@
             Your Stripe account has been created but you haven't finished the onboarding steps yet.
             Complete setup to start accepting payments.
           </div>
+          <div v-if="connectError" class="connect-error">{{ connectError }}</div>
         </div>
         <button class="btn-stripe" :disabled="starting" @click="startConnect">
           {{ starting ? 'Redirecting…' : 'Continue Stripe Setup' }}
@@ -187,6 +189,7 @@ const plan = ref({ subscribed: false, platform: null, fee_percent: 5 })
 const subscribing = ref(false)
 const portaling = ref(false)
 const subscribeSuccess = ref(false)
+const connectError = ref('')
 
 const navFrom = computed(() => route.query.from || '')
 
@@ -214,6 +217,7 @@ async function fetchPlan() {
 async function startConnect() {
   if (starting.value) return
   starting.value = true
+  connectError.value = ''
   try {
     const res = await authFetch('/api/billing/connect/start', { method: 'POST' })
     if (res.ok) {
@@ -224,9 +228,12 @@ async function startConnect() {
         window.location.href = data.url
         return
       }
+    } else {
+      connectError.value = 'Something went wrong. Please try again or contact support if the problem persists.'
     }
   } catch (err) {
     console.error('Failed to start connect:', err)
+    connectError.value = 'Something went wrong. Please try again or contact support if the problem persists.'
   } finally {
     starting.value = false
   }
@@ -454,6 +461,12 @@ onMounted(async () => {
   font-size: 0.88rem;
   color: var(--color-text-secondary);
   line-height: 1.5;
+}
+
+.connect-error {
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: var(--color-error, #e53e3e);
 }
 
 /* ── Buttons ── */

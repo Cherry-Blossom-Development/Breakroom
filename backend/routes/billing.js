@@ -219,7 +219,18 @@ router.get('/connect/status', authenticate, async (req, res) => {
       return res.json({ status: 'active', stripe_account_id });
     }
 
-    const account = await getStripe().accounts.retrieve(stripe_account_id);
+    let account;
+    try {
+      account = await getStripe().accounts.retrieve(stripe_account_id);
+    } catch (err) {
+      if (err.code === 'resource_missing') {
+        // Stale ID from a different Stripe environment — discard and treat as unconnected
+        await client.query('DELETE FROM user_stripe_connect WHERE user_id = $1', [req.user.id]);
+        return res.json({ status: 'not_connected' });
+      }
+      throw err;
+    }
+
     const isComplete = account.details_submitted && account.charges_enabled;
 
     if (isComplete) {
@@ -267,12 +278,34 @@ router.post('/connect/start', authenticate, async (req, res) => {
       }
     }
 
-    const accountLink = await getStripe().accountLinks.create({
-      account: stripeAccountId,
-      refresh_url: REFRESH_URL,
-      return_url:  RETURN_URL,
-      type: 'account_onboarding'
-    });
+    let accountLink;
+    try {
+      accountLink = await getStripe().accountLinks.create({
+        account: stripeAccountId,
+        refresh_url: REFRESH_URL,
+        return_url:  RETURN_URL,
+        type: 'account_onboarding'
+      });
+    } catch (err) {
+      if (err.code === 'resource_missing') {
+        // Stale account ID (e.g. from test→live switch) — delete it and create a fresh account
+        await client.query('DELETE FROM user_stripe_connect WHERE user_id = $1', [req.user.id]);
+        const account = await getStripe().accounts.create({ type: 'express' });
+        stripeAccountId = account.id;
+        await client.query(
+          'INSERT INTO user_stripe_connect (user_id, stripe_account_id) VALUES ($1, $2)',
+          [req.user.id, stripeAccountId]
+        );
+        accountLink = await getStripe().accountLinks.create({
+          account: stripeAccountId,
+          refresh_url: REFRESH_URL,
+          return_url:  RETURN_URL,
+          type: 'account_onboarding'
+        });
+      } else {
+        throw err;
+      }
+    }
 
     res.json({ url: accountLink.url });
   } catch (err) {
