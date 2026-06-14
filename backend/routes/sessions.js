@@ -301,6 +301,55 @@ router.patch('/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// GET /api/sessions/:id/public — public access to session info and audio
+// No authentication required - anyone with the link can view/play
+router.get('/:id/public', async (req, res) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at,
+         u.handle AS uploader_handle,
+         s.instrument_id, i.name AS instrument_name,
+         ROUND(AVG(sr.rating), 1) AS avg_rating,
+         COUNT(sr.rating) AS rating_count
+       FROM sessions s
+       LEFT JOIN users u ON u.id = s.user_id
+       LEFT JOIN instruments i ON i.id = s.instrument_id
+       LEFT JOIN session_ratings sr ON sr.session_id = s.id
+       WHERE s.id = $1
+       GROUP BY s.id, u.handle, i.name`,
+      [req.params.id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Session not found' });
+
+    res.json({ session: result.rows[0] });
+  } catch (err) {
+    console.error('Error fetching public session:', err);
+    res.status(500).json({ message: 'Failed to fetch session' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/sessions/:id/public/stream — public streaming endpoint
+// No authentication required - anyone with the link can stream
+router.get('/:id/public/stream', async (req, res) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      'SELECT s3_key FROM sessions WHERE id = $1',
+      [req.params.id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Session not found' });
+    await streamFromS3(result.rows[0].s3_key, req, res);
+  } catch (err) {
+    console.error('Error streaming public session:', err);
+    if (!res.headersSent) res.status(500).json({ message: 'Failed to stream session' });
+  } finally {
+    client.release();
+  }
+});
+
 // DELETE /api/sessions/:id
 router.delete('/:id', authenticateToken, async (req, res) => {
   const client = await getClient();

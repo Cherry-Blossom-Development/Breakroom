@@ -220,6 +220,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/sessions/:id',
+      name: 'publicSession',
+      component: () => import('../views/PublicSessionPage.vue'),
+      meta: { publicLayout: true }, // No requiresAuth - anyone can view shared sessions
+    },
+    {
       path: '/kanban',
       name: 'kanban',
       component: () => import('../views/KanbanPage.vue'),
