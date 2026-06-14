@@ -223,12 +223,9 @@ router.get('/connect/status', authenticate, async (req, res) => {
     try {
       account = await getStripe().accounts.retrieve(stripe_account_id);
     } catch (err) {
-      if (err.code === 'resource_missing') {
-        // Stale ID from a different Stripe environment — discard and treat as unconnected
-        await client.query('DELETE FROM user_stripe_connect WHERE user_id = $1', [req.user.id]);
-        return res.json({ status: 'not_connected' });
-      }
-      throw err;
+      // Account not accessible (stale ID, deauthorized, or wrong environment) — treat as disconnected
+      await client.query('DELETE FROM user_stripe_connect WHERE user_id = $1', [req.user.id]);
+      return res.json({ status: 'not_connected' });
     }
 
     const isComplete = account.details_submitted && account.charges_enabled;
@@ -288,7 +285,7 @@ router.post('/connect/start', authenticate, async (req, res) => {
       });
     } catch (err) {
       if (err.code === 'resource_missing') {
-        // Stale account ID (e.g. from test→live switch) — delete it and create a fresh account
+        // Stale account ID — delete it and create a fresh Express account
         await client.query('DELETE FROM user_stripe_connect WHERE user_id = $1', [req.user.id]);
         const account = await getStripe().accounts.create({ type: 'express' });
         stripeAccountId = account.id;
