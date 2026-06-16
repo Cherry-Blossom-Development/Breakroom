@@ -590,6 +590,7 @@ async function handleIndivUpload() {
 
 // --- Individual sessions ---
 const indivSessions = computed(() => sessions.list.filter(s => s.session_type === 'individual'))
+const mashupSessions = computed(() => sessions.list.filter(s => s.session_type === 'mashup'))
 const indivSelectedYear = ref(null)
 const indivAvailableYears = computed(() => {
   const years = new Set()
@@ -776,7 +777,7 @@ const mergeError = ref(null)
 
 const mashupSourceSessions = computed(() => {
   if (!mashupSource.value) return []
-  if (mashupSource.value === 'own') return sessions.list
+  if (mashupSource.value === 'own') return sessions.list.filter(s => s.session_type !== 'mashup')
   const bandId = parseInt(mashupSource.value.replace('band-', ''), 10)
   return bandMemberSessions.value.filter(s => s.band_id === bandId)
 })
@@ -866,7 +867,7 @@ async function saveMerged() {
     const wavBlob = _encodeWAV(mergedAudio.getChannelData(0), sampleRate)
     const mergedFile = new File([wavBlob], `merged-${Date.now()}.wav`, { type: 'audio/wav' })
     const mergedName = `Merged – ${mashupSelectedSession.value.name}`
-    await sessions.upload(mergedFile, mergedName, null, null, 'individual', null)
+    await sessions.upload(mergedFile, mergedName, null, null, 'mashup', null)
   } catch (err) {
     mergeError.value = err.message
   } finally {
@@ -952,7 +953,7 @@ async function handleMashupUpload() {
   mashupUploading.value = true
   mashupUploadError.value = null
   try {
-    await sessions.upload(mashupFile.value, mashupName.value || defaultName(), mashupRecordedAt.value || null, mashupBandId.value || null, 'individual', mashupInstrumentId.value || null)
+    await sessions.upload(mashupFile.value, mashupName.value || defaultName(), mashupRecordedAt.value || null, mashupBandId.value || null, 'mashup', mashupInstrumentId.value || null)
     mashupFile.value = null
     mashupName.value = ''
     mashupRecordedAt.value = new Date().toISOString().split('T')[0]
@@ -1528,6 +1529,49 @@ onMounted(async () => {
         </template>
 
       </div>
+
+      <!-- Saved Mashups list -->
+      <template v-if="mashupSessions.length > 0">
+        <div class="indiv-section-heading" style="margin-top: 16px;">Your Saved Mashups</div>
+        <div class="table-wrapper">
+          <table class="sessions-table">
+            <thead>
+              <tr>
+                <th class="col-play"></th>
+                <th>Name</th>
+                <th>Recorded</th>
+                <th>Size</th>
+                <th>Rating</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="session in mashupSessions" :key="session.id">
+                <tr :class="{ playing: playingId === session.id }">
+                  <td class="col-play">
+                    <button class="play-btn" @click="togglePlay(session)"
+                            :title="playingId === session.id && isPlaying ? 'Pause' : 'Play'">
+                      {{ playingId === session.id && isPlaying ? '⏸' : '▶' }}
+                    </button>
+                  </td>
+                  <td class="col-name">
+                    <span class="session-name-text">{{ session.name }}</span>
+                  </td>
+                  <td>{{ session.recorded_at ? session.recorded_at.slice(0, 10) : '—' }}</td>
+                  <td class="muted">{{ formatBytes(session.file_size) }}</td>
+                  <td class="col-rating">
+                    <div class="rating-cell" @click.stop>
+                      <span class="avg-rating" :class="{ unrated: !session.avg_rating }">
+                        {{ session.avg_rating ? `★ ${session.avg_rating}` : '★ —' }}
+                        <span v-if="session.rating_count > 0" class="rating-count">({{ session.rating_count }})</span>
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </template>
 
     </template>
 

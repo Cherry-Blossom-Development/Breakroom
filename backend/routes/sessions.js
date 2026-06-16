@@ -142,7 +142,7 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
   if (!req.file) return res.status(400).json({ message: 'No audio file uploaded' });
 
   const { name, recorded_at, band_id, session_type, instrument_id } = req.body;
-  const sessionTypeVal = session_type === 'individual' ? 'individual' : 'band';
+  const sessionTypeVal = session_type === 'individual' ? 'individual' : session_type === 'mashup' ? 'mashup' : 'band';
 
   // Enforce free-tier limits: 3 band sessions, 3 individual sessions
   const FREE_LIMITS = { band: 3, individual: 3 };
