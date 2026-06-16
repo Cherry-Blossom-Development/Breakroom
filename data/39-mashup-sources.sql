@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS mashup_sources (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  mashup_session_id INT NOT NULL,
+  source_session_id INT NOT NULL,
+  volume DECIMAL(4,3) NOT NULL DEFAULT 1.000,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (mashup_session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY (source_session_id) REFERENCES sessions(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

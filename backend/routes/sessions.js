@@ -254,6 +254,40 @@ router.post('/:id/rate', authenticateToken, async (req, res) => {
   }
 });
 
+// POST /api/sessions/:id/sources — record which source sessions went into a mashup
+router.post('/:id/sources', authenticateToken, async (req, res) => {
+  const { sources } = req.body; // [{ session_id, volume }]
+  if (!Array.isArray(sources) || sources.length === 0) {
+    return res.status(400).json({ message: 'sources must be a non-empty array' });
+  }
+
+  const client = await getClient();
+  try {
+    const mashup = await client.query(
+      "SELECT id FROM sessions WHERE id = $1 AND user_id = $2 AND session_type = 'mashup'",
+      [req.params.id, req.user.id]
+    );
+    if (mashup.rowCount === 0) return res.status(404).json({ message: 'Mashup session not found' });
+
+    for (const src of sources) {
+      const sessionId = parseInt(src.session_id, 10);
+      const volume = parseFloat(src.volume);
+      if (!sessionId || isNaN(volume)) continue;
+      await client.query(
+        'INSERT INTO mashup_sources (mashup_session_id, source_session_id, volume) VALUES ($1, $2, $3)',
+        [req.params.id, sessionId, Math.max(0, Math.min(1, volume))]
+      );
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Error recording mashup sources:', err);
+    res.status(500).json({ message: 'Failed to record mashup sources' });
+  } finally {
+    client.release();
+  }
+});
+
 // PATCH /api/sessions/:id — update name, recorded_at, band_id, and/or instrument_id
 router.patch('/:id', authenticateToken, async (req, res) => {
   const { name, recorded_at, band_id, instrument_id } = req.body;

@@ -766,6 +766,7 @@ const mashupInstrumentId = ref('')
 const mashupBandId = ref('')
 const mashupUploading = ref(false)
 const mashupUploadError = ref(null)
+const saveAsIndividual = ref(false)
 const mashupBackingAudioEl = ref(null)
 const mashupBackingPreviewEl = ref(null)
 const mashupNewPreviewEl = ref(null)
@@ -863,11 +864,44 @@ async function saveMerged() {
 
     const mergedAudio = await offlineCtx.startRendering()
 
-    // Encode to WAV then upload — server applies EBU R128 normalization
+    // Optionally save the new recording as a standalone individual session first
+    let individualSession = null
+    if (saveAsIndividual.value) {
+      const indivName = mashupName.value.trim() || defaultName()
+      individualSession = await sessions.upload(
+        mashupFile.value, indivName,
+        mashupRecordedAt.value || null,
+        mashupBandId.value || null,
+        'individual',
+        mashupInstrumentId.value || null
+      )
+    }
+
+    // Encode merged audio to WAV and upload as mashup
     const wavBlob = _encodeWAV(mergedAudio.getChannelData(0), sampleRate)
     const mergedFile = new File([wavBlob], `merged-${Date.now()}.wav`, { type: 'audio/wav' })
-    const mergedName = `Merged – ${mashupSelectedSession.value.name}`
-    await sessions.upload(mergedFile, mergedName, null, null, 'mashup', null)
+    const mergedName = mashupName.value.trim() || `Merged – ${mashupSelectedSession.value.name}`
+    const mashupSession = await sessions.upload(
+      mergedFile, mergedName,
+      mashupRecordedAt.value || null,
+      mashupBandId.value || null,
+      'mashup',
+      mashupInstrumentId.value || null
+    )
+
+    // Record which source sessions went into this mashup (best-effort)
+    const sources = [
+      { session_id: mashupSelectedSession.value.id, volume: mashupBackingVolume.value }
+    ]
+    if (individualSession) {
+      sources.push({ session_id: individualSession.id, volume: mashupNewVolume.value })
+    }
+    authFetch(`/api/sessions/${mashupSession.id}/sources`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sources })
+    }).catch(err => console.warn('Failed to record mashup sources:', err))
+
   } catch (err) {
     mergeError.value = err.message
   } finally {
@@ -1565,6 +1599,10 @@ onMounted(async () => {
                   {{ isMerging ? 'Merging…' : '⬇ Save Merged' }}
                 </button>
               </div>
+              <label class="mashup-save-individual-toggle">
+                <input type="checkbox" v-model="saveAsIndividual" />
+                <span>Also save my recording as an individual session</span>
+              </label>
               <p v-if="mergeError" class="error-msg">{{ mergeError }}</p>
             </div>
 
@@ -2135,6 +2173,8 @@ onMounted(async () => {
 .mashup-volume-pct { font-size: 0.78rem; color: var(--color-text-muted); min-width: 34px; text-align: right; }
 .mashup-preview-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
 .mashup-merge-btn { margin-left: auto; padding: 9px 18px; font-size: 0.9rem; }
+.mashup-save-individual-toggle { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--color-text-muted); cursor: pointer; user-select: none; }
+.mashup-save-individual-toggle input[type="checkbox"] { cursor: pointer; accent-color: var(--color-accent); width: 15px; height: 15px; flex-shrink: 0; }
 
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
 .modal { background: var(--color-background-card); border-radius: 12px; padding: 24px; width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto; }
