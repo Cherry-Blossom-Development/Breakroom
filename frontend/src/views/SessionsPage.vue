@@ -1373,6 +1373,79 @@ onMounted(async () => {
 
       <!-- Mashups -->
       <div class="indiv-section-heading">Mashups</div>
+
+      <!-- Saved Mashups list (above creation form, matching Android/iPhone layout) -->
+      <template v-if="mashupSessions.length > 0">
+        <div class="table-wrapper" style="margin-bottom: 16px;">
+          <table class="sessions-table">
+            <thead>
+              <tr>
+                <th class="col-play"></th>
+                <th>Name</th>
+                <th>Recorded</th>
+                <th>Size</th>
+                <th>Rating</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template v-for="session in mashupSessions" :key="session.id">
+                <tr :class="{ playing: playingId === session.id }">
+                  <td class="col-play">
+                    <button class="play-btn" @click="togglePlay(session)"
+                            :title="playingId === session.id && isPlaying ? 'Pause' : 'Play'">
+                      {{ playingId === session.id && isPlaying ? '⏸' : '▶' }}
+                    </button>
+                  </td>
+                  <td class="col-name">
+                    <input type="text" class="inline-edit" :value="session.name"
+                           @blur="e => saveName(session, e.target.value)"
+                           @keydown.enter="e => e.target.blur()" />
+                  </td>
+                  <td>{{ session.recorded_at ? session.recorded_at.slice(0, 10) : '—' }}</td>
+                  <td class="muted">{{ formatBytes(session.file_size) }}</td>
+                  <td class="col-rating">
+                    <div class="rating-cell" @click.stop>
+                      <span class="avg-rating" :class="{ unrated: !session.avg_rating }">
+                        {{ session.avg_rating ? `★ ${session.avg_rating}` : '★ —' }}
+                        <span v-if="session.rating_count > 0" class="rating-count">({{ session.rating_count }})</span>
+                      </span>
+                      <button class="rate-btn" :class="{ rated: session.my_rating }"
+                              @click="openRatingPopup(session.id, $event)"
+                              :title="session.my_rating ? `Your rating: ${session.my_rating}/10` : 'Rate this mashup'">
+                        {{ session.my_rating ? session.my_rating : 'Rate' }}
+                      </button>
+                      <div v-if="ratingPopupId === session.id" class="rating-popup" @click.stop>
+                        <div class="popup-label">Your rating</div>
+                        <div class="popup-numbers">
+                          <button v-for="n in 10" :key="n" class="popup-num"
+                                  :class="{ selected: session.my_rating === n }"
+                                  @click="submitRating(session, n)">{{ n }}</button>
+                        </div>
+                        <button v-if="session.my_rating" class="popup-clear" @click="submitRating(session, null)">
+                          Clear rating
+                        </button>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <button class="delete-btn" @click="deleteSession(session.id)" title="Delete">✕</button>
+                  </td>
+                </tr>
+                <tr v-if="playingId === session.id" class="player-row">
+                  <td colspan="6">
+                    <audio ref="audioEl" :src="`/api/sessions/${playingId}/stream`"
+                           @play="onAudioPlay" @pause="onAudioPause" @ended="onAudioEnded"
+                           @loadedmetadata="onAudioMetadata"
+                           controls preload="metadata"></audio>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
       <div class="card mashup-card">
 
         <!-- Step 1: source selector -->
@@ -1529,49 +1602,6 @@ onMounted(async () => {
         </template>
 
       </div>
-
-      <!-- Saved Mashups list -->
-      <template v-if="mashupSessions.length > 0">
-        <div class="indiv-section-heading" style="margin-top: 16px;">Your Saved Mashups</div>
-        <div class="table-wrapper">
-          <table class="sessions-table">
-            <thead>
-              <tr>
-                <th class="col-play"></th>
-                <th>Name</th>
-                <th>Recorded</th>
-                <th>Size</th>
-                <th>Rating</th>
-              </tr>
-            </thead>
-            <tbody>
-              <template v-for="session in mashupSessions" :key="session.id">
-                <tr :class="{ playing: playingId === session.id }">
-                  <td class="col-play">
-                    <button class="play-btn" @click="togglePlay(session)"
-                            :title="playingId === session.id && isPlaying ? 'Pause' : 'Play'">
-                      {{ playingId === session.id && isPlaying ? '⏸' : '▶' }}
-                    </button>
-                  </td>
-                  <td class="col-name">
-                    <span class="session-name-text">{{ session.name }}</span>
-                  </td>
-                  <td>{{ session.recorded_at ? session.recorded_at.slice(0, 10) : '—' }}</td>
-                  <td class="muted">{{ formatBytes(session.file_size) }}</td>
-                  <td class="col-rating">
-                    <div class="rating-cell" @click.stop>
-                      <span class="avg-rating" :class="{ unrated: !session.avg_rating }">
-                        {{ session.avg_rating ? `★ ${session.avg_rating}` : '★ —' }}
-                        <span v-if="session.rating_count > 0" class="rating-count">({{ session.rating_count }})</span>
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
-        </div>
-      </template>
 
     </template>
 
