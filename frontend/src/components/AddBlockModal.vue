@@ -41,7 +41,8 @@ const widgetTypes = [
   { value: 'weather', label: 'Weather', desc: 'Current weather conditions', w: 1, h: 2 },
   { value: 'news', label: 'News', desc: 'NPR news headlines', w: 2, h: 2 },
   { value: 'blog', label: 'Blog Posts', desc: 'Your recent blog posts', w: 3, h: 2 },
-  { value: 'chat_summary', label: 'Chat Summary', desc: 'Browse and reply to unread messages across all chats', w: 2, h: 2 }
+  { value: 'chat_summary', label: 'Chat Summary', desc: 'Browse and reply to unread messages across all chats', w: 2, h: 2 },
+  { value: 'scheduled_messages', label: 'Scheduled Messages', desc: 'Write messages to be delivered at a future time', w: 2, h: 3 }
 ]
 
 // Default sizes for block types

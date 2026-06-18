@@ -414,7 +414,7 @@ onUnmounted(() => {
             v-for="msg in chat.messages"
             :key="msg.id"
             class="message"
-            :class="{ own: isOwnMessage(msg.handle) }"
+            :class="{ own: isOwnMessage(msg.handle), 'message-scheduled': msg.is_scheduled }"
           >
             <div class="message-header">
               <RouterLink :to="`/user/${msg.handle}`" class="message-author">{{ msg.handle }}</RouterLink>
@@ -660,6 +660,11 @@ onUnmounted(() => {
   background: var(--color-background-soft);
   align-self: flex-start;
   color: var(--color-text);
+}
+
+.message.message-scheduled {
+  background: rgba(237, 137, 54, 0.09);
+  border-left: 2px solid rgba(237, 137, 54, 0.55);
 }
 
 .message.own {

@@ -630,7 +630,7 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
           v-for="msg in messages"
           :key="msg.id"
           class="message"
-          :class="{ 'message-flash': flashingMessageIds.has(msg.id) }"
+          :class="{ 'message-flash': flashingMessageIds.has(msg.id), 'message-scheduled': msg.is_scheduled }"
         >
           <div class="message-header">
             <RouterLink :to="`/user/${msg.handle}`" class="username">{{ msg.handle }}</RouterLink>
@@ -851,6 +851,11 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   padding: var(--card-padding-compact);
   border-radius: var(--card-radius-sm);
   box-shadow: var(--shadow-sm);
+}
+
+.message.message-scheduled {
+  background: rgba(237, 137, 54, 0.09);
+  border-left: 2px solid rgba(237, 137, 54, 0.55);
 }
 
 .message-header {

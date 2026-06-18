@@ -281,7 +281,7 @@ router.get('/rooms/:roomId/messages', authenticateToken, async (req, res) => {
     if (before) {
       query = `
         SELECT
-          m.id, m.message, m.image_path, m.video_path, m.created_at,
+          m.id, m.message, m.image_path, m.video_path, m.created_at, m.is_scheduled,
           u.id as user_id, u.handle
         FROM chat_messages m
         JOIN users u ON m.user_id = u.id
@@ -293,7 +293,7 @@ router.get('/rooms/:roomId/messages', authenticateToken, async (req, res) => {
     } else {
       query = `
         SELECT
-          m.id, m.message, m.image_path, m.video_path, m.created_at,
+          m.id, m.message, m.image_path, m.video_path, m.created_at, m.is_scheduled,
           u.id as user_id, u.handle
         FROM chat_messages m
         JOIN users u ON m.user_id = u.id
@@ -358,7 +358,7 @@ router.post('/rooms/:roomId/messages', authenticateToken, async (req, res) => {
     // Get the inserted message with user info
     const newMessage = await client.query(
       `SELECT
-        m.id, m.message, m.image_path, m.video_path, m.created_at,
+        m.id, m.message, m.image_path, m.video_path, m.created_at, m.is_scheduled,
         u.id as user_id, u.handle
       FROM chat_messages m
       JOIN users u ON m.user_id = u.id
@@ -450,7 +450,7 @@ router.post('/rooms/:roomId/image', authenticateToken, upload.single('image'), a
     // Get the inserted message with user info
     const newMessage = await client.query(
       `SELECT
-        m.id, m.message, m.image_path, m.video_path, m.created_at,
+        m.id, m.message, m.image_path, m.video_path, m.created_at, m.is_scheduled,
         u.id as user_id, u.handle
       FROM chat_messages m
       JOIN users u ON m.user_id = u.id
@@ -524,7 +524,7 @@ router.post('/rooms/:roomId/video', authenticateToken, videoUpload.single('video
     // Get the inserted message with user info
     const newMessage = await client.query(
       `SELECT
-        m.id, m.message, m.image_path, m.video_path, m.created_at,
+        m.id, m.message, m.image_path, m.video_path, m.created_at, m.is_scheduled,
         u.id as user_id, u.handle
       FROM chat_messages m
       JOIN users u ON m.user_id = u.id

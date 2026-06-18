@@ -44,6 +44,9 @@ const io = new Server(server, {
 
   const { initializeSocket } = require('./utilities/socket');
   initializeSocket(io);
+
+  const { startScheduler } = require('./jobs/messageScheduler');
+  startScheduler();
 })();
 
 app.use(cors({
@@ -88,6 +91,7 @@ const bandsRoutes = require('./routes/bands');
 const instrumentsRoutes = require('./routes/instruments');
 const subscriptionsRoutes = require('./routes/subscriptions');
 const shippingRoutes = require('./routes/shipping');
+const scheduledMessagesRoutes = require('./routes/scheduled-messages');
 const { getS3Url } = require('./utilities/aws-s3');
 
 
@@ -139,6 +143,7 @@ app.use('/api/bands', bandsRoutes);
 app.use('/api/instruments', instrumentsRoutes);
 app.use('/api/subscriptions', subscriptionsRoutes);
 app.use('/api/shipping', shippingRoutes);
+app.use('/api/scheduled-messages', scheduledMessagesRoutes);
 const emailNannyRoutes = require('./routes/emailnanny');
 app.use('/api/emailnanny', emailNannyRoutes);
 

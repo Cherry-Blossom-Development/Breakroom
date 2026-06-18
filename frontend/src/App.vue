@@ -15,6 +15,8 @@ import SupportModal from './components/SupportModal.vue'
 import { io } from 'socket.io-client'
 
 const mentionQueue = ref([])
+const scheduledWarning = ref(null)
+const scheduledMissed = ref(null)
 
 function addMention(data) {
   const id = Date.now()
@@ -112,6 +114,14 @@ function setupNotificationSocket() {
     badges.onBlogBadgeUpdate(postId)
   })
 
+  socket.on('scheduled_message_warning', (data) => {
+    scheduledWarning.value = data
+  })
+
+  socket.on('scheduled_message_missed', (data) => {
+    scheduledMissed.value = data
+  })
+
   socket.on('disconnect', () => {
     console.log('Notification socket disconnected')
   })
@@ -156,6 +166,37 @@ onUnmounted(() => {
   teardownNotificationSocket()
 })
 
+async function confirmScheduledSend() {
+  if (!scheduledWarning.value) return
+  try {
+    await fetch(`/api/scheduled-messages/${scheduledWarning.value.id}/confirm`, {
+      method: 'POST', credentials: 'include'
+    })
+  } catch {}
+  scheduledWarning.value = null
+}
+
+async function cancelScheduledSend() {
+  if (!scheduledWarning.value) return
+  try {
+    await fetch(`/api/scheduled-messages/${scheduledWarning.value.id}`, {
+      method: 'DELETE', credentials: 'include'
+    })
+  } catch {}
+  scheduledWarning.value = null
+}
+
+async function editScheduledSend() {
+  if (!scheduledWarning.value) return
+  try {
+    await fetch(`/api/scheduled-messages/${scheduledWarning.value.id}/pause-edit`, {
+      method: 'POST', credentials: 'include'
+    })
+  } catch {}
+  scheduledWarning.value = null
+  router.push('/breakroom')
+}
+
 async function logout() {
   await user.logout()
   window.location.href = '/login'
@@ -199,6 +240,43 @@ setInterval(() => {
   <PopupNotification />
   <MentionToast :mentions="mentionQueue" @dismiss="dismissMention" />
   <SupportModal :visible="showSupport" @close="showSupport = false" />
+
+  <!-- Scheduled message warning modal -->
+  <div v-if="scheduledWarning" class="sched-overlay">
+    <div class="sched-modal">
+      <div class="sched-header">
+        <span class="sched-icon">&#9200;</span>
+        <strong>Scheduled Message Reminder</strong>
+      </div>
+      <p class="sched-desc">
+        Your message to <strong>#{{ scheduledWarning.roomName }}</strong> sends in
+        <strong>{{ scheduledWarning.minutesRemaining }} minute{{ scheduledWarning.minutesRemaining === 1 ? '' : 's' }}</strong>.
+      </p>
+      <div class="sched-preview">{{ scheduledWarning.messagePreview }}</div>
+      <div class="sched-actions">
+        <button class="sched-btn confirm" @click="confirmScheduledSend">Send it</button>
+        <button class="sched-btn cancel" @click="cancelScheduledSend">Don't send</button>
+        <button class="sched-btn edit" @click="editScheduledSend">Edit first</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scheduled message missed/expired modal -->
+  <div v-if="scheduledMissed" class="sched-overlay">
+    <div class="sched-modal">
+      <div class="sched-header">
+        <span class="sched-icon">&#9888;</span>
+        <strong>Scheduled Message Not Sent</strong>
+      </div>
+      <p class="sched-desc">
+        Your scheduled message expired while you were editing it and was <strong>not sent</strong>.
+      </p>
+      <div class="sched-preview">{{ scheduledMissed.messagePreview }}</div>
+      <div class="sched-actions">
+        <button class="sched-btn confirm" @click="scheduledMissed = null">OK</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Logged-in: sidebar + bottom bar navigation -->
   <template v-if="user.username && !route.meta.publicLayout">
@@ -272,6 +350,100 @@ setInterval(() => {
 </template>
 
 <style>
+/* ============================================
+   SCHEDULED MESSAGE MODAL
+   ============================================ */
+
+.sched-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--color-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.sched-modal {
+  background: var(--color-background-card);
+  border-radius: 12px;
+  padding: 24px;
+  width: 360px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+
+.sched-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 1rem;
+  color: var(--color-text);
+}
+
+.sched-icon {
+  font-size: 1.3rem;
+}
+
+.sched-desc {
+  margin: 0 0 12px;
+  font-size: 0.9rem;
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+.sched-preview {
+  background: var(--color-background-soft);
+  border-left: 3px solid rgba(237, 137, 54, 0.6);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 16px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.sched-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sched-btn {
+  flex: 1;
+  min-width: 80px;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 7px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.sched-btn:hover {
+  opacity: 0.85;
+}
+
+.sched-btn.confirm {
+  background: var(--color-accent);
+  color: white;
+}
+
+.sched-btn.cancel {
+  background: var(--color-error, #e53e3e);
+  color: white;
+}
+
+.sched-btn.edit {
+  background: var(--color-button-secondary);
+  color: var(--color-text);
+}
+
 /* Main body styles */
 body {
   margin: 0;

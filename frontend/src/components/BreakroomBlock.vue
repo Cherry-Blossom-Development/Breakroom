@@ -7,6 +7,7 @@ import WeatherWidget from './WeatherWidget.vue'
 import NewsWidget from './NewsWidget.vue'
 import BlogPostsWidget from './BlogPostsWidget.vue'
 import ChatSummaryWidget from './ChatSummaryWidget.vue'
+import ScheduledMessageWidget from './ScheduledMessageWidget.vue'
 
 const props = defineProps({
   block: {
@@ -51,6 +52,7 @@ const blockTitle = computed(() => {
     case 'weather': return 'Weather'
     case 'news': return 'News'
     case 'blog': return 'Blog Posts'
+    case 'scheduled_messages': return 'Scheduled Messages'
     default: return 'Block'
   }
 })
@@ -105,6 +107,9 @@ const blockTitle = computed(() => {
         v-else-if="block.block_type === 'chat_summary'"
         @new-message="onNewMessage"
       />
+
+      <!-- Scheduled Messages block -->
+      <ScheduledMessageWidget v-else-if="block.block_type === 'scheduled_messages'" />
 
       <!-- Unknown block type -->
       <div v-else class="unknown-content">

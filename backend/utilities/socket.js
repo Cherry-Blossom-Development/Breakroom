@@ -143,7 +143,7 @@ const initializeSocket = (io) => {
         // Get the inserted message
         const newMessage = await client.query(
           `SELECT
-            m.id, m.message, m.image_path, m.created_at,
+            m.id, m.message, m.image_path, m.created_at, m.is_scheduled,
             u.id as user_id, u.handle
           FROM chat_messages m
           JOIN users u ON m.user_id = u.id
