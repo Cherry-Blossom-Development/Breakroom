@@ -299,13 +299,23 @@ router.post('/public/:storeUrl/items/:itemId/checkout/intent', async (req, res) 
     const feePercent = await getSellerFeePercent(sellerUserId, client);
     const platformFeeCents = Math.round(totalCents * feePercent / 100);
 
-    const paymentIntent = await getStripe().paymentIntents.create({
-      amount: totalCents,
-      currency: 'usd',
-      application_fee_amount: platformFeeCents,
-      transfer_data: { destination: stripeAccountId },
-      metadata: { item_id: String(item.id), seller_user_id: String(sellerUserId), buyer_email, buyer_name }
-    });
+    let paymentIntent;
+    try {
+      paymentIntent = await getStripe().paymentIntents.create({
+        amount: totalCents,
+        currency: 'usd',
+        application_fee_amount: platformFeeCents,
+        transfer_data: { destination: stripeAccountId },
+        metadata: { item_id: String(item.id), seller_user_id: String(sellerUserId), buyer_email, buyer_name }
+      });
+    } catch (stripeErr) {
+      if (stripeErr.code === 'resource_missing') {
+        // Seller's Connect account ID is stale — clear it so they re-onboard
+        await client.query('DELETE FROM user_stripe_connect WHERE user_id = $1', [sellerUserId]);
+        return res.status(400).json({ message: 'Seller has not completed payment setup' });
+      }
+      throw stripeErr;
+    }
 
     const orderResult = await client.query(
       `INSERT INTO orders
