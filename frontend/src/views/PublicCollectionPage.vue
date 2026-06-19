@@ -42,6 +42,7 @@
                 <polyline points="21 15 16 10 5 21"/>
               </svg>
             </div>
+            <div v-if="!item.is_available" class="sold-badge">Sold</div>
             <div class="buy-overlay">{{ item.is_available ? 'View & Buy' : 'View' }}</div>
           </div>
           <div class="item-body">
@@ -80,7 +81,7 @@
 
     <!-- ── Purchase modal ── -->
     <Teleport to="body">
-      <div v-if="modal.open" class="modal-backdrop" @click.self="closeModal">
+      <div v-if="modal.open" class="modal-backdrop">
         <div class="modal" :class="{ 'modal-lightbox': modal.step === 0 }">
 
           <!-- Step 0: Preview (lightbox-style with Buy Now) -->
@@ -412,7 +413,8 @@ async function submitPayment() {
       modal.step = 3
       // Remove the purchased item from the list
       if (data.value?.items) {
-        data.value.items = data.value.items.filter(i => i.id !== modal.item.id)
+        const soldIdx = data.value.items.findIndex(i => i.id === modal.item.id)
+        if (soldIdx !== -1) data.value.items[soldIdx] = { ...data.value.items[soldIdx], is_available: 0 }
       }
     }
   } catch {
@@ -508,6 +510,21 @@ async function submitPayment() {
   align-items: center;
   justify-content: center;
   color: rgba(0,0,0,0.2);
+}
+
+.sold-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(0,0,0,0.65);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 4px;
+  pointer-events: none;
 }
 
 .buy-overlay {

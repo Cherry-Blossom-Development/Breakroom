@@ -50,6 +50,7 @@
                         <polyline points="21 15 16 10 5 21"/>
                       </svg>
                     </div>
+                    <div v-if="!item.is_available" class="sold-badge">Sold</div>
                     <div class="buy-overlay">{{ item.is_available ? 'View & Buy' : 'View' }}</div>
                   </div>
                   <div class="item-body">
@@ -115,7 +116,7 @@
 
     <!-- ── Purchase modal ── -->
     <Teleport to="body">
-      <div v-if="modal.open" class="modal-backdrop" @click.self="closeModal">
+      <div v-if="modal.open" class="modal-backdrop">
         <div class="modal" :class="{ 'modal-lightbox': modal.step === 0 }">
 
           <!-- Step 0: Preview -->
@@ -490,7 +491,8 @@ async function submitPayment() {
       cardElement.destroy()
       cardElement = null
       modal.step = 3
-      collectionItems.value = collectionItems.value.filter(i => i.id !== modal.item.id)
+      const soldIdx = collectionItems.value.findIndex(i => i.id === modal.item.id)
+      if (soldIdx !== -1) collectionItems.value[soldIdx] = { ...collectionItems.value[soldIdx], is_available: 0 }
     }
   } catch {
     modal.error = 'Payment failed. Please try again.'
@@ -707,6 +709,21 @@ async function submitPayment() {
   align-items: center;
   justify-content: center;
   color: rgba(0,0,0,0.2);
+}
+
+.sold-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(0,0,0,0.65);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 4px;
+  pointer-events: none;
 }
 
 .buy-overlay {

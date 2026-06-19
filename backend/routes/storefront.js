@@ -126,13 +126,13 @@ router.get('/public/:storeUrl/collection/:collectionId', async (req, res) => {
 
     const collection = parseSettings(colResult.rows[0]);
 
-    // Fetch available items only
+    // Fetch all gallery items (including sold ones so they show as "Sold")
     const itemResult = await client.query(
       `SELECT id, name, description, image_path, price_cents, is_available, shipping_cost_cents,
               weight_oz, length_in, width_in, height_in
        FROM collection_items
        WHERE collection_id = $1 AND in_gallery = 1
-       ORDER BY display_order ASC, created_at ASC`,
+       ORDER BY is_available DESC, display_order ASC, created_at ASC`,
       [req.params.collectionId]
     );
 
