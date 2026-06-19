@@ -9,7 +9,7 @@ const sesClient = new SESClient({
   }
 });
 
-const sendMail = async (to, from, subject, htmlContent) => {
+const sendMail = async (to, from, subject, htmlContent, replyTo = null) => {
   const params = {
     Destination: {
       ToAddresses: [to]
@@ -26,7 +26,8 @@ const sendMail = async (to, from, subject, htmlContent) => {
         Data: subject
       }
     },
-    Source: from
+    Source: from,
+    ...(replyTo && { ReplyToAddresses: [replyTo] })
   };
 
   console.log('Attempting to send email via AWS SES to:', to);

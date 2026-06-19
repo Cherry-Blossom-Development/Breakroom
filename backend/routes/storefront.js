@@ -233,6 +233,55 @@ router.put('/', authenticate, async (req, res) => {
   }
 });
 
+// POST /api/storefront/public/:storeUrl/contact  (no auth)
+router.post('/public/:storeUrl/contact', async (req, res) => {
+  const { buyer_name, buyer_email, message, item_name } = req.body;
+
+  if (!buyer_name || !buyer_email || !message) {
+    return res.status(400).json({ message: 'Name, email, and message are required.' });
+  }
+
+  let client;
+  try {
+    client = await getClient();
+
+    const storeResult = await client.query(
+      `SELECT u.email, u.first_name FROM user_storefront us
+       JOIN users u ON us.user_id = u.id
+       WHERE us.store_url = $1`,
+      [req.params.storeUrl]
+    );
+    if (storeResult.rowCount === 0) return res.status(404).json({ message: 'Store not found' });
+
+    const { email: sellerEmail, first_name: sellerFirst } = storeResult.rows[0];
+
+    const subject = item_name
+      ? `Inquiry about "${item_name}" from ${buyer_name}`
+      : `Message from ${buyer_name} via your Prosaurus store`;
+
+    const html = `
+      <p>Hi ${sellerFirst || 'there'},</p>
+      <p>You have a new inquiry${item_name ? ` about <strong>${item_name}</strong>` : ''} from your Prosaurus store.</p>
+      <hr style="border:none;border-top:1px solid #eee;margin:16px 0">
+      <p><strong>From:</strong> ${buyer_name} &lt;${buyer_email}&gt;</p>
+      ${item_name ? `<p><strong>Item:</strong> ${item_name}</p>` : ''}
+      <p><strong>Message:</strong></p>
+      <p style="white-space:pre-wrap">${message}</p>
+      <hr style="border:none;border-top:1px solid #eee;margin:16px 0">
+      <p style="color:#888;font-size:0.9em">Reply directly to this email to respond to ${buyer_name}.</p>
+      <p>— Prosaurus</p>`;
+
+    await sendMail(sellerEmail, 'noreply@prosaurus.com', subject, html, buyer_email);
+
+    res.json({ message: 'Message sent' });
+  } catch (err) {
+    console.error('Failed to send contact email:', err);
+    res.status(500).json({ message: 'Failed to send message. Please try again.' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
 // ─── Checkout ────────────────────────────────────────────────────────────────
 
 // POST /api/storefront/public/:storeUrl/items/:itemId/checkout/intent  (no auth)

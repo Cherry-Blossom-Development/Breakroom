@@ -55,6 +55,7 @@
               </span>
               <span v-else-if="item.price_cents != null" class="item-shipping">Free shipping</span>
             </div>
+            <button class="contact-seller-btn" @click.stop="openContact(item)">Contact Seller</button>
           </div>
         </div>
       </div>
@@ -231,6 +232,46 @@
             </div>
             <div class="modal-footer">
               <button class="btn-primary" @click="closeModal">Done</button>
+            </div>
+          </template>
+
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- ── Contact Seller modal ── -->
+    <Teleport to="body">
+      <div v-if="contactModal.open" class="modal-backdrop">
+        <div class="modal contact-modal">
+          <div class="modal-header">
+            <h2 class="modal-title">Contact Seller</h2>
+            <button class="modal-close" @click="closeContact">✕</button>
+          </div>
+
+          <div v-if="contactModal.sent" class="modal-body confirmation">
+            <div class="confirm-icon">✓</div>
+            <p>Your message has been sent! The seller will reply to your email.</p>
+          </div>
+
+          <template v-else>
+            <div class="modal-body">
+              <p v-if="contactModal.item" class="contact-item-ref">About: <strong>{{ contactModal.item.name }}</strong></p>
+              <div class="form-row">
+                <label>Your name *<input v-model="contactForm.buyer_name" type="text" placeholder="Jane Smith" /></label>
+                <label>Your email *<input v-model="contactForm.buyer_email" type="email" placeholder="jane@example.com" /></label>
+              </div>
+              <div class="form-row">
+                <label class="full">Message *
+                  <textarea v-model="contactForm.message" rows="5" placeholder="What would you like to know?"></textarea>
+                </label>
+              </div>
+              <p v-if="contactModal.error" class="form-error">{{ contactModal.error }}</p>
+            </div>
+            <div class="modal-footer">
+              <button class="btn-secondary" @click="closeContact">Cancel</button>
+              <button class="btn-primary" :disabled="contactModal.loading" @click="submitContact">
+                {{ contactModal.loading ? 'Sending…' : 'Send Message' }}
+              </button>
             </div>
           </template>
 
@@ -423,6 +464,53 @@ async function submitPayment() {
     modal.loading = false
   }
 }
+
+// ── Contact Seller ────────────────────────────────────────────────────────────
+const contactModal = reactive({ open: false, item: null, loading: false, error: null, sent: false })
+const contactForm = reactive({ buyer_name: '', buyer_email: '', message: '' })
+
+function openContact(item) {
+  contactModal.item = item
+  contactModal.sent = false
+  contactModal.error = null
+  contactModal.loading = false
+  contactModal.open = true
+}
+
+function closeContact() {
+  contactModal.open = false
+}
+
+async function submitContact() {
+  contactModal.error = null
+  if (!contactForm.buyer_name || !contactForm.buyer_email || !contactForm.message) {
+    contactModal.error = 'Please fill in all fields.'
+    return
+  }
+  contactModal.loading = true
+  try {
+    const res = await fetch(`/api/storefront/public/${route.params.storeUrl}/contact`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        buyer_name: contactForm.buyer_name,
+        buyer_email: contactForm.buyer_email,
+        message: contactForm.message,
+        item_name: contactModal.item?.name || null,
+      }),
+    })
+    const body = await res.json()
+    if (!res.ok) {
+      contactModal.error = body.message || 'Failed to send message.'
+      return
+    }
+    contactModal.sent = true
+  } catch {
+    contactModal.error = 'Network error. Please try again.'
+  } finally {
+    contactModal.loading = false
+  }
+}
 </script>
 
 <style scoped>
@@ -543,7 +631,47 @@ async function submitPayment() {
 }
 .item-card:hover .buy-overlay { opacity: 1; }
 
-.item-body { padding: 14px 16px 18px; }
+.item-body { padding: 14px 16px 14px; }
+
+.contact-seller-btn {
+  margin-top: 10px;
+  background: none;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 0.8rem;
+  color: #555;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+  width: 100%;
+}
+.contact-seller-btn:hover { border-color: #6366f1; color: #6366f1; }
+
+.contact-modal { max-width: 480px; }
+
+.contact-item-ref {
+  font-size: 0.88rem;
+  color: #555;
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  background: #f5f5f5;
+  border-radius: 6px;
+}
+
+.form-row textarea {
+  padding: 9px 11px;
+  border: 1px solid #ddd;
+  border-radius: 7px;
+  font-size: 0.92rem;
+  color: #222;
+  outline: none;
+  resize: vertical;
+  font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+.form-row textarea:focus { border-color: #6366f1; }
 .item-name { font-size: 1rem; font-weight: 600; color: inherit; margin-bottom: 6px; }
 .item-desc { font-size: 0.88rem; color: inherit; opacity: 0.7; line-height: 1.5; margin-bottom: 8px; }
 .item-price-row { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
