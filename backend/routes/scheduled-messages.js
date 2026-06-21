@@ -8,6 +8,21 @@ require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
 
+// Ensure scheduled_at is always returned as a UTC ISO string (with Z suffix)
+// so clients can parse it unambiguously regardless of what mysql2 returns.
+function normalizeMsg(msg) {
+  const val = msg.scheduled_at;
+  let normalized;
+  if (val instanceof Date) {
+    normalized = val.toISOString();
+  } else if (typeof val === 'string') {
+    normalized = (val.endsWith('Z') ? val : val.replace(' ', 'T') + 'Z');
+  } else {
+    normalized = val;
+  }
+  return { ...msg, scheduled_at: normalized };
+}
+
 const authenticateToken = async (req, res, next) => {
   const token = extractToken(req);
   if (!token) return res.status(401).json({ message: 'Not authenticated' });
@@ -71,7 +86,7 @@ router.post('/', authenticateToken, async (req, res) => {
       [result.insertId]
     );
 
-    res.status(201).json({ scheduled_message: created.rows[0] });
+    res.status(201).json({ scheduled_message: normalizeMsg(created.rows[0]) });
   } catch (err) {
     console.error('Error creating scheduled message:', err);
     res.status(500).json({ message: 'Failed to create scheduled message' });
@@ -92,7 +107,7 @@ router.get('/', authenticateToken, async (req, res) => {
        ORDER BY scm.scheduled_at ASC`,
       [req.user.id]
     );
-    res.json({ scheduled_messages: result.rows });
+    res.json({ scheduled_messages: result.rows.map(normalizeMsg) });
   } catch (err) {
     console.error('Error fetching scheduled messages:', err);
     res.status(500).json({ message: 'Failed to fetch scheduled messages' });
@@ -149,7 +164,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
       [id]
     );
 
-    res.json({ scheduled_message: updated.rows[0] });
+    res.json({ scheduled_message: normalizeMsg(updated.rows[0]) });
   } catch (err) {
     console.error('Error updating scheduled message:', err);
     res.status(500).json({ message: 'Failed to update scheduled message' });

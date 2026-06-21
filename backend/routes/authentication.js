@@ -373,7 +373,7 @@ router.get('/me', async (req, res) => {
     // Fetch user ID from database
     const client = await getClient();
     const user = await client.query(
-      'SELECT id FROM users WHERE handle = $1',
+      'SELECT id, timezone FROM users WHERE handle = $1',
       [payload.username]
     );
     client.release();
@@ -384,7 +384,8 @@ router.get('/me', async (req, res) => {
 
     return res.json({
       username: payload.username,
-      userId: user.rows[0].id
+      userId: user.rows[0].id,
+      timezone: user.rows[0].timezone ?? null
     });
   } catch (err) {
     return res.status(401).json({ message: 'Invalid token' });
