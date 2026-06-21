@@ -9,6 +9,7 @@ const error = ref('')
 
 const DEFAULT_INDICATOR = '- sent via scheduled message'
 
+const showModal = ref(false)
 const editingId = ref(null)
 const form = reactive({
   messageText: '',
@@ -47,6 +48,27 @@ function resetForm() {
   form.warningMinutes = 10
   form.indicatorText = DEFAULT_INDICATOR
   formError.value = ''
+}
+
+function openCreate() {
+  resetForm()
+  showModal.value = true
+}
+
+function openEdit(msg) {
+  editingId.value = msg.id
+  form.messageText = msg.message_text
+  form.roomId = msg.room_id
+  form.scheduledAt = toLocalISOString(new Date(msg.scheduled_at))
+  form.warningMinutes = msg.warning_minutes
+  form.indicatorText = msg.indicator_text ?? DEFAULT_INDICATOR
+  formError.value = ''
+  showModal.value = true
+}
+
+function closeModal() {
+  showModal.value = false
+  resetForm()
 }
 
 async function fetchScheduled() {
@@ -97,7 +119,7 @@ async function handleSubmit() {
       const d = await res.json()
       throw new Error(d.message || 'Failed to save')
     }
-    resetForm()
+    closeModal()
     await fetchScheduled()
   } catch (err) {
     formError.value = err.message
@@ -106,20 +128,9 @@ async function handleSubmit() {
   }
 }
 
-function startEdit(msg) {
-  editingId.value = msg.id
-  form.messageText = msg.message_text
-  form.roomId = msg.room_id
-  form.scheduledAt = toLocalISOString(new Date(msg.scheduled_at))
-  form.warningMinutes = msg.warning_minutes
-  form.indicatorText = msg.indicator_text ?? DEFAULT_INDICATOR
-  formError.value = ''
-}
-
 async function cancelMessage(id) {
   try {
     await fetch(`/api/scheduled-messages/${id}`, { method: 'DELETE', credentials: 'include' })
-    if (editingId.value === id) resetForm()
     await fetchScheduled()
   } catch (err) {
     error.value = err.message
@@ -152,98 +163,17 @@ function statusLabel(msg) {
 onMounted(async () => {
   if (rooms.value.length === 0) await chat.fetchRooms()
   if (rooms.value.length > 0 && !form.roomId) form.roomId = rooms.value[0].id
-  form.scheduledAt = getDefaultScheduledAt()
   await fetchScheduled()
 })
 </script>
 
 <template>
   <div class="scheduled-widget">
-    <!-- Create / Edit form -->
-    <div class="form-section">
-      <h4 class="section-heading">{{ editingId ? 'Edit Scheduled Message' : 'Schedule a Message' }}</h4>
-
-      <form @submit.prevent="handleSubmit">
-        <textarea
-          v-model="form.messageText"
-          placeholder="Type your message..."
-          maxlength="1000"
-          rows="3"
-          class="msg-input"
-          :class="{ 'edit-mode': editingId }"
-        />
-        <div class="char-count">{{ form.messageText.length }}/1000</div>
-
-        <div class="field-row">
-          <div class="field">
-            <label>Room</label>
-            <select v-model="form.roomId">
-              <option v-for="r in rooms" :key="r.id" :value="r.id"># {{ r.name }}</option>
-            </select>
-          </div>
-          <div class="field">
-            <label>Warn me</label>
-            <div class="warn-row">
-              <input
-                type="number"
-                v-model.number="form.warningMinutes"
-                min="0"
-                max="60"
-                class="warn-input"
-              />
-              <span class="warn-label">min before</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="field">
-          <label>Send at</label>
-          <input
-            type="datetime-local"
-            v-model="form.scheduledAt"
-            :min="minScheduledAt"
-            class="datetime-input"
-          />
-        </div>
-
-        <div class="field">
-          <label>
-            Indicator text
-            <span class="label-hint">(appended to message — leave empty for none)</span>
-          </label>
-          <div class="indicator-row">
-            <input
-              type="text"
-              v-model="form.indicatorText"
-              placeholder="e.g. - sent via scheduled message"
-              maxlength="255"
-              class="indicator-input"
-            />
-            <button type="button" class="btn-tiny" @click="form.indicatorText = DEFAULT_INDICATOR" title="Reset to default">Default</button>
-            <button type="button" class="btn-tiny" @click="form.indicatorText = ''" title="No indicator">None</button>
-          </div>
-        </div>
-
-        <p v-if="formError" class="form-error">{{ formError }}</p>
-
-        <div class="form-actions">
-          <button type="submit" class="btn-primary" :disabled="saving">
-            {{ saving ? 'Saving...' : editingId ? 'Update Message' : 'Schedule Message' }}
-          </button>
-          <button v-if="editingId" type="button" class="btn-secondary" @click="resetForm">
-            Cancel Edit
-          </button>
-        </div>
-      </form>
-    </div>
-
-    <!-- Pending list -->
+    <!-- Message list -->
     <div class="list-section">
-      <h4 class="section-heading">Upcoming</h4>
-
       <div v-if="loading" class="empty-state">Loading...</div>
       <div v-else-if="error" class="empty-state error-text">{{ error }}</div>
-      <div v-else-if="scheduled.length === 0" class="empty-state">No scheduled messages.</div>
+      <div v-else-if="scheduled.length === 0" class="empty-state">No messages scheduled.</div>
 
       <div v-else class="scheduled-list">
         <div
@@ -261,7 +191,7 @@ onMounted(async () => {
           <div class="item-actions">
             <button
               class="btn-tiny"
-              @click="startEdit(msg)"
+              @click="openEdit(msg)"
               :disabled="msg.status === 'warning_sent' && !msg.is_editing"
             >
               Edit
@@ -271,232 +201,137 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+
+    <!-- Footer button -->
+    <div class="widget-footer">
+      <button class="btn-create" @click="openCreate">Create new Message</button>
+    </div>
   </div>
+
+  <!-- Create / Edit modal -->
+  <Teleport to="body">
+    <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
+      <div class="modal">
+        <h4 class="modal-title">{{ editingId ? 'Edit Scheduled Message' : 'Schedule a Message' }}</h4>
+
+        <form @submit.prevent="handleSubmit">
+          <div class="field">
+            <label>Message</label>
+            <textarea
+              v-model="form.messageText"
+              placeholder="Type your message..."
+              maxlength="1000"
+              rows="4"
+              class="msg-input"
+            />
+            <div class="char-count">{{ form.messageText.length }}/1000</div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label>Room</label>
+              <select v-model="form.roomId">
+                <option v-for="r in rooms" :key="r.id" :value="r.id"># {{ r.name }}</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Warn me</label>
+              <div class="warn-row">
+                <input
+                  type="number"
+                  v-model.number="form.warningMinutes"
+                  min="0"
+                  max="60"
+                  class="warn-input"
+                />
+                <span class="warn-label">min before</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Send at</label>
+            <input
+              type="datetime-local"
+              v-model="form.scheduledAt"
+              :min="minScheduledAt"
+              class="datetime-input"
+            />
+          </div>
+
+          <div class="field">
+            <label>
+              Indicator text
+              <span class="label-hint">(appended to message — leave empty for none)</span>
+            </label>
+            <div class="indicator-row">
+              <input
+                type="text"
+                v-model="form.indicatorText"
+                placeholder="e.g. - sent via scheduled message"
+                maxlength="255"
+                class="indicator-input"
+              />
+              <button type="button" class="btn-tiny" @click="form.indicatorText = DEFAULT_INDICATOR" title="Reset to default">Default</button>
+              <button type="button" class="btn-tiny" @click="form.indicatorText = ''" title="No indicator">None</button>
+            </div>
+          </div>
+
+          <p v-if="formError" class="form-error">{{ formError }}</p>
+
+          <div class="modal-actions">
+            <button type="submit" class="btn-primary" :disabled="saving">
+              {{ saving ? 'Saving...' : editingId ? 'Update Message' : 'Create' }}
+            </button>
+            <button type="button" class="btn-secondary" @click="closeModal">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
 .scheduled-widget {
   height: 100%;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 0;
   font-size: 0.85rem;
 }
 
-.form-section,
 .list-section {
+  flex: 1;
+  overflow-y: auto;
   padding: 10px 12px;
 }
 
-.form-section {
-  border-bottom: 1px solid var(--color-border);
+.widget-footer {
+  padding: 8px 12px;
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
-.section-heading {
-  margin: 0 0 8px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.msg-input {
+.btn-create {
   width: 100%;
-  box-sizing: border-box;
-  padding: 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-background-input);
-  color: var(--color-text);
-  font-size: 0.85rem;
-  resize: vertical;
-  font-family: inherit;
-}
-
-.msg-input.edit-mode {
-  border-color: var(--color-accent);
-}
-
-.msg-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
-
-.char-count {
-  text-align: right;
-  font-size: 0.72rem;
-  color: var(--color-text-muted);
-  margin: 2px 0 6px;
-}
-
-.field-row {
-  display: flex;
-  gap: 8px;
-}
-
-.field-row .field {
-  flex: 1;
-  min-width: 0;
-}
-
-.field {
-  margin-bottom: 8px;
-}
-
-.field label {
-  display: block;
-  font-size: 0.75rem;
-  color: var(--color-text-secondary);
-  margin-bottom: 3px;
-  font-weight: 500;
-}
-
-.label-hint {
-  font-weight: 400;
-  color: var(--color-text-muted);
-}
-
-.field select,
-.field input[type="text"],
-.field input[type="number"],
-.datetime-input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 6px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-background-input);
-  color: var(--color-text);
-  font-size: 0.82rem;
-}
-
-.field select:focus,
-.field input:focus,
-.datetime-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
-
-.warn-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.warn-input {
-  width: 52px !important;
-  text-align: center;
-}
-
-.warn-label {
-  font-size: 0.78rem;
-  color: var(--color-text-muted);
-  white-space: nowrap;
-}
-
-.indicator-row {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-}
-
-.indicator-input {
-  flex: 1;
-  min-width: 0;
-  padding: 6px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-background-input);
-  color: var(--color-text);
-  font-size: 0.82rem;
-}
-
-.indicator-input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
-
-.form-error {
-  color: var(--color-error);
-  font-size: 0.8rem;
-  margin: 4px 0;
-}
-
-.form-actions {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.btn-primary {
   background: var(--color-accent);
   color: white;
   border: none;
-  padding: 7px 14px;
+  padding: 8px 14px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 0.82rem;
+  font-size: 0.85rem;
   font-weight: 500;
 }
 
-.btn-primary:hover:not(:disabled) {
+.btn-create:hover {
   background: var(--color-accent-hover);
-}
-
-.btn-primary:disabled {
-  background: var(--color-button-disabled);
-  cursor: not-allowed;
-}
-
-.btn-secondary {
-  background: var(--color-button-secondary);
-  color: var(--color-text);
-  border: none;
-  padding: 7px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.82rem;
-}
-
-.btn-secondary:hover {
-  background: var(--color-button-secondary-hover);
-}
-
-.btn-tiny {
-  background: var(--color-background-hover);
-  color: var(--color-text-secondary);
-  border: 1px solid var(--color-border);
-  padding: 3px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.75rem;
-  white-space: nowrap;
-}
-
-.btn-tiny:hover:not(:disabled) {
-  background: var(--color-button-secondary-hover);
-}
-
-.btn-tiny:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.btn-tiny.danger {
-  color: var(--color-error);
-}
-
-.btn-tiny.danger:hover {
-  background: var(--color-error-bg, rgba(255, 59, 48, 0.1));
 }
 
 .empty-state {
   color: var(--color-text-muted);
   font-size: 0.82rem;
   text-align: center;
-  padding: 12px 0;
+  padding: 16px 0;
 }
 
 .error-text {
@@ -575,5 +410,220 @@ onMounted(async () => {
 .item-actions {
   display: flex;
   gap: 4px;
+}
+
+.btn-tiny {
+  background: var(--color-background-hover);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.btn-tiny:hover:not(:disabled) {
+  background: var(--color-button-secondary-hover);
+}
+
+.btn-tiny:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-tiny.danger {
+  color: var(--color-error);
+}
+
+.btn-tiny.danger:hover {
+  background: var(--color-error-bg, rgba(255, 59, 48, 0.1));
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--color-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: var(--color-background-card);
+  border-radius: 10px;
+  padding: 20px 24px;
+  width: 460px;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+
+.modal-title {
+  margin: 0 0 16px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.field {
+  margin-bottom: 12px;
+}
+
+.field label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+.label-hint {
+  font-weight: 400;
+  color: var(--color-text-muted);
+}
+
+.field-row {
+  display: flex;
+  gap: 10px;
+}
+
+.field-row .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.field select,
+.field input[type="text"],
+.field input[type="number"],
+.datetime-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background-input);
+  color: var(--color-text);
+  font-size: 0.85rem;
+}
+
+.field select:focus,
+.field input:focus,
+.datetime-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.msg-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background-input);
+  color: var(--color-text);
+  font-size: 0.85rem;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.msg-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.char-count {
+  text-align: right;
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  margin-top: 3px;
+}
+
+.warn-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.warn-input {
+  width: 56px !important;
+  text-align: center;
+}
+
+.warn-label {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.indicator-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.indicator-input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background-input);
+  color: var(--color-text);
+  font-size: 0.85rem;
+}
+
+.indicator-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.form-error {
+  color: var(--color-error);
+  font-size: 0.82rem;
+  margin: 6px 0 0;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.btn-primary {
+  background: var(--color-accent);
+  color: white;
+  border: none;
+  padding: 8px 18px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.btn-primary:disabled {
+  background: var(--color-button-disabled);
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: var(--color-button-secondary);
+  color: var(--color-text);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.btn-secondary:hover {
+  background: var(--color-button-secondary-hover);
 }
 </style>
