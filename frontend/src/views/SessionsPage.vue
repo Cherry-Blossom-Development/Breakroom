@@ -13,7 +13,13 @@ const audioDefaults = reactive({
   echo_cancellation: false,
   noise_suppression: false,
   auto_gain_control: false,
-  playback_volume: 0.75
+  playback_volume: 0.75,
+  wav_playback_boost: 3.33,
+  recording_normalization: 0.9,
+  bitrate: 256000,
+  mashup_backing_volume: 1.0,
+  mashup_new_volume: 1.0,
+  soft_limiter: false
 })
 
 // --- Device tracking ---
@@ -75,6 +81,14 @@ async function loadAudioDefaults() {
       audioDefaults.noise_suppression = !!data.noise_suppression
       audioDefaults.auto_gain_control = !!data.auto_gain_control
       audioDefaults.playback_volume = parseFloat(data.playback_volume) || 0.75
+      audioDefaults.wav_playback_boost = parseFloat(data.wav_playback_boost) || 3.33
+      audioDefaults.recording_normalization = parseFloat(data.recording_normalization) || 0.9
+      audioDefaults.bitrate = parseInt(data.bitrate) || 256000
+      audioDefaults.mashup_backing_volume = parseFloat(data.mashup_backing_volume) ?? 1.0
+      audioDefaults.mashup_new_volume = parseFloat(data.mashup_new_volume) ?? 1.0
+      audioDefaults.soft_limiter = !!data.soft_limiter
+      mashupBackingVolume.value = audioDefaults.mashup_backing_volume
+      mashupNewVolume.value = audioDefaults.mashup_new_volume
     }
   } catch { /* keep defaults */ }
 }
@@ -778,7 +792,7 @@ const mergeError = ref(null)
 
 const mashupSourceSessions = computed(() => {
   if (!mashupSource.value) return []
-  if (mashupSource.value === 'own') return sessions.list.filter(s => s.session_type !== 'mashup')
+  if (mashupSource.value === 'own') return sessions.list
   const bandId = parseInt(mashupSource.value.replace('band-', ''), 10)
   return bandMemberSessions.value.filter(s => s.band_id === bandId)
 })
@@ -963,12 +977,11 @@ function stopMashupRecording() {
   for (const chunk of _pcmSamples) { flat.set(chunk, offset); offset += chunk.length }
   _pcmSamples = []
 
-  // OS-level echo processing often attenuates mic input when audio is playing through
-  // speakers simultaneously. Normalize peak to 0.7 before encoding so the server's
-  // EBU R128 normalization has adequate signal to work with.
+  // Normalize peak before encoding so the server's EBU R128 normalization has adequate signal.
+  const normTarget = audioDefaults.recording_normalization || 0.9
   const peak = flat.reduce((max, s) => Math.max(max, Math.abs(s)), 0)
-  if (peak > 0 && peak < 0.7) {
-    const boost = 0.7 / peak
+  if (peak > 0 && peak < normTarget) {
+    const boost = normTarget / peak
     for (let i = 0; i < flat.length; i++) flat[i] = Math.max(-1, Math.min(1, flat[i] * boost))
   }
 
@@ -1060,12 +1073,14 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- Playback Volume -->
+        <!-- Playback section -->
+        <div class="ad-section-label">Playback</div>
+
         <div class="ad-group">
           <div class="ad-row">
             <div class="ad-label">
               <span class="ad-name">Playback Volume</span>
-              <span class="ad-desc">Default volume when playing back sessions</span>
+              <span class="ad-desc">Default volume when playing back sessions. 75% is the default; lower if output is too loud through speakers.</span>
             </div>
             <span class="ad-value">{{ Math.round(audioDefaults.playback_volume * 100) }}%</span>
           </div>
@@ -1074,14 +1089,27 @@ onMounted(async () => {
                  @input="e => audioDefaults.playback_volume = parseFloat(e.target.value)" />
         </div>
 
-        <!-- Recording toggles -->
+        <div class="ad-group">
+          <div class="ad-row">
+            <div class="ad-label">
+              <span class="ad-name">WAV Playback Boost</span>
+              <span class="ad-desc">Extra gain applied when playing WAV files on mobile apps. Android plays raw PCM quieter than browsers, so a boost compensates. Has no effect on web playback.</span>
+            </div>
+            <span class="ad-value">×{{ audioDefaults.wav_playback_boost.toFixed(1) }}</span>
+          </div>
+          <input type="range" class="ad-slider" min="0.5" max="5" step="0.1"
+                 :value="audioDefaults.wav_playback_boost"
+                 @input="e => audioDefaults.wav_playback_boost = parseFloat(e.target.value)" />
+        </div>
+
+        <!-- Recording section -->
         <div class="ad-section-label">Recording</div>
 
         <div class="ad-group">
           <label class="ad-toggle-row">
             <div class="ad-label">
               <span class="ad-name">Echo Cancellation</span>
-              <span class="ad-desc">Reduce echo when monitoring through speakers. Disable for music recording to preserve the full signal.</span>
+              <span class="ad-desc">Removes echo caused by the microphone picking up speaker output. Disable for music recording to preserve the full signal.</span>
             </div>
             <div class="ad-toggle" :class="{ active: audioDefaults.echo_cancellation }"
                  @click="audioDefaults.echo_cancellation = !audioDefaults.echo_cancellation">
@@ -1094,7 +1122,7 @@ onMounted(async () => {
           <label class="ad-toggle-row">
             <div class="ad-label">
               <span class="ad-name">Noise Suppression</span>
-              <span class="ad-desc">Filter out background noise. Disable for music recording to avoid artifacts on sustained notes.</span>
+              <span class="ad-desc">Filters out background noise. Can colour the sound — disable for music recording to avoid artifacts on sustained notes.</span>
             </div>
             <div class="ad-toggle" :class="{ active: audioDefaults.noise_suppression }"
                  @click="audioDefaults.noise_suppression = !audioDefaults.noise_suppression">
@@ -1107,13 +1135,85 @@ onMounted(async () => {
           <label class="ad-toggle-row">
             <div class="ad-label">
               <span class="ad-name">Auto Gain Control</span>
-              <span class="ad-desc">Automatically adjust mic gain to keep a steady level. Disable for music recording to preserve dynamics.</span>
+              <span class="ad-desc">Automatically adjusts mic sensitivity to keep volume consistent. Helpful for voice but can cause pumping on instruments.</span>
             </div>
             <div class="ad-toggle" :class="{ active: audioDefaults.auto_gain_control }"
                  @click="audioDefaults.auto_gain_control = !audioDefaults.auto_gain_control">
               <div class="ad-toggle-knob"></div>
             </div>
           </label>
+        </div>
+
+        <div class="ad-group">
+          <label class="ad-toggle-row">
+            <div class="ad-label">
+              <span class="ad-name">Soft Limiter</span>
+              <span class="ad-desc">Applies smooth compression to loud peaks above 75% of full scale rather than hard-clipping them. Reduces distortion when the signal gets unexpectedly loud. (Mobile apps only)</span>
+            </div>
+            <div class="ad-toggle" :class="{ active: audioDefaults.soft_limiter }"
+                 @click="audioDefaults.soft_limiter = !audioDefaults.soft_limiter">
+              <div class="ad-toggle-knob"></div>
+            </div>
+          </label>
+        </div>
+
+        <div class="ad-group">
+          <div class="ad-row">
+            <div class="ad-label">
+              <span class="ad-name">Recording Normalization</span>
+              <span class="ad-desc">Peak target when boosting quiet mashup recordings before upload. The signal is boosted so its loudest point hits this level.</span>
+            </div>
+            <span class="ad-value">{{ Math.round(audioDefaults.recording_normalization * 100) }}%</span>
+          </div>
+          <input type="range" class="ad-slider" min="0.5" max="1" step="0.05"
+                 :value="audioDefaults.recording_normalization"
+                 @input="e => audioDefaults.recording_normalization = parseFloat(e.target.value)" />
+        </div>
+
+        <div class="ad-group">
+          <div class="ad-row">
+            <div class="ad-label">
+              <span class="ad-name">Recording Bitrate</span>
+              <span class="ad-desc">AAC bitrate for recordings on mobile apps. Higher = better quality and larger files. Has no effect on web (web always records as WAV).</span>
+            </div>
+          </div>
+          <select class="text-input"
+                  :value="audioDefaults.bitrate"
+                  @change="e => audioDefaults.bitrate = parseInt(e.target.value)">
+            <option :value="128000">128 kbps (voice)</option>
+            <option :value="192000">192 kbps</option>
+            <option :value="256000">256 kbps (default)</option>
+            <option :value="320000">320 kbps (high quality)</option>
+          </select>
+        </div>
+
+        <!-- Mashup Defaults section -->
+        <div class="ad-section-label">Mashup Defaults</div>
+
+        <div class="ad-group">
+          <div class="ad-row">
+            <div class="ad-label">
+              <span class="ad-name">Backing Track Volume</span>
+              <span class="ad-desc">Default volume for the backing track when starting a new mashup. Adjust if you consistently change this from the default.</span>
+            </div>
+            <span class="ad-value">{{ Math.round(audioDefaults.mashup_backing_volume * 100) }}%</span>
+          </div>
+          <input type="range" class="ad-slider" min="0" max="1" step="0.05"
+                 :value="audioDefaults.mashup_backing_volume"
+                 @input="e => audioDefaults.mashup_backing_volume = parseFloat(e.target.value)" />
+        </div>
+
+        <div class="ad-group">
+          <div class="ad-row">
+            <div class="ad-label">
+              <span class="ad-name">New Recording Volume</span>
+              <span class="ad-desc">Default volume for your new recording in the mashup mix. Adjust if you consistently prefer a different balance.</span>
+            </div>
+            <span class="ad-value">{{ Math.round(audioDefaults.mashup_new_volume * 100) }}%</span>
+          </div>
+          <input type="range" class="ad-slider" min="0" max="1" step="0.05"
+                 :value="audioDefaults.mashup_new_volume"
+                 @input="e => audioDefaults.mashup_new_volume = parseFloat(e.target.value)" />
         </div>
 
         <div class="modal-actions">
