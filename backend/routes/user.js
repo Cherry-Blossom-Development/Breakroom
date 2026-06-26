@@ -501,7 +501,9 @@ router.get('/audio-defaults', authenticate, async (req, res) => {
   const client = await getClient();
   try {
     const result = await client.query(
-      `SELECT echo_cancellation, noise_suppression, auto_gain_control, playback_volume
+      `SELECT echo_cancellation, noise_suppression, auto_gain_control, playback_volume,
+              wav_playback_boost, recording_normalization, bitrate,
+              mashup_backing_volume, mashup_new_volume, soft_limiter
        FROM audio_defaults WHERE user_id = $1`,
       [req.user.id]
     );
@@ -510,7 +512,13 @@ router.get('/audio-defaults', authenticate, async (req, res) => {
         echo_cancellation: false,
         noise_suppression: false,
         auto_gain_control: false,
-        playback_volume: 0.75
+        playback_volume: 0.75,
+        wav_playback_boost: 3.33,
+        recording_normalization: 0.9,
+        bitrate: 256000,
+        mashup_backing_volume: 1.0,
+        mashup_new_volume: 1.0,
+        soft_limiter: false
       });
     }
     res.json(result.rows[0]);
@@ -527,23 +535,39 @@ router.get('/audio-defaults', authenticate, async (req, res) => {
  * Upserts the current user's audio defaults.
  */
 router.put('/audio-defaults', authenticate, async (req, res) => {
-  const { echo_cancellation, noise_suppression, auto_gain_control, playback_volume } = req.body;
+  const { echo_cancellation, noise_suppression, auto_gain_control, playback_volume,
+          wav_playback_boost, recording_normalization, bitrate,
+          mashup_backing_volume, mashup_new_volume, soft_limiter } = req.body;
   const client = await getClient();
   try {
     await client.query(
       `INSERT INTO audio_defaults
-         (user_id, echo_cancellation, noise_suppression, auto_gain_control, playback_volume)
-       VALUES ($1, $2, $3, $4, $5)
+         (user_id, echo_cancellation, noise_suppression, auto_gain_control, playback_volume,
+          wav_playback_boost, recording_normalization, bitrate,
+          mashup_backing_volume, mashup_new_volume, soft_limiter)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        ON DUPLICATE KEY UPDATE
-         echo_cancellation = VALUES(echo_cancellation),
-         noise_suppression = VALUES(noise_suppression),
-         auto_gain_control = VALUES(auto_gain_control),
-         playback_volume   = VALUES(playback_volume)`,
+         echo_cancellation      = VALUES(echo_cancellation),
+         noise_suppression      = VALUES(noise_suppression),
+         auto_gain_control      = VALUES(auto_gain_control),
+         playback_volume        = VALUES(playback_volume),
+         wav_playback_boost     = VALUES(wav_playback_boost),
+         recording_normalization= VALUES(recording_normalization),
+         bitrate                = VALUES(bitrate),
+         mashup_backing_volume  = VALUES(mashup_backing_volume),
+         mashup_new_volume      = VALUES(mashup_new_volume),
+         soft_limiter           = VALUES(soft_limiter)`,
       [req.user.id,
        echo_cancellation ?? false,
        noise_suppression ?? false,
        auto_gain_control ?? false,
-       playback_volume ?? 0.75]
+       playback_volume ?? 0.75,
+       wav_playback_boost ?? 3.33,
+       recording_normalization ?? 0.9,
+       bitrate ?? 256000,
+       mashup_backing_volume ?? 1.0,
+       mashup_new_volume ?? 1.0,
+       soft_limiter ?? false]
     );
     res.json({ message: 'Audio defaults saved' });
   } catch (err) {
