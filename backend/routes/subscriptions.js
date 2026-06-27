@@ -339,11 +339,11 @@ router.post('/admin/grant', authenticate, async (req, res) => {
   try {
     // Check create_billing permission
     const perm = await client.query(
-      `SELECT up.id FROM user_permissions up
+      `SELECT 1 FROM user_permissions up
        JOIN permissions p ON p.id = up.permission_id
        WHERE up.user_id = $1 AND p.name = 'create_billing'
        UNION
-       SELECT gp.id FROM user_groups ug
+       SELECT 1 FROM user_groups ug
        JOIN group_permissions gp ON gp.group_id = ug.group_id
        JOIN permissions p ON p.id = gp.permission_id
        WHERE ug.user_id = $1 AND p.name = 'create_billing'
