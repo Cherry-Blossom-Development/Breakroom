@@ -32,18 +32,17 @@ const authenticate = async (req, res, next) => {
 router.get('/all', async (req, res) => {
   const client = await getClient();
   try {
-    console.log('Fetching all users...');
     const users = await client.query(
-      `SELECT 
-         id, handle, first_name, last_name, email 
-      FROM "users"
-      ORDER BY id;`
+      `SELECT
+         u.id, u.handle, u.first_name, u.last_name, u.email,
+         us.platform  AS sub_platform,
+         us.status    AS sub_status,
+         us.expires_at AS sub_expires_at
+       FROM users u
+       LEFT JOIN user_subscriptions us ON us.user_id = u.id
+       ORDER BY u.id`
     );
-
-    res.status(200).json({
-      message: 'Users retrieved',
-      users: users.rows,
-    });
+    res.status(200).json({ message: 'Users retrieved', users: users.rows });
   } catch (err) {
     console.error('Error fetching users:', err);
     res.status(500).json({ message: 'Failed to retrieve users' });
