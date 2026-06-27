@@ -6,6 +6,7 @@ const { AppStoreServerAPIClient, Environment, SignedDataVerifier } = require('@a
 const fs = require('fs');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
+const { sendMail } = require('../utilities/aws-ses-email');
 
 require('dotenv').config();
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -372,6 +373,31 @@ router.post('/admin/grant', authenticate, async (req, res) => {
            updated_at = NOW()`,
         [targetId]
       );
+
+      const emailRow = await client.query(
+        `SELECT email, first_name FROM users WHERE id = $1`,
+        [targetId]
+      );
+      if (emailRow.rowCount > 0) {
+        const { email, first_name } = emailRow.rows[0];
+        const greeting = first_name ? `Hi ${first_name},` : 'Hi there,';
+        sendMail(
+          email,
+          'noreply@prosaurus.com',
+          'Your Prosaurus account has been upgraded — on us',
+          `<p>${greeting}</p>
+           <p>Great news! Your Prosaurus account has been upgraded to <strong>Pro</strong> as a complimentary gift from us — completely free, with no subscription or payment required.</p>
+           <p>With Pro you get:</p>
+           <ul>
+             <li><strong>No Prosaurus platform fee</strong> on art sales (down from 5%)</li>
+             <li><strong>Extra storage</strong> on Sessions</li>
+           </ul>
+           <p>Your Pro access is active right now. You can view your plan status in your <a href="https://www.prosaurus.com/profile/billing">Billing &amp; Plans</a> page.</p>
+           <p>Thanks for being part of Prosaurus!</p>
+           <p>— The Prosaurus Team</p>`
+        ).catch(err => console.error('Failed to send promo email:', err));
+      }
+
       res.json({ message: `Promo subscription granted to @${handle}` });
     } else {
       await client.query(

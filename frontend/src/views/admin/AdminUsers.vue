@@ -34,7 +34,7 @@
               <td>{{ user.last_name }}</td>
               <td>{{ user.email }}</td>
               <td>
-                <span class="plan-badge" :class="isPaid(user) ? 'plan-paid' : 'plan-free'">
+                <span class="plan-badge" :class="planClass(user)">
                   {{ planLabel(user) }}
                 </span>
               </td>
@@ -100,7 +100,7 @@
           <h3>Payment Plan</h3>
           <div class="plan-row">
             <div class="plan-info">
-              <span class="plan-badge" :class="isPaid(editingUser) ? 'plan-paid' : 'plan-free'">
+              <span class="plan-badge" :class="planClass(editingUser)">
                 {{ planLabel(editingUser) }}
               </span>
               <span v-if="editingUser.sub_platform" class="plan-detail">
@@ -232,9 +232,14 @@ function isPaid(user) {
 }
 
 function planLabel(user) {
-  if (isPaid(user)) return 'Paid'
+  if (isPaid(user)) return user.sub_platform === 'promo' ? 'Promo' : 'Paid'
   if (user.sub_status && user.sub_status !== 'active') return `Expired (${user.sub_status})`
   return 'Free'
+}
+
+function planClass(user) {
+  if (isPaid(user)) return user.sub_platform === 'promo' ? 'plan-promo' : 'plan-paid'
+  return 'plan-free'
 }
 
 function formatDate(str) {
@@ -412,6 +417,7 @@ thead { background-color: var(--color-background-soft); }
 
 .plan-badge { font-size: 0.75rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
 .plan-paid { background: #d4edda; color: #155724; }
+.plan-promo { background: #d0e8ff; color: #0051a2; }
 .plan-free { background: var(--color-background-soft); color: var(--color-text-muted); }
 
 .btn-edit { padding: 5px 14px; border: none; border-radius: 4px; cursor: pointer; background: var(--color-accent); color: white; font-size: 0.85rem; }

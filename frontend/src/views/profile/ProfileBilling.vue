@@ -6,7 +6,15 @@
       if you want to sell artwork without a platform fee, or need extra session storage.
     </p>
 
-    <div v-if="plan" class="current-plan-banner" :class="plan.subscribed ? 'banner--pro' : 'banner--free'">
+    <div v-if="plan && plan.subscribed && plan.platform === 'promo'" class="promo-banner">
+      <div class="promo-banner-title">Complimentary Pro access</div>
+      <div class="promo-banner-body">
+        Your account has been upgraded to Pro for free — no subscription or payment required.
+        You have 0% platform fees on art sales and extra Sessions storage.
+      </div>
+    </div>
+
+    <div v-else-if="plan" class="current-plan-banner" :class="plan.subscribed ? 'banner--pro' : 'banner--free'">
       <span class="current-plan-label">Your current plan</span>
       <span class="current-plan-name">{{ plan.subscribed ? 'Pro' : 'Free' }}</span>
       <span class="current-plan-detail">{{ plan.subscribed ? '0% platform fee on sales' : '5% platform fee on sales' }}</span>
@@ -43,7 +51,8 @@
       <div class="tier-card pro" :class="{ 'tier-card--current': plan && plan.subscribed }">
         <div class="tier-header">
           <span class="tier-badge pro">Pro</span>
-          <span v-if="plan && plan.subscribed" class="current-tag current-tag--pro">Current</span>
+          <span v-if="plan && plan.subscribed && plan.platform === 'promo'" class="current-tag current-tag--promo">Complimentary</span>
+          <span v-else-if="plan && plan.subscribed" class="current-tag current-tag--pro">Current</span>
           <div v-else class="tier-price">$3.99 <span class="per">/&nbsp;month</span></div>
         </div>
         <ul class="feature-list">
@@ -52,9 +61,14 @@
           <li><span class="check pro-check">✓</span> <strong>No Prosaurus platform fee</strong> on art sales</li>
           <li><span class="check pro-check">✓</span> <strong>Extra storage</strong> on Sessions</li>
         </ul>
-        <div class="pro-cta">
+        <div v-if="!plan || (!plan.subscribed)" class="pro-cta">
           <router-link to="/collections/payment-setup?from=profile" class="upgrade-btn">
-            {{ plan && plan.subscribed ? 'Manage subscription' : 'Upgrade to Pro — $3.99/mo' }}
+            Upgrade to Pro — $3.99/mo
+          </router-link>
+        </div>
+        <div v-else-if="plan.platform !== 'promo'" class="pro-cta">
+          <router-link to="/collections/payment-setup?from=profile" class="upgrade-btn">
+            Manage subscription
           </router-link>
         </div>
       </div>
@@ -138,6 +152,29 @@ onMounted(async () => {
   margin: 0 0 28px;
 }
 
+/* ── Promo banner ── */
+.promo-banner {
+  background: rgba(0, 81, 162, 0.06);
+  border: 1px solid rgba(0, 81, 162, 0.25);
+  border-left: 4px solid #0051a2;
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 24px;
+}
+
+.promo-banner-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: #0051a2;
+  margin-bottom: 4px;
+}
+
+.promo-banner-body {
+  font-size: 0.88rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
 /* ── Current plan banner ── */
 .current-plan-banner {
   display: flex;
@@ -194,6 +231,11 @@ onMounted(async () => {
 .current-tag--pro {
   background: rgba(107, 70, 193, 0.12);
   color: #6b46c1;
+}
+
+.current-tag--promo {
+  background: rgba(0, 81, 162, 0.1);
+  color: #0051a2;
 }
 
 .tier-card--current {
