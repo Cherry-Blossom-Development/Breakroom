@@ -2,6 +2,12 @@
   <section>
     <h1>Feature Flags</h1>
 
+    <div class="notice-banner">
+      <strong>Feature flags are no longer enforced in the app.</strong>
+      All features (Sessions, Audio Defaults, Collections, etc.) are now live for all users.
+      This panel is kept for future use — flags defined here have no effect on what users can see.
+    </div>
+
     <div class="features-layout">
       <!-- Left: feature list -->
       <div class="feature-list">
@@ -386,7 +392,18 @@ loadFeatures()
 </script>
 
 <style scoped>
-h1 { color: var(--color-text); margin-bottom: 20px; }
+h1 { color: var(--color-text); margin-bottom: 12px; }
+
+.notice-banner {
+  background: rgba(237, 137, 54, 0.12);
+  border: 1px solid rgba(237, 137, 54, 0.4);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  font-size: 0.9rem;
+  color: var(--color-text);
+  line-height: 1.5;
+}
 h2 { color: var(--color-text); margin: 0 0 4px; }
 h3 { color: var(--color-text); margin: 0 0 12px; }
 

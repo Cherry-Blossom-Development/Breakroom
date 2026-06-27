@@ -2,7 +2,6 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { authFetch } from '@/utilities/authFetch'
-import { features } from '@/stores/features'
 
 const router = useRouter()
 const addingShortcut = ref(null)
@@ -23,8 +22,7 @@ const allTools = {
       name: 'Sessions',
       description: 'Track and manage your recording sessions, log progress, and keep notes on each session.',
       route: '/sessions',
-      shortcutName: 'Sessions',
-      featureKey: 'sessions'
+      shortcutName: 'Sessions'
     }
   ],
   artist: [
@@ -64,7 +62,7 @@ const allTools = {
 }
 
 function visibleTools(toolList) {
-  return toolList.filter(t => !t.featureKey || features.has(t.featureKey))
+  return toolList
 }
 
 // Tool categories

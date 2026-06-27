@@ -1,7 +1,6 @@
 <script setup>
 import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { sessions } from '@/stores/sessions'
-import { features } from '@/stores/features'
 import { authFetch } from '@/utilities/authFetch'
 import { buildDevicePayload } from '@/utilities/deviceId'
 
@@ -1016,7 +1015,7 @@ async function handleMashupUpload() {
 
 onMounted(async () => {
   sessions.reset()
-  await Promise.all([sessions.load(), features.load(), loadAudioDefaults(), registerDevice()])
+  await Promise.all([sessions.load(), loadAudioDefaults(), registerDevice()])
   if (availableYears.value.length > 0) selectedYear.value = availableYears.value[0]
   document.addEventListener('click', closeRatingPopup)
   await Promise.all([loadBands(), loadInstruments(), loadBandMemberSessions()])
@@ -1038,7 +1037,7 @@ onMounted(async () => {
         <button class="section-tab" :class="{ active: activeTab === 'individual' }" @click="activeTab = 'individual'">Individual</button>
         <button class="section-tab" :class="{ active: activeTab === 'bands' }" @click="activeTab = 'bands'">Bands</button>
       </div>
-      <button v-if="features.has('audio_defaults')" class="btn-ghost btn-sm audio-defaults-btn" @click="showAudioDefaults = true">
+      <button class="btn-ghost btn-sm audio-defaults-btn" @click="showAudioDefaults = true">
         🎛 Audio Defaults
       </button>
     </div>
