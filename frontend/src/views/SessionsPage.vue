@@ -505,7 +505,7 @@ const availableYears = computed(() => {
 })
 
 // --- Grouped sessions ---
-const bandSessions = computed(() => sessions.list.filter(s => !s.session_type || s.session_type === 'band'))
+const bandSessions = computed(() => sessions.list.filter(s => s.session_type === 'band'))
 
 const yearGroups = computed(() => {
   const list = (selectedYear.value
@@ -757,6 +757,16 @@ async function submitRating(session, value) {
   try { await sessions.rate(session.id, newRating) }
   catch (err) { console.error('Failed to rate:', err) }
   ratingPopupId.value = null
+}
+
+// --- Share ---
+async function shareSession(session) {
+  const url = `https://www.prosaurus.com/sessions/${session.id}`
+  if (navigator.share) {
+    try { await navigator.share({ url }) } catch { /* user cancelled */ }
+  } else {
+    try { await navigator.clipboard.writeText(url) } catch { /* ignore */ }
+  }
 }
 
 // --- Delete ---
@@ -1381,6 +1391,7 @@ onMounted(async () => {
                         </div>
                       </td>
                       <td>
+                        <button class="share-btn" @click="shareSession(session)" title="Share">⬆</button>
                         <button class="delete-btn" @click="deleteSession(session.id)" title="Delete">✕</button>
                       </td>
                     </tr>
@@ -1562,6 +1573,7 @@ onMounted(async () => {
                     </div>
                   </td>
                   <td>
+                    <button class="share-btn" @click="shareSession(session)" title="Share">⬆</button>
                     <button class="delete-btn" @click="deleteSession(session.id)" title="Delete">✕</button>
                   </td>
                 </tr>
@@ -2015,6 +2027,7 @@ onMounted(async () => {
                       </div>
                     </td>
                     <td>
+                      <button class="share-btn" @click="shareSession(session)" title="Share">⬆</button>
                       <button class="delete-btn" @click="deleteSession(session.id)" title="Delete">✕</button>
                     </td>
                   </tr>
@@ -2153,6 +2166,8 @@ onMounted(async () => {
 .popup-clear { display: block; width: 100%; margin-top: 8px; background: none; border: none; color: var(--color-text-muted); font-size: 0.8rem; cursor: pointer; text-align: center; padding: 4px; }
 .popup-clear:hover { color: #e05555; }
 
+.share-btn { background: none; border: none; color: var(--color-text-muted); cursor: pointer; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; transition: color 0.15s, background 0.15s; }
+.share-btn:hover { color: var(--color-accent); background: rgba(100, 180, 100, 0.1); }
 .delete-btn { background: none; border: none; color: var(--color-text-muted); cursor: pointer; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; transition: color 0.15s, background 0.15s; }
 .delete-btn:hover { color: #e05555; background: rgba(224, 85, 85, 0.1); }
 
