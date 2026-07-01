@@ -101,6 +101,7 @@ const sendMessage = () => {
   if (messageInput.value.trim()) {
     chat.sendMessage(messageInput.value)
     messageInput.value = ''
+    nextTick(() => { if (messageInputEl.value) messageInputEl.value.style.height = 'auto' })
     chat.stopTyping()
   }
 }
@@ -141,6 +142,8 @@ const selectMention = (user) => {
 
 // Handle typing indicator and mention detection
 const handleTyping = () => {
+  const el = messageInputEl.value
+  if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px' }
   chat.startTyping()
 
   if (typingTimeout.value) clearTimeout(typingTimeout.value)
@@ -544,17 +547,17 @@ onUnmounted(() => {
                 <span v-if="u.first_name || u.last_name" class="mention-option-name">{{ u.first_name }} {{ u.last_name }}</span>
               </div>
             </div>
-            <input
+            <textarea
               ref="messageInputEl"
               v-model="messageInput"
               @keydown="handleMentionKeydown"
-              @keyup.enter="sendMessage"
+              @keydown.enter.exact.prevent="sendMessage"
               @input="handleTyping"
               @focus="closeAttachMenu"
               @blur="closeMention"
-              type="text"
               placeholder="Type a message..."
               maxlength="1000"
+              rows="1"
               :disabled="!chat.connected"
             />
             <button class="send-btn" @click="sendMessage" :disabled="!chat.connected || !messageInput.trim()">
@@ -920,27 +923,32 @@ onUnmounted(() => {
   display: flex;
   padding: 12px;
   gap: 8px;
-  align-items: center;
+  align-items: flex-end;
   position: relative;
 }
 
-.message-input-container input[type="text"] {
+.message-input-container textarea {
   flex: 1;
   min-width: 0;
   padding: 10px 15px;
   border: 1px solid var(--color-border);
-  border-radius: 25px;
+  border-radius: 20px;
   font-size: 1em;
   outline: none;
   background: var(--color-background-input);
   color: var(--color-text);
+  resize: none;
+  overflow-y: hidden;
+  line-height: 1.4;
+  max-height: 120px;
+  font-family: inherit;
 }
 
-.message-input-container input[type="text"]:focus {
+.message-input-container textarea:focus {
   border-color: var(--color-accent);
 }
 
-.message-input-container input[type="text"]:disabled {
+.message-input-container textarea:disabled {
   background: var(--color-background-soft);
 }
 
@@ -1187,7 +1195,7 @@ onUnmounted(() => {
     gap: 6px;
   }
 
-  .message-input-container input[type="text"] {
+  .message-input-container textarea {
     padding: 8px 12px;
     font-size: 0.95em;
   }

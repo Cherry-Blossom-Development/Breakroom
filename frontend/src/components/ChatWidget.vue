@@ -273,6 +273,7 @@ const sendMessage = async () => {
 
   const messageText = newMessage.value.trim()
   newMessage.value = ''
+  nextTick(() => { if (messageInputEl.value) messageInputEl.value.style.height = 'auto' })
 
   // Stop typing indicator
   if (socket && socket.connected) {
@@ -311,6 +312,8 @@ const sendMessage = async () => {
 
 // Handle typing and @mention detection
 const onInput = () => {
+  const el = messageInputEl.value
+  if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px' }
   if (socket && socket.connected) {
     socket.emit('typing_start', props.roomId)
 
@@ -760,13 +763,14 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
               <span v-if="u.first_name || u.last_name" class="mention-option-name">{{ u.first_name }} {{ u.last_name }}</span>
             </div>
           </div>
-          <input
+          <textarea
             ref="messageInputEl"
             v-model="newMessage"
-            type="text"
             placeholder="Type a message..."
             maxlength="2000"
+            rows="1"
             @keydown="handleMentionKeydown"
+            @keydown.enter.exact.prevent="sendMessage"
             @input="onInput"
             @focus="closeAttachMenu"
             @blur="closeMention"
@@ -1097,11 +1101,11 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   display: flex;
   gap: 6px;
   padding: 8px;
-  align-items: center;
+  align-items: flex-end;
   position: relative;
 }
 
-.input-area input[type="text"] {
+.input-area textarea {
   flex: 1;
   min-width: 0;
   padding: 8px 10px;
@@ -1110,9 +1114,14 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   font-size: 0.85rem;
   background: var(--color-background-input);
   color: var(--color-text);
+  resize: none;
+  overflow-y: hidden;
+  line-height: 1.4;
+  max-height: 120px;
+  font-family: inherit;
 }
 
-.input-area input[type="text"]:focus {
+.input-area textarea:focus {
   outline: none;
   border-color: var(--color-accent);
 }
