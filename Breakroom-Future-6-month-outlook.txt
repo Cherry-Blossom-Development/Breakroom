@@ -1,0 +1,44 @@
+Prosaurus Phase 2 Ideas:
+
+Idea #1: Go over the original design documents and see what we missed
+
+  Project management with many layers of communication, was one of the original design goals.  
+  We have not explored this further however since it seems as though software development is 
+  a waning industry with the rise of agentic coding.
+
+  People and Entity focused application..  we have the people part, missing the entity
+
+  AI agents to help make tickets better.  Basically, look at existing tickets and learn from 
+  them.  Eliminate the need to fill out dozens of boxes every time (re SNOW)
+
+  Marketing (internal tools to do this)
+
+  Load Balancers
+
+  Desktop Application
+
+  Business Admin Interface.  We already have Admin Technical, we also pretty much have Admin 
+  Personal (although that is not what we call it, this is effectively the User Settings 
+  area). what is missing is the Business Entities admin interface.
+
+  CDN for flat files (explore what we have on s3 and if this is sufficient)
+
+  ETL and Data Performance and Data Reporting 
+
+Idea #2: Add some metrics for users so they can see how many people viewed their 
+  store/products etc…
+
+Idea #3: Add usage metrics for users and/or admin.  The ability to see how many posts happen 
+  per day/per user could be useful, also knowing how much storage a user is taking up might 
+  be of interest.
+
+Idea #4: Heatmap… where on the site are users going?  what features do they actually use.
+
+Idea #5: Add people to Prosaurus without them knowing… What?  yes.. a way for the admin user 
+  to put a particular email address in (probably someone we know) and get their account 
+  effectively created but in a state where they have never actually logged in.  Doing this 
+  will allow us to give a promotion (such as a free upgrade) to this user and then send them 
+  an email about it.
+
+Idea #6: Create a way for bands to have band websites, similar to how artists can have artist 
+  websites
