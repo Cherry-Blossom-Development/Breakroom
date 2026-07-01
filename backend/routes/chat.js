@@ -80,7 +80,7 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
-// Get chat rooms the user has joined (default room + accepted memberships)
+// Get chat rooms the user has joined (default room + accepted memberships, excludes DMs)
 router.get('/rooms', authenticateToken, async (req, res) => {
   const client = await getClient();
   try {
@@ -92,6 +92,7 @@ router.get('/rooms', authenticateToken, async (req, res) => {
        LEFT JOIN users u ON cr.owner_id = u.id
        LEFT JOIN users_rooms ur ON cr.id = ur.room_id AND ur.user_id = $1
        WHERE cr.is_active = true
+         AND cr.type = 'room'
          AND (
            ((cr.owner_id IS NULL OR cr.is_default = true) AND (ur.user_id IS NULL OR ur.accepted = true))
            OR (cr.owner_id IS NOT NULL AND cr.is_default = false AND ur.user_id IS NOT NULL AND ur.accepted = true)
@@ -1178,6 +1179,112 @@ router.get('/rooms/:roomId/mute', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('Error fetching mute state:', err);
     res.status(500).json({ message: 'Failed to fetch mute state' });
+  } finally {
+    client.release();
+  }
+});
+
+// ── Direct Message endpoints ─────────────────────────────────────────────────
+
+// Get all DM threads for the current user
+router.get('/dms', authenticateToken, async (req, res) => {
+  const client = await getClient();
+  try {
+    const dms = await client.query(
+      `SELECT cr.id, cr.type, cr.is_active, cr.created_at,
+              partner.id AS partner_id, partner.handle AS partner_handle,
+              (SELECT COUNT(*)
+               FROM chat_messages cm
+               WHERE cm.room_id = cr.id
+                 AND cm.is_hidden = false
+                 AND cm.created_at > COALESCE(ur.last_read_at, '1970-01-01 00:00:00')) AS unread_count,
+              (SELECT cm2.message
+               FROM chat_messages cm2
+               WHERE cm2.room_id = cr.id AND cm2.is_hidden = false
+               ORDER BY cm2.created_at DESC LIMIT 1) AS last_message,
+              (SELECT cm3.created_at
+               FROM chat_messages cm3
+               WHERE cm3.room_id = cr.id AND cm3.is_hidden = false
+               ORDER BY cm3.created_at DESC LIMIT 1) AS last_message_at
+       FROM chat_rooms cr
+       JOIN users_rooms ur ON ur.room_id = cr.id AND ur.user_id = $1 AND ur.accepted = true
+       JOIN users_rooms ur2 ON ur2.room_id = cr.id AND ur2.user_id != $1 AND ur2.accepted = true
+       JOIN users partner ON partner.id = ur2.user_id
+       WHERE cr.type = 'dm' AND cr.is_active = true
+       ORDER BY last_message_at DESC`,
+      [req.user.id]
+    );
+    res.json({ dms: dms.rows });
+  } catch (err) {
+    console.error('Error fetching DMs:', err);
+    res.status(500).json({ message: 'Failed to fetch DMs' });
+  } finally {
+    client.release();
+  }
+});
+
+// Start or resume a DM with another user
+router.post('/dm', authenticateToken, async (req, res) => {
+  const { userId } = req.body;
+
+  if (!userId || parseInt(userId) === req.user.id) {
+    return res.status(400).json({ message: 'Invalid user' });
+  }
+
+  const client = await getClient();
+  try {
+    // Verify target user exists
+    const target = await client.query(
+      'SELECT id, handle FROM users WHERE id = $1',
+      [userId]
+    );
+    if (target.rowCount === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Find existing DM room between these two users
+    const existing = await client.query(
+      `SELECT cr.id
+       FROM chat_rooms cr
+       JOIN users_rooms ur1 ON ur1.room_id = cr.id AND ur1.user_id = $1 AND ur1.accepted = true
+       JOIN users_rooms ur2 ON ur2.room_id = cr.id AND ur2.user_id = $2 AND ur2.accepted = true
+       WHERE cr.type = 'dm' AND cr.is_active = true
+       LIMIT 1`,
+      [req.user.id, userId]
+    );
+
+    let roomId;
+    if (existing.rowCount > 0) {
+      roomId = existing.rows[0].id;
+    } else {
+      const result = await client.query(
+        `INSERT INTO chat_rooms (name, \`type\`, owner_id, discoverable, is_default)
+         VALUES ($1, 'dm', $2, false, false)`,
+        [`dm_${req.user.id}_${userId}`, req.user.id]
+      );
+      roomId = result.insertId;
+
+      await client.query(
+        'INSERT INTO users_rooms (user_id, room_id, accepted) VALUES ($1, $2, true)',
+        [req.user.id, roomId]
+      );
+      await client.query(
+        'INSERT INTO users_rooms (user_id, room_id, accepted) VALUES ($1, $2, true)',
+        [userId, roomId]
+      );
+    }
+
+    res.json({
+      room: {
+        id: roomId,
+        type: 'dm',
+        partner_id: target.rows[0].id,
+        partner_handle: target.rows[0].handle
+      }
+    });
+  } catch (err) {
+    console.error('Error starting DM:', err);
+    res.status(500).json({ message: 'Failed to start DM' });
   } finally {
     client.release();
   }

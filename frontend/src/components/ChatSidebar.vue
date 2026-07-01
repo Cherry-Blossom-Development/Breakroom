@@ -22,6 +22,11 @@ const usersToInvite = ref([])
 const allUsers = ref([])
 const loadingUsers = ref(false)
 
+// DM search state
+const dmSearch = ref('')
+const dmSearchResults = ref([])
+let dmSearchTimeout = null
+
 // Filter users for invite search
 const filteredInviteUsers = computed(() => {
   if (!inviteSearch.value.trim()) return []
@@ -36,18 +41,64 @@ const filteredInviteUsers = computed(() => {
   })
 })
 
-onMounted(() => {
+onMounted(async () => {
   chat.fetchInvites()
   friends.fetchFriends()
+  await chat.fetchUnreadCounts()
+  await chat.fetchDMs()
 })
 
-// Switch to a room
+// Switch to a room or DM
 const selectRoom = async (room) => {
   if (chat.currentRoom !== room.id) {
     chat.leaveRoom()
     await chat.joinRoom(room.id)
   }
   emit('room-selected', room)
+}
+
+// Start a DM from search result
+const startDM = async (targetUser) => {
+  dmSearch.value = ''
+  dmSearchResults.value = []
+  try {
+    const room = await chat.startDM(targetUser.id)
+    chat.leaveRoom()
+    await chat.joinRoom(room.id)
+    emit('room-selected', room)
+  } catch (err) {
+    console.error('Failed to start DM:', err)
+  }
+}
+
+// DM user search
+const onDmSearch = () => {
+  clearTimeout(dmSearchTimeout)
+  if (!dmSearch.value.trim()) {
+    dmSearchResults.value = []
+    return
+  }
+  dmSearchTimeout = setTimeout(async () => {
+    try {
+      const res = await fetch('/api/user/all', { credentials: 'include' })
+      if (res.ok) {
+        const data = await res.json()
+        const q = dmSearch.value.toLowerCase()
+        dmSearchResults.value = (data.users || []).filter(u => {
+          if (u.handle === user.username) return false
+          return u.handle.toLowerCase().includes(q) ||
+            (u.first_name && u.first_name.toLowerCase().includes(q)) ||
+            (u.last_name && u.last_name.toLowerCase().includes(q))
+        }).slice(0, 8)
+      }
+    } catch (err) {
+      console.error('DM search failed:', err)
+    }
+  }, 200)
+}
+
+const clearDmSearch = () => {
+  setTimeout(() => { dmSearchResults.value = [] }, 150)
 }
 
 // Create room modal handlers
@@ -59,7 +110,6 @@ const openCreateModal = async () => {
   usersToInvite.value = []
   showCreateModal.value = true
 
-  // Load all users for invite search
   loadingUsers.value = true
   try {
     const res = await fetch('/api/user/all', { credentials: 'include' })
@@ -96,7 +146,6 @@ const createRoom = async () => {
   try {
     const room = await chat.createRoom(newRoomName.value, newRoomDescription.value)
 
-    // Send invites to selected users
     for (const invitee of usersToInvite.value) {
       try {
         await chat.inviteUser(room.id, invitee.id)
@@ -214,19 +263,71 @@ const openInviteModal = (room) => {
         @click="selectRoom(room)"
       >
         <span class="room-name"># {{ room.name }}</span>
-        <div v-if="chat.isRoomOwner(room)" class="room-actions" @click.stop>
-          <button @click="openInviteModal(room)" class="icon-btn" title="Invite">
-            <span>Inv</span>
-          </button>
-          <button @click="openEditModal(room)" class="icon-btn" title="Edit">
-            <span>Edit</span>
-          </button>
-          <button @click="deleteRoom(room)" class="icon-btn delete" title="Delete">
-            <span>Del</span>
-          </button>
+        <div class="room-right">
+          <span v-if="chat.unreadCounts[room.id]" class="unread-badge">
+            {{ chat.unreadCounts[room.id] > 99 ? '99+' : chat.unreadCounts[room.id] }}
+          </span>
+          <div v-if="chat.isRoomOwner(room)" class="room-actions" @click.stop>
+            <button @click="openInviteModal(room)" class="icon-btn" title="Invite">
+              <span>Inv</span>
+            </button>
+            <button @click="openEditModal(room)" class="icon-btn" title="Edit">
+              <span>Edit</span>
+            </button>
+            <button @click="deleteRoom(room)" class="icon-btn delete" title="Delete">
+              <span>Del</span>
+            </button>
+          </div>
         </div>
       </li>
     </ul>
+
+    <!-- Direct Messages section -->
+    <div class="dm-section">
+      <div class="dm-section-header">
+        <span class="section-label">Direct Messages</span>
+      </div>
+
+      <div class="dm-search-container">
+        <input
+          v-model="dmSearch"
+          type="text"
+          placeholder="Find a user..."
+          class="dm-search"
+          @input="onDmSearch"
+          @blur="clearDmSearch"
+        />
+        <ul v-if="dmSearchResults.length > 0" class="dm-dropdown">
+          <li
+            v-for="u in dmSearchResults"
+            :key="u.id"
+            @mousedown.prevent="startDM(u)"
+          >
+            <span class="dropdown-handle">{{ u.handle }}</span>
+            <span v-if="u.first_name || u.last_name" class="dropdown-name">
+              {{ u.first_name }} {{ u.last_name }}
+            </span>
+          </li>
+        </ul>
+      </div>
+
+      <ul class="room-list dm-list">
+        <li v-if="chat.dms.length === 0" class="empty-rooms">
+          No messages yet
+        </li>
+        <li
+          v-for="dm in chat.dms"
+          :key="dm.id"
+          :class="{ active: chat.currentRoom === dm.id }"
+          @click="selectRoom(dm)"
+        >
+          <span class="room-name">@ {{ dm.partner_handle }}</span>
+          <span v-if="chat.unreadCounts[dm.id]" class="unread-badge">
+            {{ chat.unreadCounts[dm.id] > 99 ? '99+' : chat.unreadCounts[dm.id] }}
+          </span>
+        </li>
+      </ul>
+    </div>
 
     <!-- Create Room Modal -->
     <div v-if="showCreateModal" class="modal-overlay" @click.self="showCreateModal = false">
@@ -330,6 +431,7 @@ const openInviteModal = (room) => {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+  overflow-y: auto;
 }
 
 .sidebar-header {
@@ -363,21 +465,18 @@ const openInviteModal = (room) => {
   list-style: none;
   padding: 0;
   margin: 0;
-  flex: 1;
-  overflow-y: auto;
 }
 
 .room-list .empty-rooms {
-  padding: 20px 15px;
-  color: rgba(255, 255, 255, 0.5);
+  padding: 10px 15px;
+  color: rgba(255, 255, 255, 0.45);
   font-style: italic;
-  font-size: 0.9em;
-  text-align: center;
+  font-size: 0.85em;
   cursor: default;
 }
 
 .room-list li {
-  padding: 12px 15px;
+  padding: 10px 15px;
   cursor: pointer;
   display: flex;
   justify-content: space-between;
@@ -399,6 +498,27 @@ const openInviteModal = (room) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.room-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.unread-badge {
+  background: var(--color-accent);
+  color: white;
+  font-size: 0.7em;
+  font-weight: bold;
+  padding: 2px 6px;
+  border-radius: 10px;
+  min-width: 18px;
+  text-align: center;
+  flex-shrink: 0;
 }
 
 .room-actions {
@@ -426,6 +546,90 @@ const openInviteModal = (room) => {
 
 .icon-btn.delete:hover {
   background: var(--color-error);
+}
+
+/* DM section */
+.dm-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  margin-top: 6px;
+  padding-top: 2px;
+}
+
+.dm-section-header {
+  padding: 8px 15px 4px;
+}
+
+.section-label {
+  font-size: 0.75em;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.dm-search-container {
+  position: relative;
+  padding: 4px 10px 6px;
+}
+
+.dm-search {
+  width: 100%;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: var(--color-header-text);
+  font-size: 0.85em;
+  box-sizing: border-box;
+}
+
+.dm-search::placeholder {
+  color: rgba(255, 255, 255, 0.38);
+}
+
+.dm-search:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.dm-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 10px;
+  right: 10px;
+  background: var(--color-background-card);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  max-height: 180px;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  z-index: 20;
+  box-shadow: var(--shadow-md);
+}
+
+.dm-dropdown li {
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dm-dropdown li:hover {
+  background: var(--color-background-hover);
+}
+
+.dropdown-handle {
+  font-weight: bold;
+  font-size: 0.9em;
+}
+
+.dropdown-name {
+  font-size: 0.8em;
+  color: var(--color-text-muted);
 }
 
 /* Modal styles */
@@ -626,16 +830,6 @@ const openInviteModal = (room) => {
 
 .invite-dropdown li:hover {
   background: var(--color-background-hover);
-}
-
-.dropdown-handle {
-  font-weight: bold;
-  font-size: 0.9em;
-}
-
-.dropdown-name {
-  font-size: 0.8em;
-  color: var(--color-text-muted);
 }
 
 .selected-users {

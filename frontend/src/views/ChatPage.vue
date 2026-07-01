@@ -31,17 +31,23 @@ const closeAttachMenu = () => {
   showAttachMenu.value = false
 }
 
-// Get current room info
+// Get current room info (checks both rooms and DMs)
 const currentRoom = computed(() => {
   return chat.rooms.find(r => r.id === chat.currentRoom)
+    || chat.dms.find(r => r.id === chat.currentRoom)
 })
 
+const isDM = computed(() => currentRoom.value?.type === 'dm')
+
 const currentRoomName = computed(() => {
-  return currentRoom.value ? currentRoom.value.name : 'Chat'
+  if (!currentRoom.value) return 'Chat'
+  if (currentRoom.value.type === 'dm') return currentRoom.value.partner_handle
+  return currentRoom.value.name
 })
 
 const currentRoomDescription = computed(() => {
-  return currentRoom.value ? currentRoom.value.description : null
+  if (!currentRoom.value || currentRoom.value.type === 'dm') return null
+  return currentRoom.value.description
 })
 
 // Auto-scroll to bottom when new messages arrive
@@ -391,7 +397,7 @@ onUnmounted(() => {
           <div class="room-info">
             <div class="room-title">
               <span class="connection-dot" :class="chat.connected ? 'dot-connected' : 'dot-disconnected'"></span>
-              <h2># {{ currentRoomName }}</h2>
+              <h2>{{ isDM ? '@' : '#' }} {{ currentRoomName }}</h2>
             </div>
             <p v-if="currentRoomDescription" class="room-description">{{ currentRoomDescription }}</p>
           </div>

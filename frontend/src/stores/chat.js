@@ -7,6 +7,7 @@ const state = reactive({
   connected: false,
   currentRoom: null,
   rooms: [],
+  dms: [],
   discoverableRooms: [],
   messages: [],
   typingUsers: [],
@@ -17,7 +18,8 @@ const state = reactive({
   members: [],
   isLoadingOlderMessages: false,
   hasOlderMessages: false,
-  oldestMessageDate: null
+  oldestMessageDate: null,
+  unreadCounts: {}
 })
 
 // Get the socket instance, creating if needed
@@ -61,6 +63,9 @@ function getSocket() {
         if (!exists) {
           state.messages.push(data.message)
         }
+      } else {
+        // Track unread count for rooms not currently open
+        state.unreadCounts[data.roomId] = (state.unreadCounts[data.roomId] || 0) + 1
       }
     })
 
@@ -136,8 +141,14 @@ export const chat = reactive({
   get members() {
     return state.members
   },
+  get dms() {
+    return state.dms
+  },
   get discoverableRooms() {
     return state.discoverableRooms
+  },
+  get unreadCounts() {
+    return state.unreadCounts
   },
   get isLoadingOlderMessages() {
     return state.isLoadingOlderMessages
@@ -251,6 +262,8 @@ export const chat = reactive({
     state.hasOlderMessages = false
     state.isLoadingOlderMessages = false
     state.oldestMessageDate = null
+    // Clear unread badge for this room
+    delete state.unreadCounts[roomId]
     // Fetch initial messages via REST
     const messages = await this.fetchMessages(roomId)
     state.messages = messages
@@ -616,6 +629,63 @@ export const chat = reactive({
       console.error('Error fetching members:', err)
       state.error = err.message
       return []
+    }
+  },
+
+  // Fetch DM threads
+  async fetchDMs() {
+    try {
+      const res = await authFetch('/api/chat/dms')
+      if (!res.ok) throw new Error('Failed to fetch DMs')
+      const data = await res.json()
+      state.dms = data.dms
+      // Seed unread counts from DM list
+      for (const dm of data.dms) {
+        const count = parseInt(dm.unread_count) || 0
+        if (count > 0) state.unreadCounts[dm.id] = count
+      }
+    } catch (err) {
+      console.error('Error fetching DMs:', err)
+    }
+  },
+
+  // Start or resume a DM conversation; returns room object
+  async startDM(userId) {
+    try {
+      const res = await authFetch('/api/chat/dm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId })
+      })
+      if (!res.ok) {
+        const error = await res.json()
+        throw new Error(error.message || 'Failed to start DM')
+      }
+      const data = await res.json()
+      // Add to dms list if not already there
+      const exists = state.dms.find(d => d.id === data.room.id)
+      if (!exists) {
+        state.dms.unshift(data.room)
+      }
+      return data.room
+    } catch (err) {
+      state.error = err.message
+      throw err
+    }
+  },
+
+  // Load unread counts from the server (rooms only; DM counts come from fetchDMs)
+  async fetchUnreadCounts() {
+    try {
+      const res = await authFetch('/api/chat/rooms/unread-summary')
+      if (!res.ok) return
+      const rows = await res.json()
+      for (const row of rows) {
+        const count = parseInt(row.unread_count) || 0
+        if (count > 0) state.unreadCounts[row.id] = count
+      }
+    } catch (err) {
+      console.error('Error fetching unread counts:', err)
     }
   }
 })
