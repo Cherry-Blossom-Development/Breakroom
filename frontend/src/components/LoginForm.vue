@@ -31,7 +31,7 @@
 
 <script>
 import axios from 'axios'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { user } from '@/stores/user.js'
 
 export default {
@@ -46,7 +46,8 @@ export default {
   },
   setup() {
     const router = useRouter()
-    return { router }
+    const route = useRoute()
+    return { router, route }
   },
   methods: {
     async handleSubmit() {
@@ -61,6 +62,19 @@ export default {
         })
 
         await user.fetchUser() // Fetch the username after login
+
+        // Accept band email invite if one was in the URL
+        const bandInviteToken = this.route.query.bandInvite
+        if (bandInviteToken) {
+          try {
+            await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/bands/invite/${bandInviteToken}/accept`, {
+              method: 'POST',
+              credentials: 'include'
+            })
+          } catch { /* non-critical */ }
+          this.router.push('/sessions')
+          return
+        }
 
         // If login succeeds, redirect to home
         this.router.push('/')

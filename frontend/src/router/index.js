@@ -226,6 +226,11 @@ const router = createRouter({
       meta: { publicLayout: true }, // No requiresAuth - anyone can view shared sessions
     },
     {
+      path: '/band-invite/:token',
+      name: 'bandInvite',
+      component: () => import('../views/BandInvitePage.vue'),
+    },
+    {
       path: '/kanban',
       name: 'kanban',
       component: () => import('../views/KanbanPage.vue'),

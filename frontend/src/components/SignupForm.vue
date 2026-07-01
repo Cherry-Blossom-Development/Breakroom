@@ -48,7 +48,7 @@
 
 <script>
 import axios from 'axios';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { user } from '@/stores/user.js';
 
 // Function to generate a random salt using the Web Crypto API
@@ -103,7 +103,8 @@ export default {
   },
   setup() {
     const router = useRouter();
-    return { router };
+    const route = useRoute();
+    return { router, route };
   },
   computed: {
     isFormValid() {
@@ -164,6 +165,19 @@ export default {
 
           // Fetch user to update nav with logged-in state
           await user.fetchUser();
+
+          // Accept band email invite if one was in the URL
+          const bandInviteToken = this.route.query.bandInvite;
+          if (bandInviteToken) {
+            try {
+              await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/bands/invite/${bandInviteToken}/accept`, {
+                method: 'POST',
+                credentials: 'include'
+              });
+            } catch { /* non-critical */ }
+            this.router.push('/sessions');
+            return;
+          }
 
           // Redirect to breakroom on success
           this.router.push('/breakroom');

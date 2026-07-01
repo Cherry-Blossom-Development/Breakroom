@@ -130,6 +130,10 @@ const inviteHandle = ref('')
 const inviteError = ref(null)
 const inviteSuccess = ref(null)
 const inviting = ref(false)
+const inviteEmail = ref('')
+const inviteEmailError = ref(null)
+const inviteEmailSuccess = ref(null)
+const invitingEmail = ref(false)
 
 // Edit band name inline
 const editingBandName = ref(false)
@@ -219,6 +223,28 @@ async function inviteMember() {
     inviteError.value = err.message
   } finally {
     inviting.value = false
+  }
+}
+
+async function inviteByEmail() {
+  if (!inviteEmail.value.trim()) return
+  invitingEmail.value = true
+  inviteEmailError.value = null
+  inviteEmailSuccess.value = null
+  try {
+    const res = await authFetch(`/api/bands/${activeBand.value.id}/email-invites`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: inviteEmail.value.trim() })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message)
+    inviteEmailSuccess.value = data.message
+    inviteEmail.value = ''
+  } catch (err) {
+    inviteEmailError.value = err.message
+  } finally {
+    invitingEmail.value = false
   }
 }
 
@@ -1867,6 +1893,16 @@ onMounted(async () => {
                   {{ inviting ? 'Inviting…' : 'Send Invite' }}
                 </button>
               </div>
+
+              <p class="invite-or">or invite by email</p>
+              <div v-if="inviteEmailError" class="error-msg">{{ inviteEmailError }}</div>
+              <div v-if="inviteEmailSuccess" class="success-msg">{{ inviteEmailSuccess }}</div>
+              <div class="invite-row">
+                <input v-model="inviteEmail" class="text-input" type="email" placeholder="email@example.com" @keyup.enter="inviteByEmail" />
+                <button class="btn-primary" :disabled="invitingEmail || !inviteEmail.trim()" @click="inviteByEmail">
+                  {{ invitingEmail ? 'Sending…' : 'Send Email' }}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -2245,6 +2281,7 @@ onMounted(async () => {
 .invite-section { border-top: 1px solid var(--color-border); padding-top: 20px; }
 .invite-row { display: flex; gap: 10px; align-items: center; }
 .invite-row .text-input { flex: 1; }
+.invite-or { color: var(--color-text-muted); font-size: 0.85em; margin: 14px 0 6px; text-align: center; }
 
 .create-band-card { padding: 20px; margin-bottom: 16px; display: flex; flex-direction: column; gap: 10px; }
 .form-section-title { font-size: 0.9rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted); margin: 0 0 4px; }
