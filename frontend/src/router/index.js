@@ -231,6 +231,18 @@ const router = createRouter({
       component: () => import('../views/BandInvitePage.vue'),
     },
     {
+      path: '/band/:bandUrl',
+      name: 'publicBandPage',
+      component: () => import('../views/PublicBandPage.vue'),
+      meta: { publicLayout: true },
+    },
+    {
+      path: '/band-setup/:id',
+      name: 'bandPageSetup',
+      component: () => import('../views/BandPageSetupPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/kanban',
       name: 'kanban',
       component: () => import('../views/KanbanPage.vue'),

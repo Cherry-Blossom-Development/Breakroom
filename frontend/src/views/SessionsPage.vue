@@ -1882,6 +1882,13 @@ onMounted(async () => {
               <div v-if="activeBand.members.length === 0" class="empty-state-sm">No members yet.</div>
             </div>
 
+            <!-- Band Page link (owners only) -->
+            <div v-if="activeBand.my_role === 'owner'" class="band-page-link-row">
+              <RouterLink :to="`/band-setup/${activeBand.id}`" class="btn-secondary btn-sm band-page-btn">
+                Manage Band Page →
+              </RouterLink>
+            </div>
+
             <!-- Invite form (owners only) -->
             <div v-if="activeBand.my_role === 'owner'" class="invite-section">
               <h3 class="form-section-title">Invite a Member</h3>
@@ -2278,6 +2285,8 @@ onMounted(async () => {
 .member-role-badge.invited { background: transparent; border: 1px solid var(--color-text-muted); }
 .empty-state-sm { color: var(--color-text-muted); font-size: 0.9rem; padding: 8px 0; }
 
+.band-page-link-row { margin-bottom: 16px; }
+.band-page-btn { font-size: 0.85em; }
 .invite-section { border-top: 1px solid var(--color-border); padding-top: 20px; }
 .invite-row { display: flex; gap: 10px; align-items: center; }
 .invite-row .text-input { flex: 1; }

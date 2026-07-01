@@ -1,11 +1,24 @@
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { isSubscribed } = require('../utilities/subscription');
 const { sendMail } = require('../utilities/aws-ses-email');
+const { uploadToS3, deleteFromS3, getS3Url } = require('../utilities/aws-s3');
+
+const imageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ok = /jpeg|jpg|png|gif|webp/.test(path.extname(file.originalname).toLowerCase())
+             && /jpeg|jpg|png|gif|webp/.test(file.mimetype);
+    cb(ok ? null : new Error('Only image files are allowed'), ok);
+  }
+});
 
 require('dotenv').config();
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -462,6 +475,254 @@ router.delete('/:id/members/:userId', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Error removing member:', err);
     res.status(500).json({ message: 'Failed to remove member' });
+  } finally {
+    client.release();
+  }
+});
+
+// ─── Band Page Management (owner only) ───────────────────────────────────────
+
+// GET /api/bands/:id/page — get (or auto-create) band page settings
+router.get('/:id/page', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const membership = await client.query(
+      `SELECT role FROM band_members WHERE band_id = $1 AND user_id = $2 AND status = 'active'`,
+      [req.params.id, req.user.id]
+    );
+    if (membership.rowCount === 0 || membership.rows[0].role !== 'owner')
+      return res.status(403).json({ message: 'Only the band owner can manage the band page' });
+
+    // Auto-create page record on first access
+    await client.query(
+      `INSERT IGNORE INTO band_pages (band_id) VALUES ($1)`,
+      [req.params.id]
+    );
+
+    const page = await client.query(
+      `SELECT bp.band_url, bp.story, bp.background_photo_key, bp.is_published,
+              b.name AS band_name
+       FROM band_pages bp
+       JOIN bands b ON b.id = bp.band_id
+       WHERE bp.band_id = $1`,
+      [req.params.id]
+    );
+
+    // Members with their currently assigned instruments
+    const members = await client.query(
+      `SELECT u.id, u.handle, u.first_name, u.last_name, u.photo_path, bm.role,
+              GROUP_CONCAT(bmi.instrument_id ORDER BY bmi.instrument_id SEPARATOR ',') AS instrument_ids
+       FROM band_members bm
+       JOIN users u ON u.id = bm.user_id
+       LEFT JOIN band_member_instruments bmi ON bmi.band_id = bm.band_id AND bmi.user_id = bm.user_id
+       WHERE bm.band_id = $1 AND bm.status = 'active'
+       GROUP BY u.id, u.handle, u.first_name, u.last_name, u.photo_path, bm.role
+       ORDER BY bm.role = 'owner' DESC, u.handle`,
+      [req.params.id]
+    );
+
+    // All instruments for the picker
+    const instruments = await client.query(`SELECT id, name FROM instruments ORDER BY name`);
+
+    // Band sessions available to feature
+    const sessions = await client.query(
+      `SELECT s.id, s.name, s.recorded_at, u.handle AS uploader_handle,
+              i.name AS instrument_name,
+              CASE WHEN bps.session_id IS NOT NULL THEN 1 ELSE 0 END AS on_page,
+              COALESCE(bps.display_order, 999) AS display_order
+       FROM sessions s
+       JOIN users u ON u.id = s.user_id
+       LEFT JOIN instruments i ON i.id = s.instrument_id
+       LEFT JOIN band_page_songs bps ON bps.session_id = s.id AND bps.band_id = $1
+       WHERE s.band_id = $1
+       ORDER BY on_page DESC, bps.display_order ASC, s.recorded_at DESC`,
+      [req.params.id]
+    );
+
+    const p = page.rows[0];
+    res.json({
+      band_name: p.band_name,
+      band_url: p.band_url || '',
+      story: p.story || '',
+      background_photo_url: getS3Url(p.background_photo_key),
+      background_photo_key: p.background_photo_key,
+      is_published: !!p.is_published,
+      members: members.rows.map(m => ({
+        ...m,
+        photo_url: m.photo_path ? `/api/uploads/${m.photo_path}` : null,
+        instrument_ids: m.instrument_ids ? m.instrument_ids.split(',').map(Number) : []
+      })),
+      instruments: instruments.rows,
+      sessions: sessions.rows
+    });
+  } catch (err) {
+    console.error('Error fetching band page settings:', err);
+    res.status(500).json({ message: 'Failed to load band page settings' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/bands/:id/page — update story, band_url, is_published
+router.put('/:id/page', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const membership = await client.query(
+      `SELECT role FROM band_members WHERE band_id = $1 AND user_id = $2 AND status = 'active'`,
+      [req.params.id, req.user.id]
+    );
+    if (membership.rowCount === 0 || membership.rows[0].role !== 'owner')
+      return res.status(403).json({ message: 'Only the band owner can manage the band page' });
+
+    const { band_url, story, is_published } = req.body;
+
+    if (band_url !== undefined) {
+      if (!/^[a-z0-9-]+$/.test(band_url))
+        return res.status(400).json({ message: 'URL can only contain lowercase letters, numbers, and hyphens' });
+      // Check uniqueness
+      const conflict = await client.query(
+        `SELECT band_id FROM band_pages WHERE band_url = $1 AND band_id != $2`,
+        [band_url, req.params.id]
+      );
+      if (conflict.rowCount > 0)
+        return res.status(409).json({ message: 'That URL is already taken' });
+    }
+
+    const fields = [];
+    const values = [];
+    let idx = 1;
+    if (band_url !== undefined) { fields.push(`band_url = $${idx++}`); values.push(band_url || null); }
+    if (story !== undefined) { fields.push(`story = $${idx++}`); values.push(story || null); }
+    if (is_published !== undefined) { fields.push(`is_published = $${idx++}`); values.push(is_published ? 1 : 0); }
+    if (fields.length === 0) return res.status(400).json({ message: 'Nothing to update' });
+
+    values.push(req.params.id);
+    await client.query(`UPDATE band_pages SET ${fields.join(', ')} WHERE band_id = $${idx}`, values);
+    res.json({ message: 'Band page updated' });
+  } catch (err) {
+    console.error('Error updating band page:', err);
+    res.status(500).json({ message: 'Failed to update band page' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/bands/:id/page/background — upload background photo
+router.post('/:id/page/background', authenticate, imageUpload.single('photo'), async (req, res) => {
+  const client = await getClient();
+  try {
+    const membership = await client.query(
+      `SELECT role FROM band_members WHERE band_id = $1 AND user_id = $2 AND status = 'active'`,
+      [req.params.id, req.user.id]
+    );
+    if (membership.rowCount === 0 || membership.rows[0].role !== 'owner')
+      return res.status(403).json({ message: 'Only the band owner can manage the band page' });
+
+    if (!req.file) return res.status(400).json({ message: 'No image file provided' });
+
+    // Delete old background if it exists
+    const existing = await client.query(`SELECT background_photo_key FROM band_pages WHERE band_id = $1`, [req.params.id]);
+    if (existing.rowCount > 0 && existing.rows[0].background_photo_key)
+      await deleteFromS3(existing.rows[0].background_photo_key);
+
+    const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
+    const key = `band-backgrounds/band_${req.params.id}_${Date.now()}${ext}`;
+    const result = await uploadToS3(req.file.buffer, key, req.file.mimetype);
+    if (!result.success) return res.status(500).json({ message: 'Image upload failed' });
+
+    await client.query(`UPDATE band_pages SET background_photo_key = $1 WHERE band_id = $2`, [key, req.params.id]);
+    res.json({ background_photo_url: getS3Url(key), background_photo_key: key });
+  } catch (err) {
+    console.error('Error uploading band background:', err);
+    res.status(500).json({ message: 'Failed to upload background' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/bands/:id/page/background — remove background photo
+router.delete('/:id/page/background', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const membership = await client.query(
+      `SELECT role FROM band_members WHERE band_id = $1 AND user_id = $2 AND status = 'active'`,
+      [req.params.id, req.user.id]
+    );
+    if (membership.rowCount === 0 || membership.rows[0].role !== 'owner')
+      return res.status(403).json({ message: 'Only the band owner can manage the band page' });
+
+    const existing = await client.query(`SELECT background_photo_key FROM band_pages WHERE band_id = $1`, [req.params.id]);
+    if (existing.rowCount > 0 && existing.rows[0].background_photo_key)
+      await deleteFromS3(existing.rows[0].background_photo_key);
+
+    await client.query(`UPDATE band_pages SET background_photo_key = NULL WHERE band_id = $1`, [req.params.id]);
+    res.json({ message: 'Background removed' });
+  } catch (err) {
+    console.error('Error removing band background:', err);
+    res.status(500).json({ message: 'Failed to remove background' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/bands/:id/page/members/:userId/instruments — set instrument assignments for a member
+router.put('/:id/page/members/:userId/instruments', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const membership = await client.query(
+      `SELECT role FROM band_members WHERE band_id = $1 AND user_id = $2 AND status = 'active'`,
+      [req.params.id, req.user.id]
+    );
+    if (membership.rowCount === 0 || membership.rows[0].role !== 'owner')
+      return res.status(403).json({ message: 'Only the band owner can manage the band page' });
+
+    const { instrumentIds } = req.body; // array of instrument IDs
+    if (!Array.isArray(instrumentIds)) return res.status(400).json({ message: 'instrumentIds must be an array' });
+
+    await client.query(
+      `DELETE FROM band_member_instruments WHERE band_id = $1 AND user_id = $2`,
+      [req.params.id, req.params.userId]
+    );
+    for (const instId of instrumentIds) {
+      await client.query(
+        `INSERT IGNORE INTO band_member_instruments (band_id, user_id, instrument_id) VALUES ($1, $2, $3)`,
+        [req.params.id, req.params.userId, instId]
+      );
+    }
+    res.json({ message: 'Instruments updated' });
+  } catch (err) {
+    console.error('Error updating member instruments:', err);
+    res.status(500).json({ message: 'Failed to update instruments' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/bands/:id/page/songs — set featured songs (ordered array of session IDs)
+router.put('/:id/page/songs', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const membership = await client.query(
+      `SELECT role FROM band_members WHERE band_id = $1 AND user_id = $2 AND status = 'active'`,
+      [req.params.id, req.user.id]
+    );
+    if (membership.rowCount === 0 || membership.rows[0].role !== 'owner')
+      return res.status(403).json({ message: 'Only the band owner can manage the band page' });
+
+    const { sessionIds } = req.body; // ordered array
+    if (!Array.isArray(sessionIds)) return res.status(400).json({ message: 'sessionIds must be an array' });
+
+    await client.query(`DELETE FROM band_page_songs WHERE band_id = $1`, [req.params.id]);
+    for (let i = 0; i < sessionIds.length; i++) {
+      await client.query(
+        `INSERT IGNORE INTO band_page_songs (band_id, session_id, display_order) VALUES ($1, $2, $3)`,
+        [req.params.id, sessionIds[i], i]
+      );
+    }
+    res.json({ message: 'Songs updated' });
+  } catch (err) {
+    console.error('Error updating band page songs:', err);
+    res.status(500).json({ message: 'Failed to update songs' });
   } finally {
     client.release();
   }
