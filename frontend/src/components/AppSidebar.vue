@@ -54,6 +54,11 @@ const usersToInvite = ref([])
 const allUsers = ref([])
 const loadingUsers = ref(false)
 
+// DM search state
+const dmSearch = ref('')
+const dmSearchResults = ref([])
+let dmSearchTimeout = null
+
 const filteredInviteUsers = computed(() => {
   if (!inviteSearch.value.trim()) return []
   const query = inviteSearch.value.toLowerCase()
@@ -95,6 +100,8 @@ async function initChat() {
     chat.checkCreatePermission(),
     chat.fetchRooms(),
     chat.fetchInvites(),
+    chat.fetchDMs(),
+    chat.fetchUnreadCounts(),
     breakroom.blocks.length === 0 ? breakroom.fetchLayout() : Promise.resolve()
   ])
   friends.fetchFriends()
@@ -266,6 +273,42 @@ async function addDiscoverableRoom(room) {
   }
 }
 
+// DM functions
+function onDmSearch() {
+  clearTimeout(dmSearchTimeout)
+  if (!dmSearch.value.trim()) { dmSearchResults.value = []; return }
+  dmSearchTimeout = setTimeout(async () => {
+    try {
+      const res = await fetch('/api/user/all', { credentials: 'include' })
+      if (res.ok) {
+        const data = await res.json()
+        const q = dmSearch.value.toLowerCase()
+        dmSearchResults.value = (data.users || []).filter(u => {
+          if (u.handle === user.username) return false
+          return u.handle.toLowerCase().includes(q) ||
+            (u.first_name && u.first_name.toLowerCase().includes(q)) ||
+            (u.last_name && u.last_name.toLowerCase().includes(q))
+        }).slice(0, 8)
+      }
+    } catch {}
+  }, 200)
+}
+
+function clearDmSearch() {
+  setTimeout(() => { dmSearchResults.value = [] }, 150)
+}
+
+async function startDM(targetUser) {
+  dmSearch.value = ''
+  dmSearchResults.value = []
+  try {
+    const room = await chat.startDM(targetUser.id)
+    await selectRoom(room)
+  } catch (err) {
+    console.error('Failed to start DM:', err)
+  }
+}
+
 function handleLogout() {
   emit('logout')
   emit('close')
@@ -398,6 +441,42 @@ function handleNavClick() {
             >
               # {{ room.name }}
             </div>
+          </div>
+
+          <!-- Direct Messages -->
+          <div class="dm-section-label">Direct Messages</div>
+          <div class="dm-search-wrapper">
+            <input
+              v-model="dmSearch"
+              type="text"
+              placeholder="Find a user..."
+              class="dm-search-input"
+              @input="onDmSearch"
+              @blur="clearDmSearch"
+            />
+            <ul v-if="dmSearchResults.length > 0" class="dm-search-dropdown">
+              <li
+                v-for="u in dmSearchResults"
+                :key="u.id"
+                @mousedown.prevent="startDM(u)"
+              >
+                <span class="dropdown-handle">{{ u.handle }}</span>
+                <span v-if="u.first_name || u.last_name" class="dropdown-name">{{ u.first_name }} {{ u.last_name }}</span>
+              </li>
+            </ul>
+          </div>
+          <div v-if="chat.dms.length === 0" class="no-discoverable">No messages yet</div>
+          <div
+            v-for="dm in chat.dms"
+            :key="dm.id"
+            class="room-item"
+            :class="{ active: chat.currentRoom === dm.id }"
+            @click="selectRoom(dm)"
+          >
+            <span class="room-name">@ {{ dm.partner_handle }}</span>
+            <span v-if="chat.unreadCounts[dm.id]" class="nav-badge room-badge">
+              {{ chat.unreadCounts[dm.id] > 99 ? '99+' : chat.unreadCounts[dm.id] }}
+            </span>
           </div>
         </div>
 
@@ -886,6 +965,72 @@ function handleNavClick() {
   font-size: 0.8rem;
   color: rgba(255, 255, 255, 0.4);
   font-style: italic;
+}
+
+.dm-section-label {
+  padding: 10px 12px 4px;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 600;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: 6px;
+}
+
+.dm-search-wrapper {
+  position: relative;
+  padding: 4px 12px 6px;
+}
+
+.dm-search-input {
+  width: 100%;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.8rem;
+  box-sizing: border-box;
+}
+
+.dm-search-input::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.dm-search-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.dm-search-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 12px;
+  right: 12px;
+  background: var(--color-background-card);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  max-height: 160px;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  z-index: 200;
+  box-shadow: var(--shadow-md);
+}
+
+.dm-search-dropdown li {
+  padding: 7px 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.dm-search-dropdown li:hover {
+  background: var(--color-background-hover);
 }
 
 /* ============================================
