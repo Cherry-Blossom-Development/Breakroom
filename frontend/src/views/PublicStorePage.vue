@@ -75,7 +75,7 @@
                 <RouterLink
                   v-for="col in storefront.collections"
                   :key="col.id"
-                  :to="`/store/${route.params.storeUrl}/c/${col.id}`"
+                  :to="collectionLink(col.id)"
                   class="collection-card"
                 >
                   <div class="collection-image" :style="collectionCardStyle(col)"></div>
@@ -327,6 +327,16 @@ const loading = ref(true)
 const notFound = ref(false)
 const storefront = ref(null)
 
+// On a connected custom domain, storeUrl isn't in the route params — it's resolved
+// once via hostname lookup. Every existing storeUrl-based API call below reads
+// from this computed instead, so the endpoints themselves never needed to change.
+const resolvedStoreUrl = ref(null)
+const storeUrl = computed(() => route.meta.customDomain ? resolvedStoreUrl.value : route.params.storeUrl)
+
+function collectionLink(collectionId) {
+  return route.meta.customDomain ? `/c/${collectionId}` : `/store/${route.params.storeUrl}/c/${collectionId}`
+}
+
 const pageStyle = computed(() => {
   const collections = storefront.value?.collections
   if (collections?.length === 1) {
@@ -377,7 +387,16 @@ async function fetchCollectionItems(storeUrl, collectionId) {
 async function fetchStore() {
   loading.value = true
   try {
-    const res = await fetch(`/api/storefront/public/${route.params.storeUrl}`)
+    if (route.meta.customDomain) {
+      const resolveRes = await fetch(`/api/storefront/public/by-domain/${window.location.hostname}`)
+      if (!resolveRes.ok) {
+        notFound.value = true
+        return
+      }
+      resolvedStoreUrl.value = (await resolveRes.json()).store_url
+    }
+
+    const res = await fetch(`/api/storefront/public/${storeUrl.value}`)
     if (res.status === 404) {
       notFound.value = true
     } else if (res.ok) {
@@ -386,7 +405,7 @@ async function fetchStore() {
         document.title = storefront.value.page_title
       }
       if (storefront.value?.collections?.length === 1) {
-        fetchCollectionItems(route.params.storeUrl, storefront.value.collections[0].id)
+        fetchCollectionItems(storeUrl.value, storefront.value.collections[0].id)
       }
     }
   } catch (err) {
@@ -469,7 +488,7 @@ async function proceedToPayment() {
   modal.loading = true
   try {
     const res = await fetch(
-      `/api/storefront/public/${route.params.storeUrl}/items/${modal.item.id}/checkout/intent`,
+      `/api/storefront/public/${storeUrl.value}/items/${modal.item.id}/checkout/intent`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -566,7 +585,7 @@ async function submitContact() {
   }
   contactModal.loading = true
   try {
-    const res = await fetch(`/api/storefront/public/${route.params.storeUrl}/contact`, {
+    const res = await fetch(`/api/storefront/public/${storeUrl.value}/contact`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

@@ -1,0 +1,18 @@
+# Install to /etc/sudoers.d/custom-domain-agent on the EC2 host (validate with
+# `visudo -cf` before installing, and set permissions 0440).
+#
+# Grants the low-privilege `customdomain` user passwordless sudo for EXACTLY
+# the three commands the agent shells out to — nothing else. No wildcard sudo.
+#
+# Create the user first if it doesn't exist:
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin customdomain
+
+customdomain ALL=(root) NOPASSWD: /usr/sbin/nginx -t
+customdomain ALL=(root) NOPASSWD: /usr/bin/systemctl reload nginx
+customdomain ALL=(root) NOPASSWD: /usr/bin/certbot certonly --nginx --non-interactive --agree-tos -m * -d * -d *
+customdomain ALL=(root) NOPASSWD: /usr/bin/certbot certonly --nginx --non-interactive --agree-tos -m * -d *
+customdomain ALL=(root) NOPASSWD: /usr/bin/certbot certonly --nginx --non-interactive --agree-tos -m * -d * -d * --staging
+customdomain ALL=(root) NOPASSWD: /usr/bin/certbot certonly --nginx --non-interactive --agree-tos -m * -d * --staging
+customdomain ALL=(root) NOPASSWD: /usr/bin/cp /tmp/*.conf.*.tmp /etc/nginx/conf.d/.*.conf.tmp
+customdomain ALL=(root) NOPASSWD: /usr/bin/mv /etc/nginx/conf.d/.*.conf.tmp /etc/nginx/conf.d/*.conf
+customdomain ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/nginx/conf.d/*.conf

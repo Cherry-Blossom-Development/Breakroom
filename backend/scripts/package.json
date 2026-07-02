@@ -1,0 +1,12 @@
+{
+  "name": "custom-domain-agent",
+  "private": true,
+  "description": "Host-side EC2 agent that provisions nginx + SSL for connected custom domains. Deployed independently of the Docker backend — see ../../infra/systemd/.",
+  "main": "custom-domain-agent.js",
+  "scripts": {
+    "start": "node custom-domain-agent.js"
+  },
+  "dependencies": {
+    "mysql2": "^3.11.0"
+  }
+}

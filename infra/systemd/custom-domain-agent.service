@@ -1,0 +1,33 @@
+# Install to /etc/systemd/system/custom-domain-agent.service on the EC2 host.
+# Triggered by custom-domain-agent.timer — not enabled/started directly.
+#
+# Runs as a dedicated low-privilege user (create with:
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin customdomain
+# ), never as root. That user needs a narrow sudoers allowlist — see
+# custom-domain-agent.sudoers in this directory — scoped to exactly the three
+# commands this script shells out to (nginx -t, systemctl reload nginx, certbot).
+
+[Unit]
+Description=Custom domain provisioning agent (one cycle)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=customdomain
+Group=customdomain
+WorkingDirectory=/opt/custom-domain-agent
+ExecStart=/usr/bin/node /opt/custom-domain-agent/custom-domain-agent.js
+EnvironmentFile=/etc/custom-domain-agent.env
+
+# Sandboxing — the agent only needs to write nginx confs, read/write certbot's
+# state, and read the site's docroot for the ACME HTTP-01 challenge. Nothing
+# else on the host should be reachable even if the DB row data were somehow
+# malicious (defense in depth on top of the domain-regex validation in code).
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# Must stay false — the script calls `sudo` for nginx/certbot, which itself
+# needs to gain privileges. NoNewPrivileges=true would silently break that.
+NoNewPrivileges=false
+ReadWritePaths=/etc/nginx/conf.d /etc/letsencrypt /var/www/prosaurus.com /tmp

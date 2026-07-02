@@ -1,0 +1,17 @@
+# Install to /etc/systemd/system/custom-domain-agent.timer on the EC2 host.
+# Enable with: sudo systemctl enable --now custom-domain-agent.timer
+#
+# Type=oneshot on the paired .service means systemd will not start a new run
+# while the previous one is still active — free overlap protection, no lock
+# file needed in the script itself.
+
+[Unit]
+Description=Run the custom domain provisioning agent every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=custom-domain-agent.service
+
+[Install]
+WantedBy=timers.target

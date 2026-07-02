@@ -10,7 +10,7 @@
 
     <main v-else class="collection-content">
       <nav class="breadcrumb">
-        <RouterLink :to="`/store/${route.params.storeUrl}`" class="breadcrumb-link">
+        <RouterLink :to="storeHomeLink" class="breadcrumb-link">
           ← {{ data.store_title || 'Store' }}
         </RouterLink>
       </nav>
@@ -291,6 +291,13 @@ const loading = ref(true)
 const notFound = ref(false)
 const data = ref(null)
 
+// On a connected custom domain, storeUrl isn't in the route params — it's resolved
+// once via hostname lookup. Every existing storeUrl-based API call below reads
+// from this computed instead, so the endpoints themselves never needed to change.
+const resolvedStoreUrl = ref(null)
+const storeUrl = computed(() => route.meta.customDomain ? resolvedStoreUrl.value : route.params.storeUrl)
+const storeHomeLink = computed(() => route.meta.customDomain ? '/' : `/store/${route.params.storeUrl}`)
+
 const pageStyle = computed(() => {
   const s = data.value?.collection?.settings || {}
   return s.background_color ? { backgroundColor: s.background_color } : {}
@@ -300,8 +307,17 @@ const pageStyle = computed(() => {
 async function fetchCollection() {
   loading.value = true
   try {
+    if (route.meta.customDomain) {
+      const resolveRes = await fetch(`/api/storefront/public/by-domain/${window.location.hostname}`)
+      if (!resolveRes.ok) {
+        notFound.value = true
+        return
+      }
+      resolvedStoreUrl.value = (await resolveRes.json()).store_url
+    }
+
     const res = await fetch(
-      `/api/storefront/public/${route.params.storeUrl}/collection/${route.params.collectionId}`
+      `/api/storefront/public/${storeUrl.value}/collection/${route.params.collectionId}`
     )
     if (res.status === 404) {
       notFound.value = true
@@ -389,7 +405,7 @@ async function proceedToPayment() {
   modal.loading = true
   try {
     const res = await fetch(
-      `/api/storefront/public/${route.params.storeUrl}/items/${modal.item.id}/checkout/intent`,
+      `/api/storefront/public/${storeUrl.value}/items/${modal.item.id}/checkout/intent`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -489,7 +505,7 @@ async function submitContact() {
   }
   contactModal.loading = true
   try {
-    const res = await fetch(`/api/storefront/public/${route.params.storeUrl}/contact`, {
+    const res = await fetch(`/api/storefront/public/${storeUrl.value}/contact`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

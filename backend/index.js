@@ -11,21 +11,39 @@ const { Server } = require('socket.io');
 const cookieParser = require('cookie-parser');
 const { createAdapter } = require('@socket.io/redis-adapter');
 const { createRedisClients } = require('./utilities/redis');
+const { startCustomDomainCache, isActiveCustomDomain } = require('./utilities/customDomainCache');
 
 const app = express();
 const server = http.createServer(app);
 const port = process.env.PORT || 3000;
 
-// Set up Socket.IO - allow multiple origins
+// Static, always-trusted origins. Custom-domain origins are checked dynamically
+// (see corsOriginCheck below) — the static list is always consulted FIRST and is
+// never replaced by the dynamic check, so a cache hiccup can never lock out the
+// main site itself.
 const allowedOrigins = [
   process.env.CORS_ORIGIN,
   'https://prosaurus.com',
   'https://www.prosaurus.com'
 ];
 
+// Shared by both Express `cors()` and Socket.IO — both accept an (origin, callback) function.
+function corsOriginCheck(origin, callback) {
+  // No Origin header (server-to-server calls, curl, native mobile apps) — nothing to check.
+  if (!origin) return callback(null, true);
+  if (allowedOrigins.includes(origin)) return callback(null, true);
+  try {
+    const hostname = new URL(origin).hostname;
+    if (isActiveCustomDomain(hostname)) return callback(null, true);
+  } catch {
+    // Malformed Origin header — fall through to reject.
+  }
+  return callback(null, false);
+}
+
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: corsOriginCheck,
     credentials: true
   }
 });
@@ -49,8 +67,10 @@ const io = new Server(server, {
   startScheduler();
 })();
 
+startCustomDomainCache();
+
 app.use(cors({
-  origin: allowedOrigins,
+  origin: corsOriginCheck,
   credentials: true
 }));
 
@@ -93,6 +113,7 @@ const instrumentsRoutes = require('./routes/instruments');
 const subscriptionsRoutes = require('./routes/subscriptions');
 const shippingRoutes = require('./routes/shipping');
 const scheduledMessagesRoutes = require('./routes/scheduled-messages');
+const customDomainsRoutes = require('./routes/custom-domains');
 const { getS3Url } = require('./utilities/aws-s3');
 
 
@@ -146,6 +167,7 @@ app.use('/api/instruments', instrumentsRoutes);
 app.use('/api/subscriptions', subscriptionsRoutes);
 app.use('/api/shipping', shippingRoutes);
 app.use('/api/scheduled-messages', scheduledMessagesRoutes);
+app.use('/api/custom-domains', customDomainsRoutes);
 const emailNannyRoutes = require('./routes/emailnanny');
 app.use('/api/emailnanny', emailNannyRoutes);
 

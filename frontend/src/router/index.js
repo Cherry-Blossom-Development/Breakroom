@@ -2,6 +2,32 @@ import { createRouter, createWebHistory } from 'vue-router'
 import HomePage from '../views/HomePage.vue'
 import { user } from '@/stores/user.js'
 
+// Prosaurus-owned hosts. Anything else is a connected custom domain — that visitor
+// gets a dedicated minimal route table (see customDomainRoutes below) so their own
+// domain stays in the address bar the whole time (no redirect to /store/:storeUrl).
+const KNOWN_HOSTS = ['prosaurus.com', 'www.prosaurus.com', 'local.prosaurus.com', 'localhost', '127.0.0.1']
+const isCustomDomain = typeof window !== 'undefined' && !KNOWN_HOSTS.includes(window.location.hostname)
+
+const customDomainRoutes = [
+  {
+    path: '/',
+    name: 'customDomainHome',
+    component: () => import('../views/PublicStorePage.vue'),
+    meta: { bareLayout: true, customDomain: true },
+  },
+  {
+    path: '/c/:collectionId',
+    name: 'customDomainCollection',
+    component: () => import('../views/PublicCollectionPage.vue'),
+    meta: { bareLayout: true, customDomain: true },
+  },
+  {
+    // Any other path on a custom domain still resolves to the storefront home.
+    path: '/:pathMatch(.*)*',
+    redirect: '/',
+  },
+]
+
 //Admin views
 import AdminLayout from '@/views/admin/AdminLayout.vue'
 import AdminUsers from '@/views/admin/AdminUsers.vue'
@@ -24,7 +50,7 @@ import LegalPage from '@/views/profile/ProfileLegal.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
-  routes: [
+  routes: isCustomDomain ? customDomainRoutes : [
     {
       path: '/',
       name: 'home',
