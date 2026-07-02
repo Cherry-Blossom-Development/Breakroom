@@ -36,6 +36,7 @@ const isPrepending = ref(false)
 const flaggingMessageId = ref(null)
 const editingMessageId = ref(null)
 const editText = ref('')
+const editInputEl = ref(null)
 const deletingMessageId = ref(null)
 const openMenuId = ref(null)
 
@@ -70,11 +71,20 @@ const startEdit = (msg) => {
   editingMessageId.value = msg.id
   editText.value = msg.message
   deletingMessageId.value = null
+  nextTick(() => {
+    const el = editInputEl.value
+    if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px'; el.focus() }
+  })
 }
 
 const cancelEdit = () => {
   editingMessageId.value = null
   editText.value = ''
+}
+
+const handleEditInput = () => {
+  const el = editInputEl.value
+  if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px' }
 }
 
 const saveEdit = async (messageId) => {
@@ -673,13 +683,15 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
           </div>
           <div v-if="msg.message" class="message-content">
             <template v-if="editingMessageId === msg.id">
-              <input
+              <textarea
+                :ref="el => editInputEl = el"
                 v-model="editText"
-                @keyup.enter="saveEdit(msg.id)"
-                @keyup.escape="cancelEdit"
+                @input="handleEditInput"
+                @keydown.enter.exact.prevent="saveEdit(msg.id)"
+                @keydown.escape="cancelEdit"
                 class="edit-input"
                 maxlength="1000"
-                autofocus
+                rows="1"
               />
               <div class="edit-actions">
                 <button @click="saveEdit(msg.id)" class="edit-save-btn">Save</button>
@@ -1008,10 +1020,17 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   border: 1px solid var(--color-accent);
   border-radius: 6px;
   font-size: inherit;
+  font-family: inherit;
+  line-height: 1.4;
   background: var(--color-background-input);
   color: var(--color-text);
   outline: none;
   box-sizing: border-box;
+  resize: none;
+  overflow-y: auto;
+  max-height: 200px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
 }
 
 .edit-actions {
@@ -1052,6 +1071,7 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   font-size: 0.85rem;
   color: var(--color-text);
   word-wrap: break-word;
+  white-space: pre-wrap;
 }
 
 .message-image {
