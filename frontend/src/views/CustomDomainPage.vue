@@ -87,6 +87,41 @@
         </div>
       </section>
 
+      <!-- ── Common DNS setup issues ── -->
+      <section class="troubleshoot-card">
+        <h2>Common issues when adding these records</h2>
+        <p class="card-hint">
+          Registrars vary, but these two problems come up most often when connecting a domain:
+        </p>
+
+        <div class="notice">
+          <strong>"My registrar won't let me add the record — it says one already exists"</strong>
+          <p>
+            If this domain previously used your registrar's <strong>Domain Forwarding</strong> or
+            <strong>URL Forwarding</strong> feature, that's usually a separate setting from your DNS
+            records — but it often occupies the same <code>@</code> and <code>www</code> slots you need
+            now. Find the forwarding rule (it's usually in its own section, separate from "DNS Records")
+            and remove it first, then add the A records above.
+          </p>
+        </div>
+
+        <div class="notice">
+          <strong>"It let me add the A record for the bare domain, but not for www"</strong>
+          <p>
+            Most domains ship with a default <code>CNAME www</code> record already pointing somewhere
+            (often back to the bare domain). DNS doesn't allow a CNAME and an A record to coexist at the
+            same name, so your registrar will block the new A record until that CNAME is deleted. Look
+            through your existing DNS records for an entry with type <code>CNAME</code> and host
+            <code>www</code>, delete it, then add the A record for <code>www</code>.
+          </p>
+          <p>
+            If your registrar still won't allow an A record there, a CNAME pointing <code>www</code> back
+            to your bare domain (e.g. <code>CNAME www → yourdomain.com</code>) works just as well — we
+            check for either.
+          </p>
+        </div>
+      </section>
+
       <!-- ── Manual redirect fallback ── -->
       <section class="explainer-card">
         <h2>Prefer a simple redirect instead?</h2>
@@ -328,6 +363,7 @@ async function copyValue(value) {
 
 .connect-card,
 .explainer-card,
+.troubleshoot-card,
 .steps-card,
 .registrar-links-card {
   background: var(--color-background-card, #fff);
@@ -534,6 +570,19 @@ code {
   line-height: 1.5;
   margin-top: 14px;
 }
+
+.notice strong {
+  display: block;
+  color: var(--color-text);
+  font-size: 0.92rem;
+  margin-bottom: 6px;
+}
+
+.notice p {
+  font-size: 0.87rem;
+  margin: 0 0 8px;
+}
+.notice p:last-child { margin-bottom: 0; }
 
 .steps-intro {
   margin-bottom: 18px;
