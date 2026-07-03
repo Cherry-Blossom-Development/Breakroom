@@ -81,11 +81,19 @@ async function writeConfAtomic(domain, contents) {
   const target = path.join(NGINX_CONF_DIR, `${domain}.conf`);
 
   // Sanity checks independent of nginx's own `-t` validation — catches a
-  // broken template substitution before it's ever loaded.
-  if (!contents.includes(`server_name`) || !contents.includes(domain)) {
+  // broken template substitution before it's ever loaded. Comments are
+  // stripped first so explanatory prose (e.g. this very function's own
+  // template header warning about default_server) can't trip the check on
+  // its wording alone — only actual directives count.
+  const codeOnly = contents
+    .split('\n')
+    .filter(line => !line.trim().startsWith('#'))
+    .join('\n');
+
+  if (!codeOnly.includes(`server_name`) || !codeOnly.includes(domain)) {
     throw new Error(`Rendered nginx conf for ${domain} does not contain the expected server_name — aborting.`);
   }
-  if (contents.includes('default_server')) {
+  if (codeOnly.includes('default_server')) {
     throw new Error(`Rendered nginx conf for ${domain} unexpectedly contains default_server — aborting.`);
   }
 
