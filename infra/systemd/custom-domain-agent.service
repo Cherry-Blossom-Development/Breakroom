@@ -24,10 +24,18 @@ EnvironmentFile=/etc/custom-domain-agent.env
 # state, and read the site's docroot for the ACME HTTP-01 challenge. Nothing
 # else on the host should be reachable even if the DB row data were somehow
 # malicious (defense in depth on top of the domain-regex validation in code).
+#
+# /etc/nginx (not just conf.d) is required because certbot's --nginx plugin
+# creates its own lock file directly in /etc/nginx while it edits config.
+# /var/log/nginx, /run, /var/lib/letsencrypt, /var/log/letsencrypt are all
+# required because nginx -t and certbot each write their own logs/pidfile/
+# workdir there by default — ProtectSystem=strict makes everything else on
+# the filesystem read-only, so each of these had to be found by hitting the
+# actual "Read-only file system" error live, one at a time.
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 # Must stay false — the script calls `sudo` for nginx/certbot, which itself
 # needs to gain privileges. NoNewPrivileges=true would silently break that.
 NoNewPrivileges=false
-ReadWritePaths=/etc/nginx/conf.d /etc/letsencrypt /var/www/prosaurus.com /tmp /var/log/nginx /run /var/lib/letsencrypt /var/log/letsencrypt
+ReadWritePaths=/etc/nginx /etc/letsencrypt /var/www/prosaurus.com /tmp /var/log/nginx /run /var/lib/letsencrypt /var/log/letsencrypt
