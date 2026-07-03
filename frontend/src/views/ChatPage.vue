@@ -4,6 +4,7 @@ import { chat } from '@/stores/chat.js'
 import { user } from '@/stores/user.js'
 import { moderationStore } from '@/stores/moderation.js'
 import FlagDialog from '@/components/FlagDialog.vue'
+import { renderMessage } from '@/utilities/linkify.js'
 
 const messageInput = ref('')
 const messagesContainer = ref(null)
@@ -181,12 +182,6 @@ const handleTyping = () => {
     }
   }
   closeMention()
-}
-
-// Render message text with styled @mentions
-const renderMessage = (text) => {
-  if (!text) return ''
-  return text.replace(/@(\w+)/g, '<span class="mention-highlight">@$1</span>')
 }
 
 // Format timestamp - show date if not today
@@ -1136,6 +1131,36 @@ onUnmounted(() => {
 .message.own :deep(.mention-highlight) {
   background: rgba(255, 255, 255, 0.25);
   color: white;
+}
+
+:deep(.chat-link) {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 9px;
+  background: var(--color-accent);
+  color: white;
+  border-radius: 12px;
+  font-size: 0.9em;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+:deep(.chat-link:hover) {
+  opacity: 0.85;
+}
+
+:deep(.chat-link-icon) {
+  flex-shrink: 0;
+}
+
+.message.own :deep(.chat-link) {
+  background: rgba(255, 255, 255, 0.25);
 }
 
 .error-message {
