@@ -28,9 +28,12 @@ enabling it on the real EC2 host is a manual, guided step (see the plan's
 3. Deploy the code:
    ```bash
    sudo mkdir -p /opt/custom-domain-agent
-   # copy backend/scripts/*.js, backend/scripts/package.json, and infra/*.template.conf
-   # into /opt/custom-domain-agent (flatten — the script expects the templates
-   # in CUSTOM_DOMAIN_TEMPLATE_DIR, default /opt/custom-domain-agent/infra)
+   # copy backend/scripts/*.js, backend/scripts/package.json, and both
+   # infra/*.template.conf files flat into /opt/custom-domain-agent (same
+   # directory as the script, not a nested infra/ subfolder). The code's
+   # built-in default template path won't resolve for this flat layout, so
+   # CUSTOM_DOMAIN_TEMPLATE_DIR=/opt/custom-domain-agent must be set
+   # explicitly in the env file below — it's not actually optional.
    cd /opt/custom-domain-agent && sudo -u customdomain npm install --production
    sudo chown -R customdomain:customdomain /opt/custom-domain-agent
    ```
@@ -57,10 +60,11 @@ enabling it on the real EC2 host is a manual, guided step (see the plan's
    sudo systemctl enable --now custom-domain-agent.timer
    ```
 
-7. **Confirm `certbot.timer` (renewal) is enabled** — it may already be, from
-   the original prosaurus.com setup:
+7. **Confirm the renewal timer is enabled** — on this host it's named
+   `certbot-renew.timer` (not the generic `certbot.timer`), and it was
+   already active from the original prosaurus.com setup:
    ```bash
-   systemctl status certbot.timer
+   systemctl list-timers certbot-renew.timer
    ```
 
 8. Test end-to-end against **staging** first (`CERTBOT_STAGING=true` in the
@@ -76,3 +80,19 @@ enabling it on the real EC2 host is a manual, guided step (see the plan's
 
 10. Run through the checklist in `docs/custom-domain-carolearts.md` Step 9
     (no redirect, URL bar stays, green padlock, no CORS errors, `www` works).
+
+---
+
+**Status**: steps 1–10 completed live for `carolearts.com` on 2026-07-03 —
+staging cert issued and verified first, then flipped to a real trusted
+Let's Encrypt certificate (`C=US, O=Let's Encrypt, CN=YE1`, valid through
+Oct 1 2026), covering both `carolearts.com` and `www.carolearts.com`.
+The timer is enabled and running every 5 minutes. Three real bugs were
+found and fixed during this first run (see git history for
+`backend/scripts/custom-domain-agent.js` and
+`infra/systemd/custom-domain-agent.service` around 2026-07-03) — a
+false-positive `default_server` check tripped by the template's own
+explanatory comment, and two rounds of `ProtectSystem=strict` sandboxing
+blocking `nginx -t` and `certbot` from writing their own logs/pidfile/
+lockfile. Both are fixed in the versions of those files now in this repo,
+so a fresh install following this README should not hit either again.
