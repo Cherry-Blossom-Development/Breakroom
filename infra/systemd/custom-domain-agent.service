@@ -30,4 +30,4 @@ PrivateTmp=true
 # Must stay false — the script calls `sudo` for nginx/certbot, which itself
 # needs to gain privileges. NoNewPrivileges=true would silently break that.
 NoNewPrivileges=false
-ReadWritePaths=/etc/nginx/conf.d /etc/letsencrypt /var/www/prosaurus.com /tmp
+ReadWritePaths=/etc/nginx/conf.d /etc/letsencrypt /var/www/prosaurus.com /tmp /var/log/nginx /run
