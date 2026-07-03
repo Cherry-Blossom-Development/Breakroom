@@ -2,10 +2,10 @@
   <main class="domain-page page-container">
 
     <div class="page-header">
-      <RouterLink to="/collections/storefront" class="back-link">← Storefront</RouterLink>
+      <RouterLink :to="backLink" class="back-link">{{ backLabel }}</RouterLink>
       <h1>Use Your Own Domain</h1>
       <p class="page-desc">
-        Connect a domain you own so it becomes the real address of your store — visitors will see
+        Connect a domain you own so it becomes the real address of your {{ noun }} — visitors will see
         <em>your</em> domain in the address bar, not a Prosaurus URL.
       </p>
     </div>
@@ -77,7 +77,7 @@
 
             <div v-else-if="d.status === 'active'" class="dns-hint">
               <a :href="`https://${d.domain}`" target="_blank" rel="noopener">https://{{ d.domain }} ↗</a>
-              is live and serving your store.
+              is live and serving your {{ noun }}.
             </div>
 
             <button class="btn-remove" :disabled="removingId === d.id" @click="removeDomain(d)">
@@ -127,7 +127,7 @@
         <h2>Prefer a simple redirect instead?</h2>
         <p>
           If you'd rather not touch DNS A records, you can still set up a quick registrar-side redirect
-          that sends visitors from your domain to your Prosaurus store URL. It's faster to set up, but
+          that sends visitors from your domain to your Prosaurus {{ noun }} URL. It's faster to set up, but
           the address bar will show the Prosaurus URL after the redirect rather than your own domain.
         </p>
         <button class="link-toggle" @click="showManualGuide = !showManualGuide">
@@ -145,11 +145,11 @@
 
           <ol class="steps-list">
             <li>
-              <strong>Find your Prosaurus store URL</strong><br>
+              <strong>Find your Prosaurus {{ noun }} URL</strong><br>
               Go to your
-              <RouterLink to="/collections/storefront">Storefront settings</RouterLink>
-              and copy your store URL — it looks like
-              <code>https://www.prosaurus.com/store/your-store</code>.
+              <RouterLink :to="backLink">{{ settingsLabel }}</RouterLink>
+              and copy your {{ noun }} URL — it looks like
+              <code>{{ urlExample }}</code>.
             </li>
             <li>
               <strong>Log into your domain registrar</strong><br>
@@ -165,7 +165,7 @@
               <strong>Create a forward rule</strong><br>
               <ul class="sub-list">
                 <li><strong>From:</strong> your domain (e.g. <code>www.myshop.com</code> or <code>myshop.com</code>)</li>
-                <li><strong>To:</strong> your full Prosaurus store URL</li>
+                <li><strong>To:</strong> your full Prosaurus {{ noun }} URL</li>
                 <li><strong>Type:</strong> 301 Permanent Redirect (preferred) or 302 Temporary</li>
               </ul>
               Set up a rule for both the <code>www</code> version and the bare domain if your registrar
@@ -177,7 +177,7 @@
             </li>
             <li>
               <strong>Test it</strong><br>
-              Open a browser and type your custom domain. You should be redirected to your Prosaurus store.
+              Open a browser and type your custom domain. You should be redirected to your Prosaurus {{ noun }}.
             </li>
           </ol>
         </section>
@@ -211,9 +211,21 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
-import { RouterLink } from 'vue-router'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
 import { authFetch } from '@/utilities/authFetch'
+
+const route = useRoute()
+const bandId = computed(() => route.params.bandId || null)
+const isBand = computed(() => !!bandId.value)
+
+const noun = computed(() => isBand.value ? 'band page' : 'store')
+const backLink = computed(() => isBand.value ? `/band-setup/${bandId.value}` : '/collections/storefront')
+const backLabel = computed(() => isBand.value ? '← Band Page' : '← Storefront')
+const settingsLabel = computed(() => isBand.value ? 'Band Page settings' : 'Storefront settings')
+const urlExample = computed(() => isBand.value
+  ? 'https://www.prosaurus.com/band/your-band-name'
+  : 'https://www.prosaurus.com/store/your-store')
 
 const domains = ref([])
 const loadingDomains = ref(true)
@@ -245,7 +257,8 @@ function statusClass(status) {
 
 async function fetchDomains() {
   try {
-    const res = await authFetch('/api/custom-domains')
+    const url = isBand.value ? `/api/custom-domains?band_id=${bandId.value}` : '/api/custom-domains'
+    const res = await authFetch(url)
     if (res.ok) domains.value = await res.json()
   } catch {
     // Leave the previous list in place on a transient fetch error.
@@ -279,10 +292,13 @@ async function submitDomain() {
   submitting.value = true
   submitError.value = ''
   try {
+    const requestBody = isBand.value
+      ? { domain, content_type: 'band_page', band_id: bandId.value }
+      : { domain }
     const res = await authFetch('/api/custom-domains', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ domain }),
+      body: JSON.stringify(requestBody),
     })
     const body = await res.json()
     if (!res.ok) {

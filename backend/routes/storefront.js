@@ -150,30 +150,6 @@ router.get('/public/:storeUrl/collection/:collectionId', async (req, res) => {
   }
 });
 
-// GET /api/storefront/public/by-domain/:hostname  (no auth) — resolves an active
-// custom domain to its store_url. Deliberately thin: the frontend reuses the
-// existing storeUrl-based endpoints for everything else once resolved.
-router.get('/public/by-domain/:hostname', async (req, res) => {
-  const hostname = String(req.params.hostname || '').toLowerCase().replace(/^www\./, '');
-  let client;
-  try {
-    client = await getClient();
-    const result = await client.query(
-      `SELECT us.store_url FROM custom_domains cd
-       JOIN user_storefront us ON us.user_id = cd.user_id
-       WHERE cd.domain = $1 AND cd.status = 'active'`,
-      [hostname]
-    );
-    if (result.rowCount === 0) return res.status(404).json({ message: 'Domain not found' });
-    res.json({ store_url: result.rows[0].store_url });
-  } catch (err) {
-    console.error('Failed to resolve custom domain:', err);
-    res.status(500).json({ message: 'Server error' });
-  } finally {
-    if (client) client.release();
-  }
-});
-
 // GET /api/storefront/check-url/:storeUrl  (auth required)
 router.get('/check-url/:storeUrl', authenticate, async (req, res) => {
   const { storeUrl } = req.params;

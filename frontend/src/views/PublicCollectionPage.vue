@@ -308,12 +308,17 @@ async function fetchCollection() {
   loading.value = true
   try {
     if (route.meta.customDomain) {
-      const resolveRes = await fetch(`/api/storefront/public/by-domain/${window.location.hostname}`)
+      const resolveRes = await fetch(`/api/custom-domains/public/by-domain/${window.location.hostname}`)
       if (!resolveRes.ok) {
         notFound.value = true
         return
       }
-      resolvedStoreUrl.value = (await resolveRes.json()).store_url
+      const resolved = await resolveRes.json()
+      if (resolved.content_type !== 'storefront') {
+        notFound.value = true
+        return
+      }
+      resolvedStoreUrl.value = resolved.store_url
     }
 
     const res = await fetch(

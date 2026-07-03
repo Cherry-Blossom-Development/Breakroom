@@ -1,9 +1,13 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 
+const props = defineProps({
+  resolvedBandUrl: { type: String, default: null },
+})
+
 const route = useRoute()
-const bandUrl = route.params.bandUrl
+const bandUrl = computed(() => props.resolvedBandUrl || route.params.bandUrl)
 
 const loading = ref(true)
 const notFound = ref(false)
@@ -18,7 +22,7 @@ const duration = ref(0)
 
 onMounted(async () => {
   try {
-    const res = await fetch(`/api/band-page/${bandUrl}`)
+    const res = await fetch(`/api/band-page/${bandUrl.value}`)
     if (res.status === 404) { notFound.value = true; return }
     const data = await res.json()
     if (!res.ok) { notFound.value = true; return }
@@ -165,7 +169,7 @@ function formatTime(s) {
         <audio
           v-if="currentSongId"
           ref="audioEl"
-          :src="`/api/band-page/${bandUrl}/songs/${currentSongId}/stream`"
+          :src="`/api/band-page/${bandUrl.value}/songs/${currentSongId}/stream`"
           @timeupdate="onTimeUpdate"
           @durationchange="onDurationChange"
           @ended="onEnded"

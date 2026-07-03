@@ -1,6 +1,6 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { authFetch } from '@/utilities/authFetch'
 
 const route = useRoute()
@@ -233,6 +233,16 @@ function moveSong(session, direction) {
           <div class="bps-hint">Lowercase letters, numbers, and hyphens only.</div>
         </div>
         <div class="bps-field">
+          <label class="bps-label">Custom Domain</label>
+          <div class="bps-hint">
+            Want your band page to live at your own domain, like <code>www.yourband.com</code>?
+            Connect one — we handle DNS, SSL, and hosting automatically.
+          </div>
+          <RouterLink :to="`/band-setup/${bandId}/domain-setup`" class="domain-setup-link">
+            Use your own domain →
+          </RouterLink>
+        </div>
+        <div class="bps-field">
           <label class="bps-label">Band Story</label>
           <textarea
             v-model="page.story"
@@ -341,6 +351,15 @@ function moveSong(session, direction) {
 .bps-hint { font-size: 0.82em; color: var(--color-text-muted); margin-bottom: 10px; }
 .bps-field { margin-bottom: 16px; }
 .bps-label { display: block; font-size: 0.78em; text-transform: uppercase; letter-spacing: .5px; color: var(--color-text-light); margin-bottom: 6px; font-weight: 600; }
+
+.domain-setup-link {
+  display: inline-block;
+  font-size: 0.82rem;
+  color: var(--color-link);
+  text-decoration: none;
+  margin-top: 4px;
+}
+.domain-setup-link:hover { text-decoration: underline; }
 
 .bps-url-row { display: flex; align-items: center; gap: 0; }
 .bps-url-prefix { color: var(--color-text-muted); font-size: 0.9em; white-space: nowrap; padding: 8px 4px 8px 0; }

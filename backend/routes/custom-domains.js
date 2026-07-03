@@ -56,9 +56,32 @@ router.post('/', authenticate, async (req, res) => {
   const validationError = validateDomain(domain);
   if (validationError) return res.status(400).json({ message: validationError });
 
+  const contentType = req.body.content_type === 'band_page' ? 'band_page' : 'storefront';
+  const bandId = contentType === 'band_page' ? req.body.band_id : null;
+
   let client;
   try {
     client = await getClient();
+
+    if (contentType === 'band_page') {
+      if (!bandId) return res.status(400).json({ message: 'A band is required.' });
+
+      const membership = await client.query(
+        `SELECT role FROM band_members WHERE band_id = $1 AND user_id = $2 AND status = 'active'`,
+        [bandId, req.user.id]
+      );
+      if (membership.rowCount === 0 || membership.rows[0].role !== 'owner') {
+        return res.status(403).json({ message: 'Only the band owner can connect a custom domain.' });
+      }
+
+      const bandPage = await client.query(
+        `SELECT band_url FROM band_pages WHERE band_id = $1`,
+        [bandId]
+      );
+      if (bandPage.rowCount === 0 || !bandPage.rows[0].band_url) {
+        return res.status(400).json({ message: 'Set a band page URL before connecting a custom domain.' });
+      }
+    }
 
     // Any existing non-terminal or active claim on this exact domain blocks a new submission.
     const existing = await client.query(
@@ -93,8 +116,8 @@ router.post('/', authenticate, async (req, res) => {
     }
 
     const result = await client.query(
-      `INSERT INTO custom_domains (user_id, domain, status) VALUES ($1, $2, 'pending_dns')`,
-      [req.user.id, domain]
+      `INSERT INTO custom_domains (user_id, content_type, band_id, domain, status) VALUES ($1, $2, $3, $4, 'pending_dns')`,
+      [req.user.id, contentType, bandId, domain]
     );
 
     res.status(201).json({
@@ -115,15 +138,26 @@ router.post('/', authenticate, async (req, res) => {
 });
 
 // GET /api/custom-domains — current user's domain(s) + status
+// No ?band_id= -> storefront domains (today's behavior). ?band_id=X -> that band's domains only.
 router.get('/', authenticate, async (req, res) => {
   let client;
   try {
     client = await getClient();
-    const result = await client.query(
-      `SELECT id, domain, status, error_message, activated_at, created_at, updated_at
-       FROM custom_domains WHERE user_id = $1 AND status != 'removing' ORDER BY created_at DESC`,
-      [req.user.id]
-    );
+
+    let query = `SELECT id, domain, status, error_message, activated_at, created_at, updated_at
+       FROM custom_domains WHERE user_id = $1 AND status != 'removing'`;
+    const params = [req.user.id];
+
+    if (req.query.band_id) {
+      query += ` AND content_type = 'band_page' AND band_id = $${params.length + 1}`;
+      params.push(req.query.band_id);
+    } else {
+      query += ` AND content_type = 'storefront'`;
+    }
+
+    query += ' ORDER BY created_at DESC';
+
+    const result = await client.query(query, params);
     const rows = result.rows.map(row => ({
       ...row,
       dns_records: [
@@ -153,6 +187,39 @@ router.delete('/:id', authenticate, async (req, res) => {
     res.json({ message: 'Domain removal queued' });
   } catch (err) {
     console.error('Failed to remove custom domain:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// GET /api/custom-domains/public/by-domain/:hostname  (no auth) — resolves an active
+// custom domain to whatever it's connected to (a storefront or a band page).
+router.get('/public/by-domain/:hostname', async (req, res) => {
+  const hostname = String(req.params.hostname || '').toLowerCase().replace(/^www\./, '');
+  let client;
+  try {
+    client = await getClient();
+    const result = await client.query(
+      `SELECT cd.content_type, us.store_url, bp.band_url
+         FROM custom_domains cd
+         LEFT JOIN user_storefront us ON us.user_id = cd.user_id AND cd.content_type = 'storefront'
+         LEFT JOIN band_pages bp ON bp.band_id = cd.band_id AND cd.content_type = 'band_page'
+        WHERE cd.domain = $1 AND cd.status = 'active'`,
+      [hostname]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Domain not found' });
+
+    const row = result.rows[0];
+    if (row.content_type === 'storefront' && row.store_url) {
+      return res.json({ content_type: 'storefront', store_url: row.store_url });
+    }
+    if (row.content_type === 'band_page' && row.band_url) {
+      return res.json({ content_type: 'band_page', band_url: row.band_url });
+    }
+    res.status(404).json({ message: 'Domain not found' });
+  } catch (err) {
+    console.error('Failed to resolve custom domain:', err);
     res.status(500).json({ message: 'Server error' });
   } finally {
     if (client) client.release();

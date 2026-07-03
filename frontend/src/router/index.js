@@ -12,7 +12,7 @@ const customDomainRoutes = [
   {
     path: '/',
     name: 'customDomainHome',
-    component: () => import('../views/PublicStorePage.vue'),
+    component: () => import('../views/CustomDomainHome.vue'),
     meta: { bareLayout: true, customDomain: true },
   },
   {
@@ -266,6 +266,12 @@ const router = createRouter({
       path: '/band-setup/:id',
       name: 'bandPageSetup',
       component: () => import('../views/BandPageSetupPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/band-setup/:bandId/domain-setup',
+      name: 'bandDomainSetup',
+      component: () => import('../views/CustomDomainPage.vue'),
       meta: { requiresAuth: true },
     },
     {

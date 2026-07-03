@@ -322,16 +322,18 @@
 import { ref, computed, reactive, nextTick, onMounted } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 
+const props = defineProps({
+  resolvedStoreUrl: { type: String, default: null },
+})
+
 const route = useRoute()
 const loading = ref(true)
 const notFound = ref(false)
 const storefront = ref(null)
 
-// On a connected custom domain, storeUrl isn't in the route params — it's resolved
-// once via hostname lookup. Every existing storeUrl-based API call below reads
-// from this computed instead, so the endpoints themselves never needed to change.
-const resolvedStoreUrl = ref(null)
-const storeUrl = computed(() => route.meta.customDomain ? resolvedStoreUrl.value : route.params.storeUrl)
+// On a connected custom domain, storeUrl isn't in the route params — the CustomDomainHome
+// dispatcher resolves it via hostname lookup and passes it down as a prop instead.
+const storeUrl = computed(() => props.resolvedStoreUrl || route.params.storeUrl)
 
 function collectionLink(collectionId) {
   return route.meta.customDomain ? `/c/${collectionId}` : `/store/${route.params.storeUrl}/c/${collectionId}`
@@ -387,15 +389,6 @@ async function fetchCollectionItems(storeUrl, collectionId) {
 async function fetchStore() {
   loading.value = true
   try {
-    if (route.meta.customDomain) {
-      const resolveRes = await fetch(`/api/storefront/public/by-domain/${window.location.hostname}`)
-      if (!resolveRes.ok) {
-        notFound.value = true
-        return
-      }
-      resolvedStoreUrl.value = (await resolveRes.json()).store_url
-    }
-
     const res = await fetch(`/api/storefront/public/${storeUrl.value}`)
     if (res.status === 404) {
       notFound.value = true
