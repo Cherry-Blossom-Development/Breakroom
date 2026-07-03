@@ -91,8 +91,19 @@
       <section class="troubleshoot-card">
         <h2>Common issues when adding these records</h2>
         <p class="card-hint">
-          Registrars vary, but these two problems come up most often when connecting a domain:
+          Registrars vary, but these problems come up most often when connecting a domain:
         </p>
+
+        <div class="notice">
+          <strong>"My domain shows a 'Parked' record I never set up"</strong>
+          <p>
+            If you just bought this domain (or never pointed it anywhere), GoDaddy and other registrars
+            often auto-create a <strong>Parked</strong> record or forwarding rule at the <code>@</code>
+            host that sends visitors to a placeholder page. It occupies the same slot the new A record
+            needs, so delete it first (check both the DNS records list and any separate
+            <strong>Forwarding</strong> section), then add the A record for <code>@</code>.
+          </p>
+        </div>
 
         <div class="notice">
           <strong>"My registrar won't let me add the record — it says one already exists"</strong>
