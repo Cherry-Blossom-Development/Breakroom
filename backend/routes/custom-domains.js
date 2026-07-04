@@ -144,7 +144,7 @@ router.get('/', authenticate, async (req, res) => {
   try {
     client = await getClient();
 
-    let query = `SELECT id, domain, status, error_message, activated_at, created_at, updated_at
+    let query = `SELECT id, domain, status, error_message, dns_confirmed_at, activated_at, created_at, updated_at
        FROM custom_domains WHERE user_id = $1 AND status != 'removing'`;
     const params = [req.user.id];
 
@@ -168,6 +168,28 @@ router.get('/', authenticate, async (req, res) => {
     res.json(rows);
   } catch (err) {
     console.error('Failed to fetch custom domains:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// PUT /api/custom-domains/:id/confirm-dns — user asserts they've added the DNS records;
+// starts (or restarts) the 48-hour reference window shown in the UI.
+router.put('/:id/confirm-dns', authenticate, async (req, res) => {
+  let client;
+  try {
+    client = await getClient();
+    const result = await client.query(
+      `UPDATE custom_domains SET dns_confirmed_at = NOW() WHERE id = $1 AND user_id = $2`,
+      [req.params.id, req.user.id]
+    );
+    if (result.affectedRows === 0) return res.status(404).json({ message: 'Domain not found' });
+
+    const row = await client.query(`SELECT dns_confirmed_at FROM custom_domains WHERE id = $1`, [req.params.id]);
+    res.json({ dns_confirmed_at: row.rows[0].dns_confirmed_at });
+  } catch (err) {
+    console.error('Failed to confirm DNS:', err);
     res.status(500).json({ message: 'Server error' });
   } finally {
     if (client) client.release();

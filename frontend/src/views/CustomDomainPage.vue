@@ -69,6 +69,26 @@
                 </tbody>
               </table>
               <p class="dns-note">DNS changes can take anywhere from a few minutes to a few hours to take effect. This page checks automatically — no need to refresh.</p>
+
+              <div class="dns-confirm">
+                <template v-if="!d.dns_confirmed_at">
+                  <button class="btn-secondary-sm" :disabled="confirmingId === d.id" @click="confirmDns(d)">
+                    {{ confirmingId === d.id ? 'Saving…' : "I've set these DNS records" }}
+                  </button>
+                  <p class="dns-confirm-hint">Click once you've added both records — we'll track how long it's been.</p>
+                </template>
+                <template v-else>
+                  <p class="dns-elapsed" :class="{ overdue: isOverdue(d) }">
+                    {{ elapsedLabel(d) }} since you confirmed your DNS settings —
+                    {{ isOverdue(d)
+                      ? "that's longer than the normal 48-hour window. Double-check the records above, or reach out for help."
+                      : 'this can take up to 48 hours.' }}
+                  </p>
+                  <button class="link-toggle" :disabled="confirmingId === d.id" @click="confirmDns(d)">
+                    I've updated my records again — restart the timer
+                  </button>
+                </template>
+              </div>
             </div>
 
             <div v-else-if="d.status === 'provisioning'" class="dns-hint">
@@ -129,6 +149,17 @@
             If your registrar still won't allow an A record there, a CNAME pointing <code>www</code> back
             to your bare domain (e.g. <code>CNAME www → yourdomain.com</code>) works just as well — we
             check for either.
+          </p>
+        </div>
+
+        <div class="notice">
+          <strong>"It works in Chrome but shows a blank page in Microsoft Edge"</strong>
+          <p>
+            This is expected for the first day or two on a brand-new domain, and isn't something wrong with
+            your setup. Microsoft Edge checks new, unfamiliar domains against Microsoft Defender SmartScreen
+            before loading them, and very new domains sometimes get held in a pending state with no visible
+            error while that check runs. It clears up on its own as the domain sees normal traffic — no action
+            needed. Chrome doesn't use SmartScreen, which is why it works there immediately.
           </p>
         </div>
       </section>
@@ -246,8 +277,13 @@ const submitError = ref('')
 const removingId = ref(null)
 const copiedValue = ref('')
 const showManualGuide = ref(false)
+const confirmingId = ref(null)
+const now = ref(Date.now())
+
+const DNS_WINDOW_HOURS = 48
 
 let pollInterval = null
+let clockInterval = null
 
 const STATUS_LABELS = {
   pending_dns: 'Pending DNS',
@@ -291,11 +327,47 @@ function maybePoll() {
 onMounted(async () => {
   await fetchDomains()
   maybePoll()
+  clockInterval = setInterval(() => { now.value = Date.now() }, 60000)
 })
 
 onUnmounted(() => {
   if (pollInterval) clearInterval(pollInterval)
+  if (clockInterval) clearInterval(clockInterval)
 })
+
+function hoursSince(d) {
+  if (!d.dns_confirmed_at) return 0
+  return (now.value - new Date(d.dns_confirmed_at).getTime()) / 3600000
+}
+
+function isOverdue(d) {
+  return hoursSince(d) >= DNS_WINDOW_HOURS
+}
+
+function elapsedLabel(d) {
+  const hours = hoursSince(d)
+  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))} minute(s)`
+  if (hours < 24) return `${Math.round(hours)} hour(s)`
+  const days = Math.floor(hours / 24)
+  const rem = Math.round(hours % 24)
+  return `${days} day(s)${rem ? `, ${rem} hour(s)` : ''}`
+}
+
+async function confirmDns(d) {
+  confirmingId.value = d.id
+  try {
+    const res = await authFetch(`/api/custom-domains/${d.id}/confirm-dns`, { method: 'PUT' })
+    if (res.ok) {
+      const body = await res.json()
+      d.dns_confirmed_at = body.dns_confirmed_at
+      now.value = Date.now()
+    }
+  } catch {
+    // Leave the previous state in place on a transient error — user can just click again.
+  } finally {
+    confirmingId.value = null
+  }
+}
 
 async function submitDomain() {
   const domain = newDomain.value.trim()
@@ -528,6 +600,40 @@ code {
   font-size: 0.82rem;
   color: var(--color-text-secondary);
   margin: 10px 0 0;
+}
+
+.dns-confirm {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-border);
+}
+
+.btn-secondary-sm {
+  background: none;
+  border: 1px solid var(--color-accent);
+  color: var(--color-accent);
+  border-radius: 6px;
+  padding: 7px 14px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-secondary-sm:hover { background: var(--color-accent); color: white; }
+.btn-secondary-sm:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.dns-confirm-hint {
+  font-size: 0.8rem;
+  color: var(--color-text-secondary);
+  margin: 8px 0 0;
+}
+
+.dns-elapsed {
+  font-size: 0.87rem;
+  color: var(--color-text-secondary);
+  margin: 0 0 8px;
+}
+.dns-elapsed.overdue {
+  color: #c53030;
 }
 
 .dns-table {
