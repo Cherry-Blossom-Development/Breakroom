@@ -148,6 +148,12 @@ async function dnsMatches(domain) {
 async function issueCertificate(domain, includeWww) {
   const args = [
     'certonly', '--nginx', '--non-interactive', '--agree-tos',
+    // Pin to the classic chain (E-series/R-series -> ISRG Root X1 directly).
+    // Without this, Let's Encrypt's default "Generation Y" chain (Root YE,
+    // cross-signed up to X1) validates fine in Chrome (bundled root store)
+    // but can hang/fail in Edge, which relies on the OS trust store and may
+    // not yet have the newer cross-signed roots cached.
+    '--preferred-chain', 'ISRG Root X1',
     '-m', CERTBOT_EMAIL,
     '-d', domain,
   ];

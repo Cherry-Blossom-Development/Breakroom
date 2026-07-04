@@ -9,10 +9,10 @@
 
 customdomain ALL=(root) NOPASSWD: /usr/sbin/nginx -t
 customdomain ALL=(root) NOPASSWD: /usr/bin/systemctl reload nginx
-customdomain ALL=(root) NOPASSWD: /usr/bin/certbot certonly --nginx --non-interactive --agree-tos -m * -d * -d *
-customdomain ALL=(root) NOPASSWD: /usr/bin/certbot certonly --nginx --non-interactive --agree-tos -m * -d *
-customdomain ALL=(root) NOPASSWD: /usr/bin/certbot certonly --nginx --non-interactive --agree-tos -m * -d * -d * --staging
-customdomain ALL=(root) NOPASSWD: /usr/bin/certbot certonly --nginx --non-interactive --agree-tos -m * -d * --staging
+customdomain ALL=(root) NOPASSWD: /usr/bin/certbot certonly --nginx --non-interactive --agree-tos --preferred-chain "ISRG Root X1" -m * -d * -d *
+customdomain ALL=(root) NOPASSWD: /usr/bin/certbot certonly --nginx --non-interactive --agree-tos --preferred-chain "ISRG Root X1" -m * -d *
+customdomain ALL=(root) NOPASSWD: /usr/bin/certbot certonly --nginx --non-interactive --agree-tos --preferred-chain "ISRG Root X1" -m * -d * -d * --staging
+customdomain ALL=(root) NOPASSWD: /usr/bin/certbot certonly --nginx --non-interactive --agree-tos --preferred-chain "ISRG Root X1" -m * -d * --staging
 customdomain ALL=(root) NOPASSWD: /usr/bin/cp /tmp/*.conf.*.tmp /etc/nginx/conf.d/.*.conf.tmp
 customdomain ALL=(root) NOPASSWD: /usr/bin/mv /etc/nginx/conf.d/.*.conf.tmp /etc/nginx/conf.d/*.conf
 customdomain ALL=(root) NOPASSWD: /usr/bin/rm -f /etc/nginx/conf.d/*.conf

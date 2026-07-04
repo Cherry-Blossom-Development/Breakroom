@@ -96,3 +96,14 @@ explanatory comment, and two rounds of `ProtectSystem=strict` sandboxing
 blocking `nginx -t` and `certbot` from writing their own logs/pidfile/
 lockfile. Both are fixed in the versions of those files now in this repo,
 so a fresh install following this README should not hit either again.
+
+**Update 2026-07-04**: Both `carolearts.com` and `stationsofthesun.com` were
+issued on Let's Encrypt's newer "Generation Y" chain (`Root YE`, cross-signed
+up to `ISRG Root X1`) since the script didn't pin a chain preference. That
+chain validates fine in Chrome (bundled root store) but hung/failed in Edge
+on Windows (relies on the OS trust store, which may not yet cache the new
+cross-signed roots). Fixed by adding `--preferred-chain "ISRG Root X1"` to
+the certbot call in `custom-domain-agent.js` (and the matching `sudoers`
+entries), then force-renewing both existing certs on the classic chain —
+same chain `prosaurus.com` already uses. A fresh install following this
+README now gets the compatible chain from the start.
