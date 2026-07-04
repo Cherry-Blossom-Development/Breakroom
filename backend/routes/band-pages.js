@@ -8,7 +8,7 @@ router.get('/:bandUrl', async (req, res) => {
   const client = await getClient();
   try {
     const page = await client.query(
-      `SELECT bp.band_id, bp.story, bp.background_photo_key, bp.favicon_key,
+      `SELECT bp.band_id, bp.story, bp.background_photo_key, bp.favicon_key, bp.background_color,
               b.name AS band_name
        FROM band_pages bp
        JOIN bands b ON b.id = bp.band_id
@@ -17,7 +17,7 @@ router.get('/:bandUrl', async (req, res) => {
     );
     if (page.rowCount === 0) return res.status(404).json({ message: 'Band page not found' });
 
-    const { band_id, story, background_photo_key, favicon_key, band_name } = page.rows[0];
+    const { band_id, story, background_photo_key, favicon_key, background_color, band_name } = page.rows[0];
 
     // Active members with their instruments
     const members = await client.query(
@@ -52,6 +52,7 @@ router.get('/:bandUrl', async (req, res) => {
       story,
       background_photo_url: getS3Url(background_photo_key),
       favicon_url: getS3Url(favicon_key),
+      background_color: background_color || null,
       members: members.rows.map(m => ({
         ...m,
         photo_url: m.photo_path ? `/api/uploads/${m.photo_path}` : null,

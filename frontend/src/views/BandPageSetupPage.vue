@@ -21,6 +21,7 @@ const page = reactive({
   background_photo_key: null,
   favicon_url: null,
   favicon_key: null,
+  background_color: '',
   is_published: false,
 })
 
@@ -36,6 +37,12 @@ const featuredSessionIds = computed(() =>
 const publicUrl = computed(() => {
   const base = import.meta.env.VITE_API_BASE_URL || ''
   return page.band_url ? `${base}/band/${page.band_url}` : null
+})
+
+const DEFAULT_BG_COLOR = '#1a1a2e'
+const bgColorPickerValue = computed({
+  get: () => page.background_color || DEFAULT_BG_COLOR,
+  set: (val) => { page.background_color = val }
 })
 
 // Background photo
@@ -62,6 +69,7 @@ onMounted(async () => {
       background_photo_key: data.background_photo_key,
       favicon_url: data.favicon_url,
       favicon_key: data.favicon_key,
+      background_color: data.background_color || '',
       is_published: data.is_published,
     })
     members.value = data.members
@@ -85,6 +93,7 @@ async function saveSettings() {
       body: JSON.stringify({
         band_url: page.band_url.trim().toLowerCase() || null,
         story: page.story.trim() || null,
+        background_color: page.background_color || null,
         is_published: page.is_published,
       })
     })
@@ -295,6 +304,23 @@ function moveSong(session, direction) {
             placeholder="Tell the world about your band — how you formed, your style, your journey…"
           />
         </div>
+        <div class="bps-field">
+          <label class="bps-label">Background Color</label>
+          <div class="bps-color-row">
+            <input type="color" v-model="bgColorPickerValue" class="bps-color-input" />
+            <input
+              type="text"
+              v-model="page.background_color"
+              class="text-input bps-color-text"
+              placeholder="#1a1a2e"
+              maxlength="7"
+            />
+            <button v-if="page.background_color" class="btn-ghost btn-sm" @click="page.background_color = ''">
+              Reset to default
+            </button>
+          </div>
+          <div class="bps-hint">Shown behind your page content (and behind the background photo, if set).</div>
+        </div>
         <button class="btn-primary" :disabled="saving" @click="saveSettings">
           {{ saving ? 'Saving…' : 'Save Settings' }}
         </button>
@@ -430,6 +456,10 @@ function moveSong(session, direction) {
 .bps-url-link { color: var(--color-accent); font-size: 0.85em; word-break: break-all; }
 
 .bps-textarea { width: 100%; box-sizing: border-box; min-height: 120px; padding: 10px; border: 1px solid var(--color-border-medium); border-radius: 6px; background: var(--color-background-input); color: var(--color-text); resize: vertical; font-family: inherit; font-size: 0.95em; }
+
+.bps-color-row { display: flex; align-items: center; gap: 10px; }
+.bps-color-input { width: 40px; height: 36px; padding: 0; border: 1px solid var(--color-border-medium); border-radius: 6px; cursor: pointer; background: none; }
+.bps-color-text { width: 110px; flex-shrink: 0; }
 
 .bps-published-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .toggle-switch { position: relative; display: inline-block; width: 46px; height: 26px; flex-shrink: 0; }

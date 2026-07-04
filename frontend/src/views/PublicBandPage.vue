@@ -87,7 +87,10 @@ function formatTime(s) {
     <!-- Background -->
     <div
       class="bp-bg"
-      :style="band?.background_photo_url ? `background-image: url(${band.background_photo_url})` : ''"
+      :style="{
+        backgroundImage: band?.background_photo_url ? `url(${band.background_photo_url})` : null,
+        backgroundColor: band?.background_color || null,
+      }"
     />
     <div class="bp-overlay" />
 

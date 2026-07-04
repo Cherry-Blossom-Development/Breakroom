@@ -510,7 +510,7 @@ router.get('/:id/page', authenticate, async (req, res) => {
     );
 
     const page = await client.query(
-      `SELECT bp.band_url, bp.story, bp.background_photo_key, bp.favicon_key, bp.is_published,
+      `SELECT bp.band_url, bp.story, bp.background_photo_key, bp.favicon_key, bp.background_color, bp.is_published,
               b.name AS band_name
        FROM band_pages bp
        JOIN bands b ON b.id = bp.band_id
@@ -558,6 +558,7 @@ router.get('/:id/page', authenticate, async (req, res) => {
       background_photo_key: p.background_photo_key,
       favicon_url: getS3Url(p.favicon_key),
       favicon_key: p.favicon_key,
+      background_color: p.background_color || '',
       is_published: !!p.is_published,
       members: members.rows.map(m => ({
         ...m,
@@ -575,7 +576,7 @@ router.get('/:id/page', authenticate, async (req, res) => {
   }
 });
 
-// PUT /api/bands/:id/page — update story, band_url, is_published
+// PUT /api/bands/:id/page — update story, band_url, background_color, is_published
 router.put('/:id/page', authenticate, async (req, res) => {
   const client = await getClient();
   try {
@@ -586,7 +587,7 @@ router.put('/:id/page', authenticate, async (req, res) => {
     if (membership.rowCount === 0 || membership.rows[0].role !== 'owner')
       return res.status(403).json({ message: 'Only the band owner can manage the band page' });
 
-    const { band_url, story, is_published } = req.body;
+    const { band_url, story, background_color, is_published } = req.body;
 
     if (band_url !== undefined) {
       if (!/^[a-z0-9-]+$/.test(band_url))
@@ -600,11 +601,15 @@ router.put('/:id/page', authenticate, async (req, res) => {
         return res.status(409).json({ message: 'That URL is already taken' });
     }
 
+    if (background_color && !/^#[0-9a-fA-F]{6}$/.test(background_color))
+      return res.status(400).json({ message: 'Background color must be a hex value like #1a1a2e' });
+
     const fields = [];
     const values = [];
     let idx = 1;
     if (band_url !== undefined) { fields.push(`band_url = $${idx++}`); values.push(band_url || null); }
     if (story !== undefined) { fields.push(`story = $${idx++}`); values.push(story || null); }
+    if (background_color !== undefined) { fields.push(`background_color = $${idx++}`); values.push(background_color || null); }
     if (is_published !== undefined) { fields.push(`is_published = $${idx++}`); values.push(is_published ? 1 : 0); }
     if (fields.length === 0) return res.status(400).json({ message: 'Nothing to update' });
 
