@@ -19,6 +19,8 @@ const page = reactive({
   story: '',
   background_photo_url: null,
   background_photo_key: null,
+  favicon_url: null,
+  favicon_key: null,
   is_published: false,
 })
 
@@ -40,6 +42,10 @@ const publicUrl = computed(() => {
 const bgUploading = ref(false)
 const bgFileInput = ref(null)
 
+// Favicon
+const faviconUploading = ref(false)
+const faviconFileInput = ref(null)
+
 // Instrument saving state per member
 const instrumentSaving = reactive({})
 
@@ -54,6 +60,8 @@ onMounted(async () => {
       story: data.story,
       background_photo_url: data.background_photo_url,
       background_photo_key: data.background_photo_key,
+      favicon_url: data.favicon_url,
+      favicon_key: data.favicon_key,
       is_published: data.is_published,
     })
     members.value = data.members
@@ -124,6 +132,42 @@ async function removeBackground() {
     saveError.value = err.message
   } finally {
     bgUploading.value = false
+  }
+}
+
+async function uploadFavicon(e) {
+  const file = e.target.files[0]
+  if (!file) return
+  faviconUploading.value = true
+  saveError.value = null
+  try {
+    const form = new FormData()
+    form.append('favicon', file)
+    const res = await authFetch(`/api/bands/${bandId}/page/favicon`, { method: 'POST', body: form })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message)
+    page.favicon_url = data.favicon_url
+    page.favicon_key = data.favicon_key
+  } catch (err) {
+    saveError.value = err.message
+  } finally {
+    faviconUploading.value = false
+    if (faviconFileInput.value) faviconFileInput.value.value = ''
+  }
+}
+
+async function removeFavicon() {
+  if (!confirm('Remove favicon?')) return
+  faviconUploading.value = true
+  try {
+    const res = await authFetch(`/api/bands/${bandId}/page/favicon`, { method: 'DELETE' })
+    if (!res.ok) { const d = await res.json(); throw new Error(d.message) }
+    page.favicon_url = null
+    page.favicon_key = null
+  } catch (err) {
+    saveError.value = err.message
+  } finally {
+    faviconUploading.value = false
   }
 }
 
@@ -274,6 +318,25 @@ function moveSong(session, direction) {
         </div>
       </div>
 
+      <!-- ── Favicon ── -->
+      <div class="bps-card">
+        <div class="bps-section-title">Favicon</div>
+        <div class="bps-hint">Shown as the browser tab icon on your public band page. Use a square image (512x512 or smaller), PNG or ICO.</div>
+        <div v-if="page.favicon_url" class="bps-favicon-preview-wrap">
+          <img :src="page.favicon_url" alt="Favicon" class="bps-favicon-preview" />
+          <button class="btn-ghost btn-sm" :disabled="faviconUploading" @click="removeFavicon">
+            Remove
+          </button>
+        </div>
+        <div v-else class="bps-bg-placeholder">No favicon set — visitors see the default Prosaurus icon.</div>
+        <div class="bps-field">
+          <input ref="faviconFileInput" type="file" accept="image/png,image/jpeg,image/webp,image/x-icon,.ico" class="bps-file-input" id="favicon-upload" @change="uploadFavicon" :disabled="faviconUploading" />
+          <label for="favicon-upload" class="btn-secondary bps-upload-label" :class="{ disabled: faviconUploading }">
+            {{ faviconUploading ? 'Uploading…' : page.favicon_url ? 'Replace Favicon' : 'Upload Favicon' }}
+          </label>
+        </div>
+      </div>
+
       <!-- ── Members & Instruments ── -->
       <div class="bps-card">
         <div class="bps-section-title">Members &amp; Instruments</div>
@@ -378,6 +441,8 @@ function moveSong(session, direction) {
 
 .bps-bg-preview-wrap { position: relative; margin-bottom: 12px; }
 .bps-bg-preview { width: 100%; max-height: 200px; object-fit: cover; border-radius: 8px; }
+.bps-favicon-preview-wrap { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.bps-favicon-preview { width: 64px; height: 64px; object-fit: cover; border-radius: 8px; border: 1px solid var(--color-border); }
 .bps-bg-remove { position: absolute; top: 8px; right: 8px; background: rgba(0,0,0,.5); color: white; border: none; }
 .bps-bg-placeholder { color: var(--color-text-muted); font-size: 0.9em; margin-bottom: 12px; }
 .bps-file-input { display: none; }

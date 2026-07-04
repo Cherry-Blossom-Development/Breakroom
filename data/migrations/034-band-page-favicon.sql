@@ -1,0 +1,1 @@
+ALTER TABLE band_pages ADD COLUMN favicon_key VARCHAR(500) NULL;

@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { setFavicon, resetFavicon } from '@/utilities/favicon'
 
 const props = defineProps({
   resolvedBandUrl: { type: String, default: null },
@@ -27,12 +28,15 @@ onMounted(async () => {
     const data = await res.json()
     if (!res.ok) { notFound.value = true; return }
     band.value = data
+    if (data.favicon_url) setFavicon(data.favicon_url)
   } catch {
     notFound.value = true
   } finally {
     loading.value = false
   }
 })
+
+onUnmounted(() => resetFavicon())
 
 function playSong(songId) {
   if (currentSongId.value === songId) {
@@ -169,7 +173,7 @@ function formatTime(s) {
         <audio
           v-if="currentSongId"
           ref="audioEl"
-          :src="`/api/band-page/${bandUrl.value}/songs/${currentSongId}/stream`"
+          :src="`/api/band-page/${bandUrl}/songs/${currentSongId}/stream`"
           @timeupdate="onTimeUpdate"
           @durationchange="onDurationChange"
           @ended="onEnded"

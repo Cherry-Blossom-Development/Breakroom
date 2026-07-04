@@ -20,6 +20,16 @@ const imageUpload = multer({
   }
 });
 
+const faviconUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ok = /ico|png|jpeg|jpg|webp/.test(path.extname(file.originalname).toLowerCase())
+             && /(x-icon|vnd\.microsoft\.icon|png|jpeg|webp)/.test(file.mimetype);
+    cb(ok ? null : new Error('Only ico, png, jpeg, or webp files are allowed'), ok);
+  }
+});
+
 require('dotenv').config();
 const SECRET_KEY = process.env.SECRET_KEY;
 
@@ -500,7 +510,7 @@ router.get('/:id/page', authenticate, async (req, res) => {
     );
 
     const page = await client.query(
-      `SELECT bp.band_url, bp.story, bp.background_photo_key, bp.is_published,
+      `SELECT bp.band_url, bp.story, bp.background_photo_key, bp.favicon_key, bp.is_published,
               b.name AS band_name
        FROM band_pages bp
        JOIN bands b ON b.id = bp.band_id
@@ -546,6 +556,8 @@ router.get('/:id/page', authenticate, async (req, res) => {
       story: p.story || '',
       background_photo_url: getS3Url(p.background_photo_key),
       background_photo_key: p.background_photo_key,
+      favicon_url: getS3Url(p.favicon_key),
+      favicon_key: p.favicon_key,
       is_published: !!p.is_published,
       members: members.rows.map(m => ({
         ...m,
@@ -660,6 +672,64 @@ router.delete('/:id/page/background', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Error removing band background:', err);
     res.status(500).json({ message: 'Failed to remove background' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/bands/:id/page/favicon — upload favicon
+router.post('/:id/page/favicon', authenticate, faviconUpload.single('favicon'), async (req, res) => {
+  const client = await getClient();
+  try {
+    const membership = await client.query(
+      `SELECT role FROM band_members WHERE band_id = $1 AND user_id = $2 AND status = 'active'`,
+      [req.params.id, req.user.id]
+    );
+    if (membership.rowCount === 0 || membership.rows[0].role !== 'owner')
+      return res.status(403).json({ message: 'Only the band owner can manage the band page' });
+
+    if (!req.file) return res.status(400).json({ message: 'No image file provided' });
+
+    // Delete old favicon if it exists
+    const existing = await client.query(`SELECT favicon_key FROM band_pages WHERE band_id = $1`, [req.params.id]);
+    if (existing.rowCount > 0 && existing.rows[0].favicon_key)
+      await deleteFromS3(existing.rows[0].favicon_key);
+
+    const ext = path.extname(req.file.originalname).toLowerCase() || '.png';
+    const key = `band-favicons/band_${req.params.id}_${Date.now()}${ext}`;
+    const result = await uploadToS3(req.file.buffer, key, req.file.mimetype);
+    if (!result.success) return res.status(500).json({ message: 'Image upload failed' });
+
+    await client.query(`UPDATE band_pages SET favicon_key = $1 WHERE band_id = $2`, [key, req.params.id]);
+    res.json({ favicon_url: getS3Url(key), favicon_key: key });
+  } catch (err) {
+    console.error('Error uploading band favicon:', err);
+    res.status(500).json({ message: 'Failed to upload favicon' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/bands/:id/page/favicon — remove favicon
+router.delete('/:id/page/favicon', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const membership = await client.query(
+      `SELECT role FROM band_members WHERE band_id = $1 AND user_id = $2 AND status = 'active'`,
+      [req.params.id, req.user.id]
+    );
+    if (membership.rowCount === 0 || membership.rows[0].role !== 'owner')
+      return res.status(403).json({ message: 'Only the band owner can manage the band page' });
+
+    const existing = await client.query(`SELECT favicon_key FROM band_pages WHERE band_id = $1`, [req.params.id]);
+    if (existing.rowCount > 0 && existing.rows[0].favicon_key)
+      await deleteFromS3(existing.rows[0].favicon_key);
+
+    await client.query(`UPDATE band_pages SET favicon_key = NULL WHERE band_id = $1`, [req.params.id]);
+    res.json({ message: 'Favicon removed' });
+  } catch (err) {
+    console.error('Error removing band favicon:', err);
+    res.status(500).json({ message: 'Failed to remove favicon' });
   } finally {
     client.release();
   }
