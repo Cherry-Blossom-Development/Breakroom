@@ -1,5 +1,6 @@
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
+import draggable from 'vuedraggable'
 import { sessions } from '@/stores/sessions'
 import { authFetch } from '@/utilities/authFetch'
 import { buildDevicePayload } from '@/utilities/deviceId'
@@ -139,6 +140,14 @@ const invitingEmail = ref(false)
 const editingBandName = ref(false)
 const editBandNameValue = ref('')
 
+// Set Lists
+const setlists = ref([])
+const setlistsLoading = ref(false)
+const setlistsError = ref(null)
+const showCreateSetlist = ref(false)
+const newSetlistName = ref('')
+const newSongInputs = reactive({}) // { [setlistId]: string }
+
 async function loadBands() {
   bandsLoading.value = true
   bandsError.value = null
@@ -161,11 +170,106 @@ async function loadBandDetail(id) {
     const data = await res.json()
     if (!res.ok) throw new Error(data.message)
     activeBand.value = data.band
+    loadSetlists(id)
   } catch (err) {
     bandsError.value = err.message
   } finally {
     activeBandLoading.value = false
   }
+}
+
+async function loadSetlists(bandId) {
+  setlistsLoading.value = true
+  setlistsError.value = null
+  try {
+    const res = await authFetch(`/api/bands/${bandId}/setlists`)
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message)
+    setlists.value = data.setlists
+  } catch (err) {
+    setlistsError.value = err.message
+  } finally {
+    setlistsLoading.value = false
+  }
+}
+
+function startCreateSetlist() {
+  newSetlistName.value = new Date().toISOString().split('T')[0]
+  showCreateSetlist.value = true
+}
+
+async function createSetlist() {
+  if (!newSetlistName.value.trim()) return
+  try {
+    const res = await authFetch(`/api/bands/${activeBand.value.id}/setlists`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newSetlistName.value.trim() })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message)
+    setlists.value.unshift(data.setlist)
+    newSetlistName.value = ''
+    showCreateSetlist.value = false
+  } catch (err) {
+    setlistsError.value = err.message
+  }
+}
+
+async function deleteSetlist(setlistId) {
+  if (!confirm('Delete this set list? This cannot be undone.')) return
+  try {
+    const res = await authFetch(`/api/bands/${activeBand.value.id}/setlists/${setlistId}`, { method: 'DELETE' })
+    if (!res.ok) { const d = await res.json(); throw new Error(d.message) }
+    setlists.value = setlists.value.filter(sl => sl.id !== setlistId)
+  } catch (err) {
+    setlistsError.value = err.message
+  }
+}
+
+async function renameSetlist(setlist, newName) {
+  const trimmed = newName.trim()
+  if (!trimmed || trimmed === setlist.name) return
+  try {
+    const res = await authFetch(`/api/bands/${activeBand.value.id}/setlists/${setlist.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: trimmed })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message)
+    setlist.name = data.setlist.name
+  } catch (err) {
+    setlistsError.value = err.message
+  }
+}
+
+async function saveSongs(setlist) {
+  try {
+    const res = await authFetch(`/api/bands/${activeBand.value.id}/setlists/${setlist.id}/songs`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ songs: setlist.songs })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message)
+    setlist.songs = data.songs
+  } catch (err) {
+    setlistsError.value = err.message
+  }
+}
+
+function addSong(setlist) {
+  const name = (newSongInputs[setlist.id] || '').trim()
+  if (!name) return
+  setlist.songs.push(name)
+  newSongInputs[setlist.id] = ''
+  saveSongs(setlist)
+}
+
+function removeSong(setlist, index) {
+  setlist.songs.splice(index, 1)
+  saveSongs(setlist)
 }
 
 async function createBand() {
@@ -198,7 +302,7 @@ async function deleteBand(id) {
     const res = await authFetch(`/api/bands/${id}`, { method: 'DELETE' })
     if (!res.ok) { const d = await res.json(); throw new Error(d.message) }
     bands.value = bands.value.filter(b => b.id !== id)
-    if (activeBand.value?.id === id) activeBand.value = null
+    if (activeBand.value?.id === id) { activeBand.value = null; setlists.value = [] }
   } catch (err) {
     bandsError.value = err.message
   }
@@ -326,6 +430,27 @@ const sessionName = ref('')
 const recordedAt = ref(new Date().toISOString().split('T')[0])
 const uploadBandId = ref('')
 const fileInput = ref(null)
+
+// --- Session name autocomplete (from band set lists) ---
+const practiceSongOptions = ref([])
+const showSessionNameDropdown = ref(false)
+const filteredSongOptions = computed(() => {
+  const q = sessionName.value.trim().toLowerCase()
+  return q ? practiceSongOptions.value.filter(s => s.toLowerCase().includes(q)) : practiceSongOptions.value
+})
+watch(uploadBandId, async (bandId) => {
+  practiceSongOptions.value = []
+  if (!bandId) return
+  try {
+    const res = await authFetch(`/api/bands/${bandId}/setlists`)
+    const data = await res.json()
+    if (res.ok) {
+      const names = new Set()
+      data.setlists.forEach(sl => sl.songs.forEach(s => names.add(s)))
+      practiceSongOptions.value = [...names].sort()
+    }
+  } catch { /* non-critical */ }
+})
 
 // --- Individual upload state ---
 const indivUploading = ref(false)
@@ -1882,6 +2007,66 @@ onMounted(async () => {
               <div v-if="activeBand.members.length === 0" class="empty-state-sm">No members yet.</div>
             </div>
 
+            <!-- Set Lists -->
+            <div class="setlists-section">
+              <div class="setlists-header">
+                <h3 class="form-section-title">Set Lists</h3>
+                <button class="btn-primary btn-sm" @click="showCreateSetlist ? (showCreateSetlist = false) : startCreateSetlist()">
+                  {{ showCreateSetlist ? 'Cancel' : '+ New Set List' }}
+                </button>
+              </div>
+              <div v-if="setlistsError" class="error-msg">{{ setlistsError }}</div>
+
+              <div v-if="showCreateSetlist" class="card create-setlist-card">
+                <label class="field-label">Set List Name</label>
+                <input v-model="newSetlistName" class="text-input" maxlength="255" @keyup.enter="createSetlist" />
+                <button class="btn-primary btn-sm" :disabled="!newSetlistName.trim()" @click="createSetlist">Create</button>
+              </div>
+
+              <div v-if="setlistsLoading" class="empty-state-sm">Loading…</div>
+              <div v-else-if="setlists.length === 0 && !showCreateSetlist" class="empty-state-sm">No set lists yet.</div>
+
+              <div v-for="setlist in setlists" :key="setlist.id" class="card setlist-card">
+                <div class="setlist-card-header">
+                  <input
+                    class="text-input setlist-name-input"
+                    :value="setlist.name"
+                    @blur="e => renameSetlist(setlist, e.target.value)"
+                    @keydown.enter="e => e.target.blur()"
+                  />
+                  <button class="btn-ghost btn-sm btn-remove" @click="deleteSetlist(setlist.id)">Delete</button>
+                </div>
+
+                <draggable
+                  v-model="setlist.songs"
+                  :item-key="(_, index) => index"
+                  handle=".drag-handle"
+                  class="setlist-songs-list"
+                  :animation="150"
+                  @end="saveSongs(setlist)"
+                >
+                  <template #item="{ element: song, index }">
+                    <div class="setlist-song-row">
+                      <span class="drag-handle" title="Drag to reorder">⋮⋮</span>
+                      <span class="setlist-song-name">{{ song }}</span>
+                      <button class="btn-ghost btn-sm btn-remove" @click="removeSong(setlist, index)">Remove</button>
+                    </div>
+                  </template>
+                </draggable>
+                <div v-if="setlist.songs.length === 0" class="empty-state-sm">No songs yet.</div>
+
+                <div class="add-song-row">
+                  <input
+                    v-model="newSongInputs[setlist.id]"
+                    class="text-input"
+                    placeholder="Add a song…"
+                    @keyup.enter="addSong(setlist)"
+                  />
+                  <button class="btn-primary btn-sm" @click="addSong(setlist)">Add</button>
+                </div>
+              </div>
+            </div>
+
             <!-- Band Page link (owners only) -->
             <div v-if="activeBand.my_role === 'owner'" class="band-page-link-row">
               <RouterLink :to="`/band-setup/${activeBand.id}`" class="btn-secondary btn-sm band-page-btn">
@@ -1950,8 +2135,18 @@ onMounted(async () => {
         <div class="fields-row">
           <div class="field">
             <label class="field-label">Name</label>
-            <input v-model="sessionName" type="text" class="text-input"
-                   placeholder="Session name" :disabled="uploading" />
+            <div class="autocomplete-container">
+              <input v-model="sessionName" type="text" class="text-input"
+                     placeholder="Session name" :disabled="uploading"
+                     @focus="showSessionNameDropdown = true"
+                     @blur="showSessionNameDropdown = false" />
+              <ul v-if="showSessionNameDropdown && filteredSongOptions.length > 0" class="autocomplete-dropdown">
+                <li v-for="song in filteredSongOptions" :key="song"
+                    @mousedown.prevent="sessionName = song; showSessionNameDropdown = false">
+                  {{ song }}
+                </li>
+              </ul>
+            </div>
           </div>
           <div class="field">
             <label class="field-label">Original recording date <span class="optional">(optional)</span></label>
@@ -2248,8 +2443,7 @@ onMounted(async () => {
 
 /* Bands tab */
 .bands-area { display: flex; flex-direction: column; gap: 16px; }
-.bands-layout { display: grid; grid-template-columns: 280px 1fr; gap: 16px; align-items: start; }
-@media (max-width: 768px) { .bands-layout { grid-template-columns: 1fr; } }
+.bands-layout { display: flex; flex-direction: column; gap: 16px; }
 
 .bands-list-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .bands-list-header .card-title { margin: 0; }
@@ -2287,6 +2481,30 @@ onMounted(async () => {
 
 .band-page-link-row { margin-bottom: 16px; }
 .band-page-btn { font-size: 0.85em; }
+
+.setlists-section { border-top: 1px solid var(--color-border); padding-top: 20px; margin-bottom: 20px; }
+.setlists-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.setlists-header .form-section-title { margin: 0; }
+.create-setlist-card { padding: 12px 16px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.setlist-card { padding: 16px; margin-bottom: 12px; }
+.setlist-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.setlist-name-input { flex: 1; font-weight: 600; }
+.setlist-songs-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.setlist-song-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 6px; background: var(--color-background); }
+.setlist-song-name { flex: 1; }
+.drag-handle { cursor: grab; color: var(--color-text-muted); letter-spacing: -2px; }
+.add-song-row { display: flex; gap: 8px; }
+.add-song-row .text-input { flex: 1; }
+
+.autocomplete-container { position: relative; }
+.autocomplete-dropdown {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+  background: var(--color-background-card); border: 1px solid var(--color-border);
+  border-radius: 6px; margin-top: 4px; max-height: 180px; overflow-y: auto;
+  list-style: none; padding: 4px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+.autocomplete-dropdown li { padding: 8px 12px; cursor: pointer; font-size: 0.9em; }
+.autocomplete-dropdown li:hover { background: var(--color-background-hover); }
 .invite-section { border-top: 1px solid var(--color-border); padding-top: 20px; }
 .invite-row { display: flex; gap: 10px; align-items: center; }
 .invite-row .text-input { flex: 1; }

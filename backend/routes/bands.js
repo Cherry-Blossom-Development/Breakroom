@@ -490,6 +490,157 @@ router.delete('/:id/members/:userId', authenticate, async (req, res) => {
   }
 });
 
+// ─── Set Lists (any active member) ───────────────────────────────────────────
+
+function parseSetlist(row) {
+  let songs = [];
+  try { songs = row.songs ? JSON.parse(row.songs) : []; } catch { songs = []; }
+  return { ...row, songs };
+}
+
+// GET /api/bands/:id/setlists — list all set lists for a band
+router.get('/:id/setlists', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const membership = await client.query(
+      `SELECT id FROM band_members WHERE band_id = $1 AND user_id = $2 AND status = 'active'`,
+      [req.params.id, req.user.id]
+    );
+    if (membership.rowCount === 0) return res.status(403).json({ message: 'Not a member of this band' });
+
+    const result = await client.query(
+      `SELECT id, band_id, name, songs, created_at, updated_at FROM band_setlists WHERE band_id = $1 ORDER BY created_at DESC`,
+      [req.params.id]
+    );
+    res.json({ setlists: result.rows.map(parseSetlist) });
+  } catch (err) {
+    console.error('Error fetching set lists:', err);
+    res.status(500).json({ message: 'Failed to fetch set lists' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/bands/:id/setlists — create a new (empty) set list
+router.post('/:id/setlists', authenticate, async (req, res) => {
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ message: 'Set list name is required' });
+
+  const client = await getClient();
+  try {
+    const membership = await client.query(
+      `SELECT id FROM band_members WHERE band_id = $1 AND user_id = $2 AND status = 'active'`,
+      [req.params.id, req.user.id]
+    );
+    if (membership.rowCount === 0) return res.status(403).json({ message: 'Not a member of this band' });
+
+    const insert = await client.query(
+      'INSERT INTO band_setlists (band_id, name, songs, created_by) VALUES ($1, $2, $3, $4)',
+      [req.params.id, name.trim(), JSON.stringify([]), req.user.id]
+    );
+    const setlist = await client.query(
+      'SELECT id, band_id, name, songs, created_at, updated_at FROM band_setlists WHERE id = $1',
+      [insert.insertId]
+    );
+    res.status(201).json({ setlist: parseSetlist(setlist.rows[0]) });
+  } catch (err) {
+    console.error('Error creating set list:', err);
+    res.status(500).json({ message: 'Failed to create set list' });
+  } finally {
+    client.release();
+  }
+});
+
+// PATCH /api/bands/:id/setlists/:setlistId — rename a set list
+router.patch('/:id/setlists/:setlistId', authenticate, async (req, res) => {
+  const { name } = req.body;
+  if (!name || !name.trim()) return res.status(400).json({ message: 'Set list name is required' });
+
+  const client = await getClient();
+  try {
+    const membership = await client.query(
+      `SELECT id FROM band_members WHERE band_id = $1 AND user_id = $2 AND status = 'active'`,
+      [req.params.id, req.user.id]
+    );
+    if (membership.rowCount === 0) return res.status(403).json({ message: 'Not a member of this band' });
+
+    const existing = await client.query(
+      'SELECT id FROM band_setlists WHERE id = $1 AND band_id = $2',
+      [req.params.setlistId, req.params.id]
+    );
+    if (existing.rowCount === 0) return res.status(404).json({ message: 'Set list not found' });
+
+    await client.query('UPDATE band_setlists SET name = $1 WHERE id = $2', [name.trim(), req.params.setlistId]);
+    const setlist = await client.query(
+      'SELECT id, band_id, name, songs, created_at, updated_at FROM band_setlists WHERE id = $1',
+      [req.params.setlistId]
+    );
+    res.json({ setlist: parseSetlist(setlist.rows[0]) });
+  } catch (err) {
+    console.error('Error renaming set list:', err);
+    res.status(500).json({ message: 'Failed to rename set list' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/bands/:id/setlists/:setlistId — delete a set list
+router.delete('/:id/setlists/:setlistId', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const membership = await client.query(
+      `SELECT id FROM band_members WHERE band_id = $1 AND user_id = $2 AND status = 'active'`,
+      [req.params.id, req.user.id]
+    );
+    if (membership.rowCount === 0) return res.status(403).json({ message: 'Not a member of this band' });
+
+    const existing = await client.query(
+      'SELECT id FROM band_setlists WHERE id = $1 AND band_id = $2',
+      [req.params.setlistId, req.params.id]
+    );
+    if (existing.rowCount === 0) return res.status(404).json({ message: 'Set list not found' });
+
+    await client.query('DELETE FROM band_setlists WHERE id = $1', [req.params.setlistId]);
+    res.json({ message: 'Set list deleted' });
+  } catch (err) {
+    console.error('Error deleting set list:', err);
+    res.status(500).json({ message: 'Failed to delete set list' });
+  } finally {
+    client.release();
+  }
+});
+
+// PUT /api/bands/:id/setlists/:setlistId/songs — replace the ordered song list
+router.put('/:id/setlists/:setlistId/songs', authenticate, async (req, res) => {
+  const { songs } = req.body;
+  if (!Array.isArray(songs) || !songs.every(s => typeof s === 'string'))
+    return res.status(400).json({ message: 'songs must be an array of strings' });
+
+  const client = await getClient();
+  try {
+    const membership = await client.query(
+      `SELECT id FROM band_members WHERE band_id = $1 AND user_id = $2 AND status = 'active'`,
+      [req.params.id, req.user.id]
+    );
+    if (membership.rowCount === 0) return res.status(403).json({ message: 'Not a member of this band' });
+
+    const existing = await client.query(
+      'SELECT id FROM band_setlists WHERE id = $1 AND band_id = $2',
+      [req.params.setlistId, req.params.id]
+    );
+    if (existing.rowCount === 0) return res.status(404).json({ message: 'Set list not found' });
+
+    const cleaned = songs.map(s => s.trim()).filter(Boolean);
+    await client.query('UPDATE band_setlists SET songs = $1 WHERE id = $2', [JSON.stringify(cleaned), req.params.setlistId]);
+    res.json({ songs: cleaned });
+  } catch (err) {
+    console.error('Error updating set list songs:', err);
+    res.status(500).json({ message: 'Failed to update songs' });
+  } finally {
+    client.release();
+  }
+});
+
 // ─── Band Page Management (owner only) ───────────────────────────────────────
 
 // GET /api/bands/:id/page — get (or auto-create) band page settings

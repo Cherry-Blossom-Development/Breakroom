@@ -1,0 +1,12 @@
+CREATE TABLE IF NOT EXISTS band_setlists (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  band_id INT NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  songs JSON,
+  created_by INT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_band_setlists_band FOREIGN KEY (band_id) REFERENCES bands(id) ON DELETE CASCADE,
+  CONSTRAINT fk_band_setlists_created_by FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE,
+  INDEX idx_band_setlists_band (band_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
