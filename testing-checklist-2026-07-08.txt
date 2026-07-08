@@ -1,0 +1,152 @@
+PROSAURUS / BREAKROOM - TESTING CHECKLIST
+Generated: 2026-07-08
+Covers changes since ~2026-06-28 (last cross-platform sync point) through today,
+across Web, Android, and iPhone. iPhone repo was behind origin by 4 commits;
+pulled to 383ac1f before writing this list.
+
+Check items off as you go. Items marked [ALL] should be spot-checked on every
+platform; items marked with a single platform only apply there.
+
+================================================================================
+1. BAND SET LISTS  (new: Web 21dfbab / Android 97a58bf / iPhone 383ac1f)
+================================================================================
+Same backend/API and DB schema on all three platforms (band_setlists table).
+
+[ALL]
+[ ] Open a band you're an active member of (not just owner) and confirm you can
+    see/manage its Set Lists (permission is "any active member", not owner-only)
+[ ] Create a new set list - name defaults to today's date
+[ ] Rename a set list
+[ ] Add several songs to a set list
+[ ] Remove a song from a set list
+[ ] Reorder songs (drag on Web; up/down arrows on Android/iPhone) and confirm
+    the new order persists after leaving and returning to the band
+[ ] Delete a set list
+[ ] Create 2+ set lists on the same band with different songs, confirm they
+    stay independent of each other
+[ ] Log in as a user who is NOT a member of the band and confirm you cannot
+    see/edit its set lists (should be blocked/hidden)
+
+WEB ONLY
+[ ] Bands tab layout: band list now sits ABOVE the detail pane (not side by
+    side) and the detail pane uses the full width
+[ ] Band Practice tab -> Name field: selecting a band with set lists shows an
+    autocomplete dropdown of that band's songs (union across all its set
+    lists) as you type; selecting a suggestion fills the field
+[ ] Confirm a band with NO set lists shows no autocomplete dropdown
+[ ] Confirm switching the Band dropdown updates the autocomplete song list
+    Note: autocomplete on session naming is WEB ONLY - do not expect it on
+    Android/iPhone, they only have the set list management itself.
+
+ANDROID / IPHONE ONLY
+[ ] Confirm set lists load correctly when expanding a band card in the
+    Bands/Sessions screen
+
+================================================================================
+2. BAND PAGE (public band profile)  [ALL]
+================================================================================
+Web: 77a26b4, 1ecb346 (favicon), 6d7474e (background color)
+Android: 8de8322 | iPhone: e100940
+
+[ ] As a band owner, open "Manage Band Page" and edit the story/bio text
+[ ] Upload a background photo and confirm it displays on the public page
+[ ] (Web only) Set a background color and confirm it applies to the public page
+[ ] (Web only) Upload a custom favicon and confirm it shows in the browser tab
+    on the public band page
+[ ] Assign instruments to members and confirm they show on the public page
+[ ] Feature/order songs (sessions) on the band page and confirm order holds
+[ ] Publish the band page and view it as a logged-out visitor
+[ ] Unpublish and confirm it's no longer publicly accessible
+[ ] Non-owner members should NOT see the "Manage Band Page" management screen/
+    link, but SHOULD see the public page once published
+
+================================================================================
+3. CUSTOM DOMAINS FOR BAND PAGES  (WEB ONLY - admin/infra feature)
+================================================================================
+30ca250, 44a5405, 221caf..., 2c8876d, e14c869, c7fa272, 6b487da, f23c986, 2818589
+
+[ ] Add a custom domain to a band page (or storefront) and confirm DNS
+    instructions are shown clearly
+[ ] Confirm the new DNS confirmation timer/countdown displays correctly while
+    waiting for DNS to propagate
+[ ] After pointing DNS, confirm the domain verifies and SSL cert issues
+    (certbot) without manual intervention
+[ ] Load the band page over the custom domain in Chrome AND Edge - confirm no
+    cert warnings (chain now pinned to ISRG Root X1 for Edge/Windows compat)
+[ ] Try a domain that's still "Parked" at the registrar (e.g. GoDaddy) and
+    confirm the troubleshooting note appears / guides the user correctly
+[ ] [ALL] Load a custom-domain band page on Android and iPhone's browser (not
+    the app) to confirm it renders correctly on mobile viewports
+
+================================================================================
+4. DIRECT MESSAGES  [ALL]
+================================================================================
+Web: 7346082, 732ab08 | Android: bb1ba4c | iPhone: 9677898
+
+[ ] Start a new DM with a friend from the Chat / sidebar area
+[ ] Confirm DM shows up in the correct sidebar location (Web: fixed after
+    732ab08 - verify it lives with the other chat rooms, not somewhere odd)
+[ ] Send and receive messages in a DM in real time (test with two accounts/
+    devices at once if possible)
+[ ] Confirm re-opening an existing DM finds the same room rather than
+    creating a duplicate
+[ ] Confirm DMs don't leak into group chat rooms or vice versa
+
+================================================================================
+5. CHAT - AUTO-LINKIFY & INPUT SIZING
+================================================================================
+Auto-linkify [ALL]: Web 901fcdd | Android 04f2de7 | iPhone fc0c2bf
+Auto-grow input (WEB ONLY): 78a4b8f, 936bba8
+
+[ ] [ALL] Post a message containing a URL (e.g. https://example.com) and
+    confirm it renders as a clickable link, in both a chat room and a DM
+[ ] [ALL] Confirm the chat summary/carousel widget also linkifies URLs
+    correctly (not just the full chat view)
+[ ] (Web only) Type a long multi-line message and confirm the input box grows
+    to fit it instead of scrolling internally
+[ ] (Web only) Edit an existing long message and confirm the edit box also
+    auto-grows to show the full text
+
+================================================================================
+6. BAND EMAIL INVITES  (WEB ONLY)
+================================================================================
+d76af7a
+
+[ ] Invite a new member to a band by email (not handle)
+[ ] Open the invite link from the email on desktop web - confirm signup/login
+    -> auto-join flow works
+[ ] Open the same invite link on a mobile browser and confirm it still works
+    (this flow doesn't go through the native apps)
+[ ] Confirm an expired or already-used invite link shows a sensible error
+
+================================================================================
+7. REGRESSION - SESSIONS / RECORDING CORE FLOWS  [ALL]
+================================================================================
+Older fixes worth a quick re-check since it's been a few days:
+(session sharing / band filter: Web e683f62, Android dd28ca5/b69370d,
+iPhone bumped in 3127d72)
+
+[ ] Record a new session live (mic) and confirm it uploads/saves correctly
+[ ] Upload an existing audio file as a session
+[ ] Band Practice: assign a session to a band and confirm it shows under that
+    band's sessions only (band filter)
+[ ] Individual and Mashup upload flows still work end to end
+[ ] Share a session via the share button/icon - confirm the public link works
+    when opened logged-out
+[ ] Playback works for regular sessions, individual recordings, and mashups
+[ ] Scheduled messages block still posts on schedule (if easy to verify)
+
+================================================================================
+NOTES / KNOWN ISSUES TO KEEP IN MIND WHILE TESTING
+================================================================================
+- breakroom_dev has a pre-existing schema drift issue: it's missing a
+  user_subscriptions table, which throws a 500 on POST /api/bands for any
+  dev-DB user who already owns a band (free-tier limit check). This is a
+  dev-database-only issue, NOT present in production - unrelated to the
+  features above, flagging so it doesn't cause confusion during local testing.
+- There's a leftover test band "Verify Setlist Band 1783445143089" (id 3) in
+  breakroom_dev under the admin account from earlier automated verification -
+  safe to delete whenever convenient, it's test data only.
+- The Set Lists feature's Web UI (stacked Bands layout + autocomplete) has not
+  yet been manually verified in a real browser - only via API calls - so treat
+  section 1's Web-only items as first-time testing, not a regression check.
