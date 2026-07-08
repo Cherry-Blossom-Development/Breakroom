@@ -1198,8 +1198,8 @@ onMounted(async () => {
         <button class="section-tab" :class="{ active: activeTab === 'individual' }" @click="activeTab = 'individual'">Individual</button>
         <button class="section-tab" :class="{ active: activeTab === 'bands' }" @click="activeTab = 'bands'">Bands</button>
       </div>
-      <button class="btn-ghost btn-sm audio-defaults-btn" @click="showAudioDefaults = true">
-        🎛 Audio Defaults
+      <button class="audio-defaults-btn" @click="showAudioDefaults = true">
+        <span class="audio-defaults-icon">🎛</span> Audio Defaults
       </button>
     </div>
 
@@ -1231,6 +1231,25 @@ onMounted(async () => {
               {{ deviceNameSaving ? '…' : 'Save' }}
             </button>
           </div>
+        </div>
+
+        <!-- Microphone section -->
+        <div class="ad-section-label">Microphone</div>
+
+        <div class="ad-group">
+          <div class="ad-row">
+            <div class="ad-label">
+              <span class="ad-name">Input Device</span>
+              <span class="ad-desc">Which microphone to record from. Applies to Band Practice, Individual, and Mashup recordings.</span>
+            </div>
+          </div>
+          <select class="text-input" v-model="selectedMicId" :disabled="recordingFor !== null">
+            <option value="">Default mic</option>
+            <option v-for="d in micDevices" :key="d.deviceId" :value="d.deviceId">{{ d.label || `Mic ${d.deviceId.slice(0,6)}…` }}</option>
+          </select>
+          <p v-if="micDevices.length === 0" class="ad-desc" style="margin-top: 6px;">
+            No microphones detected yet — start a recording once to grant microphone access, then reopen this panel to pick a specific device.
+          </p>
         </div>
 
         <!-- Playback section -->
@@ -1408,10 +1427,6 @@ onMounted(async () => {
               <button class="rec-stop-btn" @click="stopRecording">Stop</button>
             </template>
             <template v-else>
-              <select v-if="micDevices.length > 0" v-model="selectedMicId" class="mic-select" :disabled="indivUploading" title="Select microphone">
-                <option value="">Default mic</option>
-                <option v-for="d in micDevices" :key="d.deviceId" :value="d.deviceId">{{ d.label || `Mic ${d.deviceId.slice(0,6)}…` }}</option>
-              </select>
               <button class="rec-btn" :disabled="recordingFor !== null || indivUploading"
                       @click="startRecording('individual')" title="Record from microphone">
                 🎙 Record
@@ -1806,13 +1821,6 @@ onMounted(async () => {
                 <button class="rec-stop-btn" @click="stopMashupRecording">Stop</button>
               </template>
               <template v-else>
-                <select v-if="micDevices.length > 0" v-model="selectedMicId" class="mic-select"
-                        :disabled="mashupUploading" title="Select microphone">
-                  <option value="">Default mic</option>
-                  <option v-for="d in micDevices" :key="d.deviceId" :value="d.deviceId">
-                    {{ d.label || `Mic ${d.deviceId.slice(0,6)}…` }}
-                  </option>
-                </select>
                 <button class="rec-btn mashup-rec-btn"
                         :disabled="recordingFor !== null || mashupUploading"
                         @click="startMashupRecording"
@@ -2122,10 +2130,6 @@ onMounted(async () => {
             <button class="rec-stop-btn" @click="stopRecording">Stop</button>
           </template>
           <template v-else>
-            <select v-if="micDevices.length > 0" v-model="selectedMicId" class="mic-select" :disabled="uploading" title="Select microphone">
-              <option value="">Default mic</option>
-              <option v-for="d in micDevices" :key="d.deviceId" :value="d.deviceId">{{ d.label || `Mic ${d.deviceId.slice(0,6)}…` }}</option>
-            </select>
             <button class="rec-btn" :disabled="recordingFor !== null || uploading"
                     @click="startRecording('band')" title="Record from microphone">
               🎙 Record
@@ -2323,7 +2327,6 @@ onMounted(async () => {
 /* Recording controls */
 .file-row { align-items: center; gap: 10px; }
 .file-label.disabled { opacity: 0.4; pointer-events: none; }
-.mic-select { background: var(--color-background-input); border: 1px solid var(--color-border-input); border-radius: 6px; padding: 8px 10px; font-size: 0.85rem; color: var(--color-text); cursor: pointer; flex-shrink: 0; max-width: 180px; }
 .recording-preview { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .preview-label { font-size: 0.85rem; color: var(--color-text-muted); white-space: nowrap; }
 .rec-btn { background: none; border: 1px solid var(--color-border, #555); border-radius: 6px; padding: 9px 14px; font-size: 0.9rem; color: var(--color-text); cursor: pointer; white-space: nowrap; transition: all 0.15s; flex-shrink: 0; }
@@ -2424,7 +2427,15 @@ onMounted(async () => {
 
 /* Section tabs */
 .tabs-bar { display: flex; justify-content: space-between; align-items: flex-end; }
-.audio-defaults-btn { margin-bottom: 4px; white-space: nowrap; }
+.audio-defaults-btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: transparent; border: 1px solid var(--color-border, #444); border-radius: 20px;
+  padding: 7px 16px 7px 12px; font-size: 0.85rem; font-weight: 600; color: var(--color-text-muted);
+  cursor: pointer; transition: border-color 0.15s, color 0.15s, background 0.15s;
+  margin-bottom: 4px; white-space: nowrap;
+}
+.audio-defaults-btn:hover { border-color: var(--color-accent); color: var(--color-accent); background: var(--color-accent-light); }
+.audio-defaults-icon { font-size: 1.05rem; line-height: 1; }
 .section-tabs { display: flex; gap: 0; flex: 1; margin-bottom: 0; border-bottom: 2px solid var(--color-border, #444); }
 .tabs-bar { margin-bottom: 24px; border-bottom: 2px solid var(--color-border, #444); }
 .tabs-bar .section-tabs { border-bottom: none; }
