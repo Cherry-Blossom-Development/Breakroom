@@ -431,7 +431,37 @@ const recordedAt = ref(new Date().toISOString().split('T')[0])
 const uploadBandId = ref('')
 const fileInput = ref(null)
 
-// --- Session name autocomplete (from band set lists) ---
+// --- New Recording: upload vs. live-record chooser ---
+const recordMode = ref(null) // null | 'upload' | 'record'
+const uploadRenameChoice = ref('keep') // 'keep' | 'rename' — upload mode only
+
+async function chooseRecordMode(mode) {
+  recordMode.value = mode
+  if (uploadBandId.value) return // band already resolved; watch(uploadBandId) already populated suggestions
+  try {
+    const res = await authFetch('/api/sessions/practice-suggestions')
+    const data = await res.json()
+    if (res.ok && data.defaultBandId) uploadBandId.value = data.defaultBandId
+  } catch { /* non-critical */ }
+}
+
+function resetRecordMode() {
+  recordMode.value = null
+  uploadRenameChoice.value = 'keep'
+  selectedFile.value = null
+  sessionName.value = ''
+  recordedAt.value = new Date().toISOString().split('T')[0]
+  uploadBandId.value = ''
+  uploadError.value = null
+  if (recordingPreviewUrl.value) { URL.revokeObjectURL(recordingPreviewUrl.value); recordingPreviewUrl.value = null }
+  if (fileInput.value) fileInput.value.value = ''
+}
+
+function stripExtension(filename) {
+  return filename.replace(/\.[^./\\]+$/, '')
+}
+
+// --- Session name autocomplete (band set lists + the user's own recent session names) ---
 const practiceSongOptions = ref([])
 const showSessionNameDropdown = ref(false)
 const filteredSongOptions = computed(() => {
@@ -442,13 +472,21 @@ watch(uploadBandId, async (bandId) => {
   practiceSongOptions.value = []
   if (!bandId) return
   try {
-    const res = await authFetch(`/api/bands/${bandId}/setlists`)
-    const data = await res.json()
-    if (res.ok) {
-      const names = new Set()
-      data.setlists.forEach(sl => sl.songs.forEach(s => names.add(s)))
-      practiceSongOptions.value = [...names].sort()
+    const [setlistRes, suggestRes] = await Promise.all([
+      authFetch(`/api/bands/${bandId}/setlists`),
+      authFetch(`/api/sessions/practice-suggestions?bandId=${bandId}`)
+    ])
+    const names = new Set()
+    if (setlistRes.ok) {
+      const setlistData = await setlistRes.json()
+      setlistData.setlists.forEach(sl => sl.songs.forEach(s => names.add(s)))
     }
+    if (suggestRes.ok) {
+      const suggestData = await suggestRes.json()
+      suggestData.commonNames.forEach(n => names.add(n))
+      if (suggestData.commonNames.length > 0 && !sessionName.value) sessionName.value = suggestData.commonNames[0]
+    }
+    practiceSongOptions.value = [...names].sort()
   } catch { /* non-critical */ }
 })
 
@@ -726,9 +764,11 @@ async function handleUpload() {
   uploading.value = true
   uploadError.value = null
   try {
-    await sessions.upload(selectedFile.value, sessionName.value || defaultName(), recordedAt.value || null, uploadBandId.value || null)
-    selectedFile.value = null; sessionName.value = ''; recordedAt.value = new Date().toISOString().split('T')[0]; uploadBandId.value = ''
-    if (fileInput.value) fileInput.value.value = ''
+    const keepFilename = recordMode.value === 'upload' && uploadRenameChoice.value === 'keep'
+    const nameToUse = keepFilename ? stripExtension(selectedFile.value.name) : (sessionName.value || defaultName())
+    const dateToUse = keepFilename ? null : (recordedAt.value || null)
+    await sessions.upload(selectedFile.value, nameToUse, dateToUse, uploadBandId.value || null)
+    resetRecordMode()
   } catch (err) { uploadError.value = err.message }
   finally { uploading.value = false }
 }
@@ -2116,62 +2156,99 @@ onMounted(async () => {
     <!-- Upload Card (Band Practice) -->
     <template v-if="activeTab === 'band'">
     <div class="card upload-card">
-      <h2 class="card-title">Upload Recording</h2>
+      <h2 class="card-title">New Recording</h2>
       <div class="upload-form">
-        <div class="file-row">
-          <input ref="fileInput" type="file" accept="audio/*" @change="onFileSelect"
-                 class="file-input" id="audio-file" :disabled="uploading || recordingFor !== null" />
-          <label for="audio-file" class="file-label" :class="{ 'has-file': selectedFile, 'disabled': recordingFor !== null }">
-            {{ selectedFile ? selectedFile.name : 'Choose audio file…' }}
-          </label>
-          <template v-if="recordingFor === 'band'">
-            <span class="rec-indicator">● {{ formatRecordingTime(recordingSeconds) }}</span>
-            <div class="level-meter" title="Input level"><div class="level-fill" :style="{ width: audioLevel + '%' }"></div></div>
-            <button class="rec-stop-btn" @click="stopRecording">Stop</button>
-          </template>
-          <template v-else>
-            <button class="rec-btn" :disabled="recordingFor !== null || uploading"
+
+        <!-- Step 1: choose upload vs. live record -->
+        <div v-if="!recordMode" class="record-mode-chooser">
+          <button class="record-mode-btn" @click="chooseRecordMode('upload')">
+            <span class="record-mode-icon">📁</span>
+            <span class="record-mode-label">Upload a Recording</span>
+            <span class="record-mode-desc">Choose an existing audio file from your device</span>
+          </button>
+          <button class="record-mode-btn" @click="chooseRecordMode('record')">
+            <span class="record-mode-icon">🎙</span>
+            <span class="record-mode-label">Record a Live Session</span>
+            <span class="record-mode-desc">Record directly from your microphone</span>
+          </button>
+        </div>
+
+        <!-- Step 2: chosen flow -->
+        <template v-else>
+          <button v-if="recordingFor !== 'band'" type="button" class="record-mode-back" @click="resetRecordMode">‹ Back</button>
+
+          <div v-if="recordMode === 'upload'" class="file-row">
+            <input ref="fileInput" type="file" accept="audio/*" @change="onFileSelect"
+                   class="file-input" id="audio-file" :disabled="uploading" />
+            <label for="audio-file" class="file-label" :class="{ 'has-file': selectedFile }">
+              {{ selectedFile ? selectedFile.name : 'Choose audio file…' }}
+            </label>
+          </div>
+
+          <div v-else class="file-row">
+            <template v-if="recordingFor === 'band'">
+              <span class="rec-indicator">● {{ formatRecordingTime(recordingSeconds) }}</span>
+              <div class="level-meter" title="Input level"><div class="level-fill" :style="{ width: audioLevel + '%' }"></div></div>
+              <button class="rec-stop-btn" @click="stopRecording">Stop</button>
+            </template>
+            <button v-else class="rec-btn" :disabled="recordingFor !== null || uploading"
                     @click="startRecording('band')" title="Record from microphone">
               🎙 Record
             </button>
-          </template>
-        </div>
-        <div class="fields-row">
-          <div class="field">
-            <label class="field-label">Name</label>
-            <div class="autocomplete-container">
-              <input v-model="sessionName" type="text" class="text-input"
-                     placeholder="Session name" :disabled="uploading"
-                     @focus="showSessionNameDropdown = true"
-                     @blur="showSessionNameDropdown = false" />
-              <ul v-if="showSessionNameDropdown && filteredSongOptions.length > 0" class="autocomplete-dropdown">
-                <li v-for="song in filteredSongOptions" :key="song"
-                    @mousedown.prevent="sessionName = song; showSessionNameDropdown = false">
-                  {{ song }}
-                </li>
-              </ul>
+          </div>
+
+          <div v-if="recordMode === 'upload'" class="rename-choice">
+            <span class="field-label">Rename uploaded file too:</span>
+            <label class="radio-row">
+              <input type="radio" name="rename-choice" value="keep" v-model="uploadRenameChoice" />
+              Keep the uploaded filename
+            </label>
+            <label class="radio-row">
+              <input type="radio" name="rename-choice" value="rename" v-model="uploadRenameChoice" />
+              Rename it
+            </label>
+          </div>
+
+          <div class="fields-row">
+            <template v-if="recordMode === 'record' || uploadRenameChoice === 'rename'">
+              <div class="field">
+                <label class="field-label">Name</label>
+                <div class="autocomplete-container">
+                  <input v-model="sessionName" type="text" class="text-input"
+                         placeholder="Session name" :disabled="uploading"
+                         @focus="showSessionNameDropdown = true"
+                         @blur="showSessionNameDropdown = false" />
+                  <ul v-if="showSessionNameDropdown && filteredSongOptions.length > 0" class="autocomplete-dropdown">
+                    <li v-for="song in filteredSongOptions" :key="song"
+                        @mousedown.prevent="sessionName = song; showSessionNameDropdown = false">
+                      {{ song }}
+                    </li>
+                  </ul>
+                </div>
+              </div>
+              <div class="field">
+                <label class="field-label">Original recording date <span class="optional">(optional)</span></label>
+                <input v-model="recordedAt" type="date" class="text-input" :disabled="uploading" />
+              </div>
+            </template>
+            <div class="field">
+              <label class="field-label">Band <span class="optional">(optional)</span></label>
+              <select v-model="uploadBandId" class="text-input" :disabled="uploading">
+                <option value="">— no band —</option>
+                <option v-for="b in activeBands" :key="b.id" :value="b.id">{{ b.name }}</option>
+              </select>
             </div>
           </div>
-          <div class="field">
-            <label class="field-label">Original recording date <span class="optional">(optional)</span></label>
-            <input v-model="recordedAt" type="date" class="text-input" :disabled="uploading" />
+
+          <div v-if="recordingPreviewUrl && !recordingFor" class="recording-preview">
+            <span class="preview-label">Preview recording:</span>
+            <audio controls :src="recordingPreviewUrl" style="height:32px;"></audio>
           </div>
-          <div class="field">
-            <label class="field-label">Band <span class="optional">(optional)</span></label>
-            <select v-model="uploadBandId" class="text-input" :disabled="uploading">
-              <option value="">— no band —</option>
-              <option v-for="b in activeBands" :key="b.id" :value="b.id">{{ b.name }}</option>
-            </select>
-          </div>
-        </div>
-        <div v-if="recordingPreviewUrl && !recordingFor" class="recording-preview">
-          <span class="preview-label">Preview recording:</span>
-          <audio controls :src="recordingPreviewUrl" style="height:32px;"></audio>
-        </div>
-        <p v-if="uploadError" class="error-msg">{{ uploadError }}</p>
-        <button class="upload-btn" @click="handleUpload" :disabled="!selectedFile || uploading">
-          {{ uploading ? 'Uploading…' : 'Upload' }}
-        </button>
+          <p v-if="uploadError" class="error-msg">{{ uploadError }}</p>
+          <button class="upload-btn" @click="handleUpload" :disabled="!selectedFile || uploading">
+            {{ uploading ? 'Saving…' : (recordMode === 'record' ? 'Save Recording' : 'Upload') }}
+          </button>
+        </template>
       </div>
     </div>
 
@@ -2323,6 +2400,24 @@ onMounted(async () => {
 .upload-btn { align-self: flex-start; background: var(--color-accent); color: #fff; border: none; border-radius: 6px; padding: 10px 24px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
 .upload-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .upload-btn:not(:disabled):hover { opacity: 0.85; }
+
+.record-mode-chooser { display: flex; gap: 16px; flex-wrap: wrap; }
+.record-mode-btn {
+  flex: 1; min-width: 220px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 6px;
+  background: none; border: 1px dashed var(--color-border, #555); border-radius: 10px;
+  padding: 28px 18px; cursor: pointer; color: var(--color-text); transition: border-color 0.15s, background 0.15s;
+}
+.record-mode-btn:hover { border-color: var(--color-accent); border-style: solid; background: var(--color-accent-light); }
+.record-mode-icon { font-size: 1.8rem; }
+.record-mode-label { font-weight: 600; font-size: 1rem; }
+.record-mode-desc { font-size: 0.8rem; color: var(--color-text-muted); }
+
+.record-mode-back { align-self: flex-start; background: none; border: none; color: var(--color-text-muted); font-size: 0.85rem; cursor: pointer; padding: 0; }
+.record-mode-back:hover { color: var(--color-accent); }
+
+.rename-choice { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--color-border, #444); border-radius: 8px; }
+.radio-row { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--color-text); cursor: pointer; }
+.radio-row input[type="radio"] { accent-color: var(--color-accent); cursor: pointer; }
 
 /* Recording controls */
 .file-row { align-items: center; gap: 10px; }

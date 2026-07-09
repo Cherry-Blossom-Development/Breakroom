@@ -117,6 +117,50 @@ router.get('/band-members', authenticateToken, async (req, res) => {
   }
 });
 
+// GET /api/sessions/practice-suggestions — recent-history defaults for the Band Practice
+// upload/record form: the user's most common band, and (for a given or resolved band) their
+// most common session names, both scoped to the last 2 months so stale history doesn't stick around
+router.get('/practice-suggestions', authenticateToken, async (req, res) => {
+  const client = await getClient();
+  try {
+    const bandRow = await client.query(
+      `SELECT s.band_id, COUNT(*) AS cnt
+       FROM sessions s
+       JOIN band_members bm ON bm.band_id = s.band_id AND bm.user_id = $1 AND bm.status = 'active'
+       WHERE s.user_id = $1 AND s.band_id IS NOT NULL AND s.session_type = 'band'
+         AND s.uploaded_at >= DATE_SUB(NOW(), INTERVAL 2 MONTH)
+       GROUP BY s.band_id
+       ORDER BY cnt DESC, MAX(s.uploaded_at) DESC
+       LIMIT 1`,
+      [req.user.id]
+    );
+    const defaultBandId = bandRow.rowCount > 0 ? bandRow.rows[0].band_id : null;
+    const targetBandId = req.query.bandId ? parseInt(req.query.bandId, 10) : defaultBandId;
+
+    let commonNames = [];
+    if (targetBandId) {
+      const nameRows = await client.query(
+        `SELECT name, COUNT(*) AS cnt
+         FROM sessions
+         WHERE user_id = $1 AND band_id = $2 AND session_type = 'band'
+           AND uploaded_at >= DATE_SUB(NOW(), INTERVAL 2 MONTH)
+         GROUP BY name
+         ORDER BY cnt DESC, MAX(uploaded_at) DESC
+         LIMIT 10`,
+        [req.user.id, targetBandId]
+      );
+      commonNames = nameRows.rows.map(r => r.name);
+    }
+
+    res.json({ defaultBandId, commonNames });
+  } catch (err) {
+    console.error('Error fetching practice suggestions:', err);
+    res.status(500).json({ message: 'Failed to fetch suggestions' });
+  } finally {
+    client.release();
+  }
+});
+
 // GET /api/sessions/:id/stream — access-checked proxy from S3 (owner or active band member)
 router.get('/:id/stream', authenticateToken, async (req, res) => {
   const client = await getClient();
