@@ -458,6 +458,13 @@ function resetRecordMode() {
   if (fileInput.value) fileInput.value.value = ''
 }
 
+// Discards the just-recorded take only — back to the pre-Record state, not the whole chooser.
+// Name/Date/Band are left as-is since they weren't part of the recording itself.
+function discardRecording() {
+  selectedFile.value = null
+  if (recordingPreviewUrl.value) { URL.revokeObjectURL(recordingPreviewUrl.value); recordingPreviewUrl.value = null }
+}
+
 function stripExtension(filename) {
   return filename.replace(/\.[^./\\]+$/, '')
 }
@@ -2260,9 +2267,15 @@ onMounted(async () => {
             <audio controls :src="recordingPreviewUrl" style="height:32px;"></audio>
           </div>
           <p v-if="uploadError" class="error-msg">{{ uploadError }}</p>
-          <button class="upload-btn" @click="handleUpload" :disabled="!selectedFile || uploading">
-            {{ uploading ? 'Saving…' : (recordMode === 'record' ? 'Save Recording' : 'Upload') }}
-          </button>
+          <div class="save-row">
+            <button class="upload-btn" @click="handleUpload" :disabled="!selectedFile || uploading">
+              {{ uploading ? 'Saving…' : (recordMode === 'record' ? 'Save Recording' : 'Upload') }}
+            </button>
+            <button v-if="recordMode === 'record' && selectedFile" class="discard-btn"
+                    :disabled="uploading" @click="discardRecording">
+              Discard
+            </button>
+          </div>
         </template>
       </div>
     </div>
@@ -2415,6 +2428,11 @@ onMounted(async () => {
 .upload-btn { align-self: flex-start; background: var(--color-accent); color: #fff; border: none; border-radius: 6px; padding: 10px 24px; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: opacity 0.15s; }
 .upload-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .upload-btn:not(:disabled):hover { opacity: 0.85; }
+
+.save-row { display: flex; gap: 10px; align-items: center; align-self: flex-start; }
+.discard-btn { background: none; border: 1px solid var(--color-border, #555); border-radius: 6px; padding: 10px 20px; font-size: 0.95rem; font-weight: 600; color: var(--color-text-muted); cursor: pointer; transition: all 0.15s; }
+.discard-btn:not(:disabled):hover { border-color: #e05555; color: #e05555; }
+.discard-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .record-mode-chooser { display: flex; gap: 16px; flex-wrap: wrap; }
 .record-mode-btn {
