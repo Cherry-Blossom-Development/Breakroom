@@ -450,6 +450,7 @@ function resetRecordMode() {
   uploadRenameChoice.value = 'keep'
   selectedFile.value = null
   sessionName.value = ''
+  sessionNameAutoFilled.value = false
   recordedAt.value = new Date().toISOString().split('T')[0]
   uploadBandId.value = ''
   uploadError.value = null
@@ -461,10 +462,15 @@ function stripExtension(filename) {
   return filename.replace(/\.[^./\\]+$/, '')
 }
 
-// --- Session name autocomplete (band set lists + the user's own recent session names) ---
+// --- Session name autocomplete (recent-history names first, then band set lists) ---
 const practiceSongOptions = ref([])
 const showSessionNameDropdown = ref(false)
+// True right after we auto-fill the field from history; cleared the moment the user actually
+// types, so the dropdown still shows the full suggestion list instead of filtering down to
+// just the one name that's already sitting in the field.
+const sessionNameAutoFilled = ref(false)
 const filteredSongOptions = computed(() => {
+  if (sessionNameAutoFilled.value) return practiceSongOptions.value
   const q = sessionName.value.trim().toLowerCase()
   return q ? practiceSongOptions.value.filter(s => s.toLowerCase().includes(q)) : practiceSongOptions.value
 })
@@ -476,17 +482,25 @@ watch(uploadBandId, async (bandId) => {
       authFetch(`/api/bands/${bandId}/setlists`),
       authFetch(`/api/sessions/practice-suggestions?bandId=${bandId}`)
     ])
-    const names = new Set()
-    if (setlistRes.ok) {
-      const setlistData = await setlistRes.json()
-      setlistData.setlists.forEach(sl => sl.songs.forEach(s => names.add(s)))
-    }
+    // Preserve the backend's most-used-then-most-recent order for common names; only
+    // append set list songs (alphabetically) for any titles not already covered above.
+    const ordered = []
+    const seen = new Set()
     if (suggestRes.ok) {
       const suggestData = await suggestRes.json()
-      suggestData.commonNames.forEach(n => names.add(n))
-      if (suggestData.commonNames.length > 0 && !sessionName.value) sessionName.value = suggestData.commonNames[0]
+      suggestData.commonNames.forEach(n => { if (!seen.has(n)) { seen.add(n); ordered.push(n) } })
+      if (suggestData.commonNames.length > 0 && !sessionName.value) {
+        sessionName.value = suggestData.commonNames[0]
+        sessionNameAutoFilled.value = true
+      }
     }
-    practiceSongOptions.value = [...names].sort()
+    if (setlistRes.ok) {
+      const setlistData = await setlistRes.json()
+      const setlistNames = new Set()
+      setlistData.setlists.forEach(sl => sl.songs.forEach(s => setlistNames.add(s)))
+      ;[...setlistNames].sort().forEach(n => { if (!seen.has(n)) { seen.add(n); ordered.push(n) } })
+    }
+    practiceSongOptions.value = ordered
   } catch { /* non-critical */ }
 })
 
@@ -2217,7 +2231,8 @@ onMounted(async () => {
                   <input v-model="sessionName" type="text" class="text-input"
                          placeholder="Session name" :disabled="uploading"
                          @focus="showSessionNameDropdown = true"
-                         @blur="showSessionNameDropdown = false" />
+                         @blur="showSessionNameDropdown = false"
+                         @input="sessionNameAutoFilled = false" />
                   <ul v-if="showSessionNameDropdown && filteredSongOptions.length > 0" class="autocomplete-dropdown">
                     <li v-for="song in filteredSongOptions" :key="song"
                         @mousedown.prevent="sessionName = song; showSessionNameDropdown = false">
