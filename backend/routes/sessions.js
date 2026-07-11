@@ -117,22 +117,25 @@ router.get('/band-members', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/sessions/practice-suggestions — recent-history defaults for the Band Practice
-// upload/record form: the user's most common band, and (for a given or resolved band) their
-// most common session names, both scoped to the last 2 months so stale history doesn't stick around
+// GET /api/sessions/practice-suggestions — recent-history defaults for the Band Practice/
+// Individual upload/record forms: the user's most common band, and (for a given or resolved
+// band) their most common session names, both scoped to the last 2 months and to whichever
+// sessionType the calling form cares about (band practice vs. individual recordings)
 router.get('/practice-suggestions', authenticateToken, async (req, res) => {
   const client = await getClient();
   try {
+    const sessionType = ['band', 'individual', 'mashup'].includes(req.query.sessionType) ? req.query.sessionType : 'band';
+
     const bandRow = await client.query(
       `SELECT s.band_id, COUNT(*) AS cnt
        FROM sessions s
        JOIN band_members bm ON bm.band_id = s.band_id AND bm.user_id = $1 AND bm.status = 'active'
-       WHERE s.user_id = $1 AND s.band_id IS NOT NULL AND s.session_type = 'band'
+       WHERE s.user_id = $1 AND s.band_id IS NOT NULL AND s.session_type = $2
          AND s.uploaded_at >= DATE_SUB(NOW(), INTERVAL 2 MONTH)
        GROUP BY s.band_id
        ORDER BY cnt DESC, MAX(s.uploaded_at) DESC
        LIMIT 1`,
-      [req.user.id]
+      [req.user.id, sessionType]
     );
     const defaultBandId = bandRow.rowCount > 0 ? bandRow.rows[0].band_id : null;
     const targetBandId = req.query.bandId ? parseInt(req.query.bandId, 10) : defaultBandId;
@@ -142,12 +145,12 @@ router.get('/practice-suggestions', authenticateToken, async (req, res) => {
       const nameRows = await client.query(
         `SELECT name, COUNT(*) AS cnt
          FROM sessions
-         WHERE user_id = $1 AND band_id = $2 AND session_type = 'band'
+         WHERE user_id = $1 AND band_id = $2 AND session_type = $3
            AND uploaded_at >= DATE_SUB(NOW(), INTERVAL 2 MONTH)
          GROUP BY name
          ORDER BY cnt DESC, MAX(uploaded_at) DESC
          LIMIT 10`,
-        [req.user.id, targetBandId]
+        [req.user.id, targetBandId, sessionType]
       );
       commonNames = nameRows.rows.map(r => r.name);
     }

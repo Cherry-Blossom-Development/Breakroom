@@ -521,6 +521,76 @@ const indivInstrumentId = ref('')
 const indivUploadBandId = ref('')
 const fileInputIndiv = ref(null)
 
+// --- New Recording: upload vs. live-record chooser (Individual) ---
+const indivRecordMode = ref(null) // null | 'upload' | 'record'
+const indivUploadRenameChoice = ref('keep') // 'keep' | 'rename' — upload mode only
+
+async function chooseIndivRecordMode(mode) {
+  indivRecordMode.value = mode
+  if (indivUploadBandId.value) return // band already resolved; watch(indivUploadBandId) already populated suggestions
+  try {
+    const res = await authFetch('/api/sessions/practice-suggestions?sessionType=individual')
+    const data = await res.json()
+    if (res.ok && data.defaultBandId) indivUploadBandId.value = data.defaultBandId
+  } catch { /* non-critical */ }
+}
+
+function resetIndivRecordMode() {
+  indivRecordMode.value = null
+  indivUploadRenameChoice.value = 'keep'
+  indivFile.value = null
+  indivName.value = ''
+  indivNameAutoFilled.value = false
+  indivRecordedAt.value = new Date().toISOString().split('T')[0]
+  indivInstrumentId.value = ''
+  indivUploadBandId.value = ''
+  indivUploadError.value = null
+  if (recordingPreviewUrl.value) { URL.revokeObjectURL(recordingPreviewUrl.value); recordingPreviewUrl.value = null }
+  if (fileInputIndiv.value) fileInputIndiv.value.value = ''
+}
+
+function discardIndivRecording() {
+  indivFile.value = null
+  if (recordingPreviewUrl.value) { URL.revokeObjectURL(recordingPreviewUrl.value); recordingPreviewUrl.value = null }
+}
+
+// --- Individual recording-name autocomplete (recent-history names first, then band set lists) ---
+const indivSongOptions = ref([])
+const showIndivNameDropdown = ref(false)
+const indivNameAutoFilled = ref(false)
+const filteredIndivSongOptions = computed(() => {
+  if (indivNameAutoFilled.value) return indivSongOptions.value
+  const q = indivName.value.trim().toLowerCase()
+  return q ? indivSongOptions.value.filter(s => s.toLowerCase().includes(q)) : indivSongOptions.value
+})
+watch(indivUploadBandId, async (bandId) => {
+  indivSongOptions.value = []
+  if (!bandId) return
+  try {
+    const [setlistRes, suggestRes] = await Promise.all([
+      authFetch(`/api/bands/${bandId}/setlists`),
+      authFetch(`/api/sessions/practice-suggestions?bandId=${bandId}&sessionType=individual`)
+    ])
+    const ordered = []
+    const seen = new Set()
+    if (suggestRes.ok) {
+      const suggestData = await suggestRes.json()
+      suggestData.commonNames.forEach(n => { if (!seen.has(n)) { seen.add(n); ordered.push(n) } })
+      if (suggestData.commonNames.length > 0 && !indivName.value) {
+        indivName.value = suggestData.commonNames[0]
+        indivNameAutoFilled.value = true
+      }
+    }
+    if (setlistRes.ok) {
+      const setlistData = await setlistRes.json()
+      const setlistNames = new Set()
+      setlistData.setlists.forEach(sl => sl.songs.forEach(s => setlistNames.add(s)))
+      ;[...setlistNames].sort().forEach(n => { if (!seen.has(n)) { seen.add(n); ordered.push(n) } })
+    }
+    indivSongOptions.value = ordered
+  } catch { /* non-critical */ }
+})
+
 // --- Live recording ---
 const recordingFor = ref(null) // 'band' | 'individual' | null
 const recordingSeconds = ref(0)
@@ -806,9 +876,11 @@ async function handleIndivUpload() {
   indivUploading.value = true
   indivUploadError.value = null
   try {
-    await sessions.upload(indivFile.value, indivName.value || defaultName(), indivRecordedAt.value || null, indivUploadBandId.value || null, 'individual', indivInstrumentId.value || null)
-    indivFile.value = null; indivName.value = ''; indivRecordedAt.value = new Date().toISOString().split('T')[0]; indivInstrumentId.value = ''; indivUploadBandId.value = ''
-    if (fileInputIndiv.value) fileInputIndiv.value.value = ''
+    const keepFilename = indivRecordMode.value === 'upload' && indivUploadRenameChoice.value === 'keep'
+    const nameToUse = keepFilename ? stripExtension(indivFile.value.name) : (indivName.value || defaultName())
+    const dateToUse = keepFilename ? null : (indivRecordedAt.value || null)
+    await sessions.upload(indivFile.value, nameToUse, dateToUse, indivUploadBandId.value || null, 'individual', indivInstrumentId.value || null)
+    resetIndivRecordMode()
   } catch (err) { indivUploadError.value = err.message }
   finally { indivUploading.value = false }
 }
@@ -1474,59 +1546,113 @@ onMounted(async () => {
 
       <!-- Upload card -->
       <div class="card">
-        <h2 class="card-title">Upload Recording</h2>
+        <h2 class="card-title">New Recording</h2>
         <div class="upload-form">
-          <div class="file-row">
-            <input ref="fileInputIndiv" type="file" accept="audio/*" @change="onIndivFileSelect"
-                   class="file-input" id="indiv-audio-file" :disabled="indivUploading || recordingFor !== null" />
-            <label for="indiv-audio-file" class="file-label" :class="{ 'has-file': indivFile, 'disabled': recordingFor !== null }">
-              {{ indivFile ? indivFile.name : 'Choose audio file…' }}
-            </label>
-            <template v-if="recordingFor === 'individual'">
-              <span class="rec-indicator">● {{ formatRecordingTime(recordingSeconds) }}</span>
-              <div class="level-meter" title="Input level"><div class="level-fill" :style="{ width: audioLevel + '%' }"></div></div>
-              <button class="rec-stop-btn" @click="stopRecording">Stop</button>
-            </template>
-            <template v-else>
-              <button class="rec-btn" :disabled="recordingFor !== null || indivUploading"
+
+          <!-- Step 1: choose upload vs. live record -->
+          <div v-if="!indivRecordMode" class="record-mode-chooser">
+            <button class="record-mode-btn" @click="chooseIndivRecordMode('upload')">
+              <span class="record-mode-icon">📁</span>
+              <span class="record-mode-label">Upload a Recording</span>
+              <span class="record-mode-desc">Choose an existing audio file from your device</span>
+            </button>
+            <button class="record-mode-btn" @click="chooseIndivRecordMode('record')">
+              <span class="record-mode-icon">🎙</span>
+              <span class="record-mode-label">Record a Live Session</span>
+              <span class="record-mode-desc">Record directly from your microphone</span>
+            </button>
+          </div>
+
+          <!-- Step 2: chosen flow -->
+          <template v-else>
+            <button v-if="recordingFor !== 'individual'" type="button" class="record-mode-back" @click="resetIndivRecordMode">‹ Back</button>
+
+            <div v-if="indivRecordMode === 'upload'" class="file-row">
+              <input ref="fileInputIndiv" type="file" accept="audio/*" @change="onIndivFileSelect"
+                     class="file-input" id="indiv-audio-file" :disabled="indivUploading" />
+              <label for="indiv-audio-file" class="file-label" :class="{ 'has-file': indivFile }">
+                {{ indivFile ? indivFile.name : 'Choose audio file…' }}
+              </label>
+            </div>
+
+            <div v-else class="file-row">
+              <template v-if="recordingFor === 'individual'">
+                <span class="rec-indicator">● {{ formatRecordingTime(recordingSeconds) }}</span>
+                <div class="level-meter" title="Input level"><div class="level-fill" :style="{ width: audioLevel + '%' }"></div></div>
+                <button class="rec-stop-btn" @click="stopRecording">Stop</button>
+              </template>
+              <button v-else class="rec-btn" :disabled="recordingFor !== null || indivUploading"
                       @click="startRecording('individual')" title="Record from microphone">
                 🎙 Record
               </button>
-            </template>
-          </div>
-          <div class="fields-row">
-            <div class="field">
-              <label class="field-label">Name</label>
-              <input v-model="indivName" type="text" class="text-input"
-                     placeholder="Recording name" :disabled="indivUploading" />
             </div>
-            <div class="field">
-              <label class="field-label">Original recording date <span class="optional">(optional)</span></label>
-              <input v-model="indivRecordedAt" type="date" class="text-input" :disabled="indivUploading" />
+
+            <div v-if="indivRecordMode === 'upload'" class="rename-choice">
+              <span class="field-label">Rename uploaded file too:</span>
+              <label class="radio-row">
+                <input type="radio" name="indiv-rename-choice" value="keep" v-model="indivUploadRenameChoice" />
+                Keep the uploaded filename
+              </label>
+              <label class="radio-row">
+                <input type="radio" name="indiv-rename-choice" value="rename" v-model="indivUploadRenameChoice" />
+                Rename it
+              </label>
             </div>
-            <div class="field">
-              <label class="field-label">Instrument <span class="optional">(optional)</span></label>
-              <select v-model="indivInstrumentId" class="text-input" :disabled="indivUploading">
-                <option value="">— select instrument —</option>
-                <option v-for="inst in instruments" :key="inst.id" :value="inst.id">{{ inst.name }}</option>
-              </select>
+
+            <div class="fields-row">
+              <template v-if="indivRecordMode === 'record' || indivUploadRenameChoice === 'rename'">
+                <div class="field">
+                  <label class="field-label">Name</label>
+                  <div class="autocomplete-container">
+                    <input v-model="indivName" type="text" class="text-input"
+                           placeholder="Recording name" :disabled="indivUploading"
+                           @focus="showIndivNameDropdown = true"
+                           @blur="showIndivNameDropdown = false"
+                           @input="indivNameAutoFilled = false" />
+                    <ul v-if="showIndivNameDropdown && filteredIndivSongOptions.length > 0" class="autocomplete-dropdown">
+                      <li v-for="song in filteredIndivSongOptions" :key="song"
+                          @mousedown.prevent="indivName = song; showIndivNameDropdown = false">
+                        {{ song }}
+                      </li>
+                    </ul>
+                  </div>
+                </div>
+                <div class="field">
+                  <label class="field-label">Original recording date <span class="optional">(optional)</span></label>
+                  <input v-model="indivRecordedAt" type="date" class="text-input" :disabled="indivUploading" />
+                </div>
+              </template>
+              <div class="field">
+                <label class="field-label">Instrument <span class="optional">(optional)</span></label>
+                <select v-model="indivInstrumentId" class="text-input" :disabled="indivUploading">
+                  <option value="">— select instrument —</option>
+                  <option v-for="inst in instruments" :key="inst.id" :value="inst.id">{{ inst.name }}</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="field-label">Band <span class="optional">(optional)</span></label>
+                <select v-model="indivUploadBandId" class="text-input" :disabled="indivUploading">
+                  <option value="">— no band —</option>
+                  <option v-for="b in activeBands" :key="b.id" :value="b.id">{{ b.name }}</option>
+                </select>
+              </div>
             </div>
-            <div class="field">
-              <label class="field-label">Band <span class="optional">(optional)</span></label>
-              <select v-model="indivUploadBandId" class="text-input" :disabled="indivUploading">
-                <option value="">— no band —</option>
-                <option v-for="b in activeBands" :key="b.id" :value="b.id">{{ b.name }}</option>
-              </select>
+
+            <div v-if="recordingPreviewUrl && !recordingFor" class="recording-preview">
+              <span class="preview-label">Preview recording:</span>
+              <audio controls :src="recordingPreviewUrl" @loadedmetadata="onAudioMetadata" style="height:32px;"></audio>
             </div>
-          </div>
-          <div v-if="recordingPreviewUrl && !recordingFor" class="recording-preview">
-            <span class="preview-label">Preview recording:</span>
-            <audio controls :src="recordingPreviewUrl" @loadedmetadata="onAudioMetadata" style="height:32px;"></audio>
-          </div>
-          <p v-if="indivUploadError" class="error-msg">{{ indivUploadError }}</p>
-          <button class="upload-btn" @click="handleIndivUpload" :disabled="!indivFile || indivUploading">
-            {{ indivUploading ? 'Uploading…' : 'Upload' }}
-          </button>
+            <p v-if="indivUploadError" class="error-msg">{{ indivUploadError }}</p>
+            <div class="save-row">
+              <button class="upload-btn" @click="handleIndivUpload" :disabled="!indivFile || indivUploading">
+                {{ indivUploading ? 'Saving…' : (indivRecordMode === 'record' ? 'Save Recording' : 'Upload') }}
+              </button>
+              <button v-if="indivRecordMode === 'record' && indivFile" class="discard-btn"
+                      :disabled="indivUploading" @click="discardIndivRecording">
+                Discard
+              </button>
+            </div>
+          </template>
         </div>
       </div>
 
