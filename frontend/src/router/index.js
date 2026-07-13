@@ -5,7 +5,7 @@ import { user } from '@/stores/user.js'
 // Prosaurus-owned hosts. Anything else is a connected custom domain — that visitor
 // gets a dedicated minimal route table (see customDomainRoutes below) so their own
 // domain stays in the address bar the whole time (no redirect to /store/:storeUrl).
-const KNOWN_HOSTS = ['prosaurus.com', 'www.prosaurus.com', 'local.prosaurus.com', 'localhost', '127.0.0.1']
+const KNOWN_HOSTS = ['prosaurus.com', 'www.prosaurus.com', 'local.prosaurus.com', 'test.prosaurus.com', 'test.dev.prosaurus.com', 'dev.prosaurus.com', 'localhost', '127.0.0.1']
 const isCustomDomain = typeof window !== 'undefined' && !KNOWN_HOSTS.includes(window.location.hostname)
 
 const customDomainRoutes = [
