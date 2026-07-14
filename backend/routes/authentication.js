@@ -288,14 +288,25 @@ router.post('/login', async (req, res) => {
     client = await getClient();
     console.log('Connected to DB');
 
-    const user = await client.query('SELECT * FROM "users" WHERE handle = $1', [req.body.handle]);
+    // Support both 'handle' (legacy) and 'usernameOrEmail' (current)
+    const identifier = req.body.usernameOrEmail || req.body.handle;
+    if (!identifier) {
+      client.release();
+      return res.status(400).json({ message: 'Username or email is required' });
+    }
+
+    // Check if identifier is an email (contains @) or a handle
+    const isEmail = identifier.includes('@');
+    const user = isEmail
+      ? await client.query('SELECT * FROM "users" WHERE email = $1', [identifier])
+      : await client.query('SELECT * FROM "users" WHERE handle = $1', [identifier]);
 
     if (user.rowCount === 1) {
       // User has been located
       const hash = await hashPasswordWithSalt(req.body.password, user.rows[0].salt);
       if (hash === user.rows[0].hash) {
 
-        const payload = { username: req.body.handle };
+        const payload = { username: user.rows[0].handle };
         const token = jwt.sign(payload, SECRET_KEY, { expiresIn: '30d' });
 
         // Ensure EULA notification exists for this user.
