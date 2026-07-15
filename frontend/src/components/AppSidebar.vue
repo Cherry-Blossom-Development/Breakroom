@@ -10,6 +10,7 @@ import InviteModal from './InviteModal.vue'
 
 const props = defineProps({
   isAdmin: Boolean,
+  isMarketing: Boolean,
   visible: Boolean
 })
 
@@ -348,6 +349,14 @@ function handleNavClick() {
           <RouterLink to="/admin/moderation" class="admin-item" @click="handleNavClick">Moderation</RouterLink>
           <RouterLink to="/admin/impersonate" class="admin-item" @click="handleNavClick">Impersonate</RouterLink>
         </div>
+      </div>
+
+      <!-- Marketing (only for users with marketing access) -->
+      <div v-if="isMarketing" class="nav-section">
+        <RouterLink to="/marketing" class="nav-item" @click="handleNavClick">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
+          <span>Marketing</span>
+        </RouterLink>
       </div>
 
       <!-- Primary -->

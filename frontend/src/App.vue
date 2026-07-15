@@ -34,6 +34,7 @@ const router = useRouter()
 const route = useRoute()
 const sidebarOpen = ref(false)
 const isAdmin = ref(false)
+const isMarketing = ref(false)
 const showSupport = ref(false)
 
 // Impersonation banner
@@ -74,6 +75,22 @@ async function checkAdminPermission() {
     isAdmin.value = data.has_permission || false
   } catch (err) {
     isAdmin.value = false
+  }
+}
+
+async function checkMarketingPermission() {
+  if (!user.username) {
+    isMarketing.value = false
+    return
+  }
+  try {
+    const res = await fetch('/api/auth/can/marketing_access', {
+      credentials: 'include'
+    })
+    const data = await res.json()
+    isMarketing.value = data.has_permission || false
+  } catch (err) {
+    isMarketing.value = false
   }
 }
 
@@ -138,6 +155,7 @@ function teardownNotificationSocket() {
 
 user.fetchUser().then(() => {
   checkAdminPermission()
+  checkMarketingPermission()
   if (user.username) {
     notificationStore.fetchNotifications()
     moderationStore.fetchBlockList()
@@ -149,6 +167,7 @@ user.fetchUser().then(() => {
 
 watch(() => user.username, (newUsername) => {
   checkAdminPermission()
+  checkMarketingPermission()
   if (newUsername) {
     notificationStore.fetchNotifications()
     moderationStore.fetchBlockList()
@@ -288,6 +307,7 @@ setInterval(() => {
 
     <AppSidebar
       :is-admin="isAdmin"
+      :is-marketing="isMarketing"
       :visible="sidebarOpen"
       @close="closeSidebar"
       @logout="logout"
@@ -312,6 +332,7 @@ setInterval(() => {
 
     <BottomTabBar
       :is-admin="isAdmin"
+      :is-marketing="isMarketing"
       @logout="logout"
     />
   </template>

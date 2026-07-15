@@ -90,6 +90,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/marketing',
+      name: 'marketing',
+      component: () => import('../views/MarketingPage.vue'),
+      meta: { requiresAuth: true, requiresMarketing: true },
+    },
+    {
       path: '/admin',
       name: 'admin',
       component: AdminLayout,
@@ -382,6 +388,22 @@ router.beforeEach(async (to, from, next) => {
           next()
         } else {
           // Not an admin, redirect to breakroom
+          next({ name: 'breakroom' })
+        }
+      } catch (err) {
+        next({ name: 'breakroom' })
+      }
+    } else if (to.matched.some(record => record.meta.requiresMarketing)) {
+      // Check for marketing permission
+      try {
+        const res = await fetch('/api/auth/can/marketing_access', {
+          credentials: 'include'
+        })
+        const data = await res.json()
+        if (data.has_permission) {
+          next()
+        } else {
+          // Not granted marketing access, redirect to breakroom
           next({ name: 'breakroom' })
         }
       } catch (err) {
