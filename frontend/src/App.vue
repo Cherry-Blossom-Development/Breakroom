@@ -6,6 +6,7 @@ import { notificationStore } from './stores/notification.js'
 import { moderationStore } from './stores/moderation.js'
 import { badges } from './stores/badges.js'
 import { initEventService, destroyEventService } from './utilities/eventService.js'
+import { getVisitorId } from './utilities/visitorId.js'
 import HeaderNotification from './components/HeaderNotification.vue'
 import PopupNotification from './components/PopupNotification.vue'
 import MentionToast from './components/MentionToast.vue'
@@ -94,6 +95,18 @@ async function checkMarketingPermission() {
   }
 }
 
+// Records one visit per browser session (works whether or not the user is logged in)
+function recordVisit() {
+  if (sessionStorage.getItem('visit_logged')) return
+  sessionStorage.setItem('visit_logged', '1')
+  fetch('/api/analytics/visit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ visitorId: getVisitorId() })
+  }).catch(() => {})
+}
+
 // Socket.IO for real-time notifications
 let socket = null
 const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
@@ -152,6 +165,8 @@ function teardownNotificationSocket() {
     socket = null
   }
 }
+
+recordVisit()
 
 user.fetchUser().then(() => {
   checkAdminPermission()

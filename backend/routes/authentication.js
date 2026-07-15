@@ -5,6 +5,7 @@ const path = require('path');
 
 const { getClient } = require('../utilities/db');
 const { sendMail } = require('../utilities/aws-ses-email');
+const { getPlatform } = require('../utilities/platform');
 
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
@@ -36,8 +37,8 @@ router.post('/signup', async (req, res) => {
     expiresAt.setHours(expiresAt.getHours() + 1);
 
     const result = await client.query(`INSERT INTO
-      "users" (handle, first_name, last_name, email, verification_token, verification_expires_at, hash, salt)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8);`, [
+      "users" (handle, first_name, last_name, email, verification_token, verification_expires_at, hash, salt, signup_platform)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`, [
         req.body.handle,
         req.body.first_name,
         req.body.last_name,
@@ -45,7 +46,8 @@ router.post('/signup', async (req, res) => {
         verificationToken,
         expiresAt,
         req.body.hash,
-        req.body.salt
+        req.body.salt,
+        getPlatform(req)
       ]);
 
     // Assign new user to Standard group
@@ -312,6 +314,12 @@ router.post('/login', async (req, res) => {
         // Ensure EULA notification exists for this user.
         // If not yet accepted (dismissed), create or reset to 'unviewed' so the popup shows.
         const userId = user.rows[0].id;
+
+        await client.query(
+          'INSERT INTO analytics_logins (user_id, platform) VALUES ($1, $2)',
+          [userId, getPlatform(req)]
+        );
+
         const eulaType = await client.query(
           `SELECT nt.id FROM notification_types nt
            JOIN event_types et ON nt.event_id = et.id

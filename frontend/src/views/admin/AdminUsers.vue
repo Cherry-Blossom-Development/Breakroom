@@ -23,6 +23,7 @@
               <th>Last Name</th>
               <th>Email</th>
               <th>Plan</th>
+              <th>Internal</th>
               <th>Options</th>
             </tr>
           </thead>
@@ -37,6 +38,9 @@
                 <span class="plan-badge" :class="planClass(user)">
                   {{ planLabel(user) }}
                 </span>
+              </td>
+              <td>
+                <span v-if="user.is_internal" class="internal-badge">Internal</span>
               </td>
               <td>
                 <button class="btn-edit" @click="openEdit(user)">Edit</button>
@@ -93,6 +97,10 @@
               <input v-model="editingUser.last_name" placeholder="Last Name" />
             </div>
           </div>
+          <label class="internal-checkbox">
+            <input type="checkbox" v-model="editingUser.is_internal" />
+            Internal user (excluded from analytics)
+          </label>
         </section>
 
         <!-- Payment Plan -->
@@ -419,6 +427,11 @@ thead { background-color: var(--color-background-soft); }
 .plan-paid { background: #d4edda; color: #155724; }
 .plan-promo { background: #d0e8ff; color: #0051a2; }
 .plan-free { background: var(--color-background-soft); color: var(--color-text-muted); }
+
+.internal-badge { font-size: 0.75rem; font-weight: 700; padding: 2px 8px; border-radius: 10px; white-space: nowrap; background: var(--color-background-soft); color: var(--color-text-muted); }
+
+.internal-checkbox { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 0.9rem; cursor: pointer; }
+.internal-checkbox input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; accent-color: var(--color-accent); }
 
 .btn-edit { padding: 5px 14px; border: none; border-radius: 4px; cursor: pointer; background: var(--color-accent); color: white; font-size: 0.85rem; }
 .btn-edit:hover { background: var(--color-accent-hover); }

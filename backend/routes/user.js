@@ -34,7 +34,7 @@ router.get('/all', async (req, res) => {
   try {
     const users = await client.query(
       `SELECT
-         u.id, u.handle, u.first_name, u.last_name, u.email,
+         u.id, u.handle, u.first_name, u.last_name, u.email, u.is_internal,
          us.platform  AS sub_platform,
          us.status    AS sub_status,
          us.expires_at AS sub_expires_at
@@ -135,16 +135,17 @@ router.put('/:id', async (req, res) => {
     }
 
     // Begin the transactional part of the process
-    await client.query('BEGIN');
+    await client.beginTransaction();
 
     const searchResult = await client.query(
-      `UPDATE users SET 
+      `UPDATE users SET
         handle = $1,
         first_name = $2,
         last_name = $3,
-        email = $4
-      WHERE id = $5`,
-      [user.handle, user.first_name, user.last_name, user.email, id]
+        email = $4,
+        is_internal = $5
+      WHERE id = $6`,
+      [user.handle, user.first_name, user.last_name, user.email, user.is_internal ?? false, id]
     );
 
     // make sure there is even a user to update
@@ -196,13 +197,13 @@ router.put('/:id', async (req, res) => {
       );
     }
 
-    await client.query('COMMIT');
+    await client.commit();
 
     // Return updated user (optionally with fresh data if needed)
     const result = await client.query('SELECT * FROM users WHERE id = $1', [id]);
     res.status(200).json(result.rows[0]);
   } catch (err) {
-    await client.query('ROLLBACK');
+    await client.rollback();
     console.error('Error updating user', err);
     res.status(500).json({ message: 'Failed to update user' });
   } finally {

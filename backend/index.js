@@ -114,6 +114,7 @@ const subscriptionsRoutes = require('./routes/subscriptions');
 const shippingRoutes = require('./routes/shipping');
 const scheduledMessagesRoutes = require('./routes/scheduled-messages');
 const customDomainsRoutes = require('./routes/custom-domains');
+const analyticsRoutes = require('./routes/analytics');
 const { getS3Url } = require('./utilities/aws-s3');
 
 
@@ -168,6 +169,7 @@ app.use('/api/subscriptions', subscriptionsRoutes);
 app.use('/api/shipping', shippingRoutes);
 app.use('/api/scheduled-messages', scheduledMessagesRoutes);
 app.use('/api/custom-domains', customDomainsRoutes);
+app.use('/api/analytics', analyticsRoutes);
 const emailNannyRoutes = require('./routes/emailnanny');
 app.use('/api/emailnanny', emailNannyRoutes);
 
