@@ -11,6 +11,28 @@ const SECRET_KEY = process.env.SECRET_KEY;
 
 const PLATFORMS = ['web', 'android', 'ios'];
 
+// Known bot/crawler User-Agent patterns (case-insensitive matching)
+const BOT_PATTERNS = [
+  'googlebot', 'bingbot', 'slurp', 'duckduckbot', 'baiduspider',
+  'yandexbot', 'sogou', 'exabot', 'facebot', 'ia_archiver',
+  'mj12bot', 'ahrefsbot', 'semrushbot', 'dotbot', 'rogerbot',
+  'seznambot', 'petalbot', 'bytespider', 'applebot', 'twitterbot',
+  'linkedinbot', 'slackbot', 'telegrambot', 'whatsapp', 'discordbot',
+  'crawler', 'spider', 'scraper', 'bot/', 'headless', 'phantom',
+  'python-requests', 'python-urllib', 'axios/', 'node-fetch', 'go-http-client',
+  'curl/', 'wget/', 'httpie/', 'postman', 'insomnia',
+];
+
+/**
+ * Returns true if the request appears to be from a bot/crawler.
+ * Checks User-Agent against known bot patterns.
+ */
+function isBot(req) {
+  const userAgent = (req.headers['user-agent'] || '').toLowerCase();
+  if (!userAgent) return true; // No UA = likely bot
+  return BOT_PATTERNS.some(pattern => userAgent.includes(pattern));
+}
+
 const authenticate = async (req, res, next) => {
   const token = extractToken(req);
   if (!token) return res.status(401).json({ message: 'Not authenticated' });
@@ -74,13 +96,19 @@ function foldPlatformRows(rows, { withUnique } = {}) {
 /**
  * POST /api/analytics/visit
  * Public — records one visit (anonymous or authenticated). Fired once per
- * client session by web/Android/iOS.
+ * client session by web/Android/iOS. Bot traffic is silently ignored.
  */
 router.post('/visit', async (req, res) => {
   const { visitorId } = req.body;
   if (!visitorId) {
     return res.status(400).json({ message: 'visitorId is required' });
   }
+
+  // Silently skip bot traffic (return success to not break anything)
+  if (isBot(req)) {
+    return res.status(201).json({ message: 'Visit recorded' });
+  }
+
   const platform = getPlatform(req);
   const client = await getClient();
   try {
