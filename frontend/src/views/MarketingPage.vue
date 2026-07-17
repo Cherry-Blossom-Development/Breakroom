@@ -57,6 +57,41 @@ async function loadAnalytics() {
 onMounted(loadAnalytics)
 watch(selectedRange, loadAnalytics)
 
+// --- Feature usage ---------------------------------------------------------
+// Independent range picker from Basic Stats -- this is its own dashboard
+// section (see interaction.md: "if one chart needs its own range, it's a
+// different dashboard").
+
+const featureRange = ref('30d')
+const featureRangeLabel = computed(() => rangeDefs.find(r => r.key === featureRange.value)?.label || '')
+const featureInitialLoading = ref(true)
+const featureRefreshing = ref(false)
+const featureError = ref('')
+const features = ref([])
+
+async function loadFeatureUsage() {
+  const isFirstLoad = !features.value.length
+  if (isFirstLoad) featureInitialLoading.value = true
+  else featureRefreshing.value = true
+  featureError.value = ''
+  try {
+    const res = await fetch(`/api/analytics/features?range=${featureRange.value}`, { credentials: 'include' })
+    if (!res.ok) throw new Error('Failed to load feature usage')
+    const data = await res.json()
+    features.value = data.features || []
+  } catch (err) {
+    featureError.value = 'Failed to load feature usage data.'
+  } finally {
+    featureInitialLoading.value = false
+    featureRefreshing.value = false
+  }
+}
+
+onMounted(loadFeatureUsage)
+watch(featureRange, loadFeatureUsage)
+
+const featureMax = computed(() => Math.max(1, ...features.value.map(f => f.total)))
+
 // --- Last 30 Days line chart ---------------------------------------------
 
 const seriesDefs = [
@@ -395,6 +430,53 @@ const tooltipStyle = computed(() => {
           </table>
         </div>
       </section>
+
+      <section class="basic-stats-card feature-usage-card viz-root" :class="{ refreshing: featureRefreshing }">
+        <div class="basic-stats-header">
+          <h2 class="basic-stats-title">Feature Usage</h2>
+          <div class="range-control">
+            <label for="feature-range-select">Time range</label>
+            <select id="feature-range-select" v-model="featureRange">
+              <option v-for="r in rangeDefs" :key="r.key" :value="r.key">{{ r.label }}</option>
+            </select>
+          </div>
+        </div>
+
+        <div v-if="featureInitialLoading" class="status-msg">Loading...</div>
+        <div v-else-if="featureError" class="status-msg error">{{ featureError }}</div>
+
+        <template v-else>
+          <p class="feature-usage-sub">Which parts of the site members actually use, over the {{ featureRangeLabel.toLowerCase() }}.</p>
+
+          <div class="legend feature-legend">
+            <span class="legend-item legend-item--static">
+              <span class="legend-swatch" style="background: var(--series-free)"></span>
+              <span class="legend-label">Free</span>
+            </span>
+            <span class="legend-item legend-item--static">
+              <span class="legend-swatch" style="background: var(--series-monetized)"></span>
+              <span class="legend-label">Monetized</span>
+            </span>
+          </div>
+
+          <div class="feature-bars">
+            <div v-for="f in features" :key="f.key" class="feature-bar-row">
+              <span class="feature-bar-label">{{ f.label }}</span>
+              <div class="feature-bar-track">
+                <div
+                  class="feature-bar-fill"
+                  :class="{ monetized: f.monetized }"
+                  :style="{ width: (f.total / featureMax * 100) + '%' }"
+                ></div>
+              </div>
+              <span class="feature-bar-value">
+                {{ f.total.toLocaleString() }}
+                <span v-if="f.unique !== f.total" class="feature-bar-unique">({{ f.unique.toLocaleString() }} unique)</span>
+              </span>
+            </div>
+          </div>
+        </template>
+      </section>
     </template>
   </section>
 </template>
@@ -537,12 +619,16 @@ const tooltipStyle = computed(() => {
   --series-visitors: #2a78d6;
   --series-logins: #008300;
   --series-signups: #e87ba4;
+  --series-free: #2a78d6;
+  --series-monetized: #eb6834;
 }
 @media (prefers-color-scheme: dark) {
   .viz-root {
     --series-visitors: #3987e5;
     --series-logins: #008300;
     --series-signups: #d55181;
+    --series-free: #3987e5;
+    --series-monetized: #d95926;
   }
 }
 
@@ -707,5 +793,91 @@ th {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--color-text-muted);
+}
+
+/* --- Feature usage --------------------------------------------------- */
+
+.feature-usage-card {
+  margin-top: 24px;
+}
+
+.feature-usage-sub {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  margin: 0 0 16px;
+}
+
+.feature-legend {
+  margin-bottom: 18px;
+}
+
+.legend-item--static {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: default;
+}
+
+.feature-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.feature-bar-row {
+  display: grid;
+  grid-template-columns: 130px 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.feature-bar-label {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.feature-bar-track {
+  background: var(--color-background-soft);
+  border-radius: 4px;
+  height: 20px;
+  overflow: hidden;
+}
+
+.feature-bar-fill {
+  height: 100%;
+  min-width: 3px;
+  border-radius: 4px;
+  background: var(--series-free);
+  transition: width 0.2s;
+}
+
+.feature-bar-fill.monetized {
+  background: var(--series-monetized);
+}
+
+.feature-bar-value {
+  font-size: 0.85rem;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 60px;
+}
+
+.feature-bar-unique {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+}
+
+@media (max-width: 560px) {
+  .feature-bar-row {
+    grid-template-columns: 90px 1fr auto;
+  }
+  .feature-bar-label {
+    font-size: 0.78rem;
+  }
 }
 </style>

@@ -31,17 +31,17 @@ function resolveRange(key) {
 // to a payment flow (Stripe Connect marketplace sales, Prosaurus Pro), so
 // they can be reported on separately from free-to-use tools.
 const FEATURES = {
-  blog: { monetized: false },
-  chat: { monetized: false },
-  friends: { monetized: false },
-  lyrics: { monetized: false },
-  sessions: { monetized: true },
-  art_gallery: { monetized: false },
-  artist_showcase: { monetized: true },
-  kanban: { monetized: false },
-  tool_shed: { monetized: false },
-  company_portal: { monetized: false },
-  band_pages: { monetized: false },
+  blog: { label: 'Blog', monetized: false },
+  chat: { label: 'Chat', monetized: false },
+  friends: { label: 'Friends', monetized: false },
+  lyrics: { label: 'Lyric Lab', monetized: false },
+  sessions: { label: 'Sessions', monetized: true },
+  art_gallery: { label: 'Art Gallery', monetized: false },
+  artist_showcase: { label: 'Artist Showcase', monetized: true },
+  kanban: { label: 'Kanban', monetized: false },
+  tool_shed: { label: 'Tool Shed', monetized: false },
+  company_portal: { label: 'Company Portal', monetized: false },
+  band_pages: { label: 'Band Pages', monetized: false },
 };
 
 // Known bot/crawler User-Agent patterns (case-insensitive matching)
@@ -299,6 +299,45 @@ router.get('/daily', authenticate, checkPermission('marketing_access'), async (r
   } catch (err) {
     console.error('Error fetching daily analytics:', err);
     res.status(500).json({ message: 'Failed to fetch daily analytics' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * GET /api/analytics/features?range=today|7d|30d|year
+ * Marketing-only. Usage totals per major feature over the given range
+ * (defaults to 30d). Every known feature is included even with zero usage,
+ * so the frontend doesn't have to reconcile against the FEATURES registry
+ * itself. Internal users are excluded.
+ */
+router.get('/features', authenticate, checkPermission('marketing_access'), async (req, res) => {
+  const range = resolveRange(req.query.range);
+  const client = await getClient();
+  try {
+    const result = await client.query(`
+      SELECT f.feature, COUNT(*) AS total, COUNT(DISTINCT f.visitor_id) AS unique_count
+      FROM analytics_feature_usage f
+      LEFT JOIN users u ON u.id = f.user_id
+      WHERE f.created_at >= ${range.sql}
+        AND (f.user_id IS NULL OR u.is_internal = FALSE)
+      GROUP BY f.feature
+    `);
+
+    const byFeature = Object.fromEntries(result.rows.map(r => [r.feature, r]));
+
+    const features = Object.entries(FEATURES).map(([key, def]) => ({
+      key,
+      label: def.label,
+      monetized: def.monetized,
+      total: Number(byFeature[key]?.total) || 0,
+      unique: Number(byFeature[key]?.unique_count) || 0,
+    })).sort((a, b) => b.total - a.total);
+
+    res.status(200).json({ features });
+  } catch (err) {
+    console.error('Error fetching feature usage:', err);
+    res.status(500).json({ message: 'Failed to fetch feature usage' });
   } finally {
     client.release();
   }
