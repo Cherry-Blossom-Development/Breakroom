@@ -25,6 +25,25 @@ function resolveRange(key) {
   return RANGES[key] || RANGES['30d'];
 }
 
+// Feature-usage registry. Each key is one "major feature" a member can use,
+// fired once per browser session per feature by the frontend router (see
+// frontend/src/router/index.js). `monetized: true` marks features that lead
+// to a payment flow (Stripe Connect marketplace sales, Prosaurus Pro), so
+// they can be reported on separately from free-to-use tools.
+const FEATURES = {
+  blog: { monetized: false },
+  chat: { monetized: false },
+  friends: { monetized: false },
+  lyrics: { monetized: false },
+  sessions: { monetized: true },
+  art_gallery: { monetized: false },
+  artist_showcase: { monetized: true },
+  kanban: { monetized: false },
+  tool_shed: { monetized: false },
+  company_portal: { monetized: false },
+  band_pages: { monetized: false },
+};
+
 // Known bot/crawler User-Agent patterns (case-insensitive matching)
 const BOT_PATTERNS = [
   'googlebot', 'bingbot', 'slurp', 'duckduckbot', 'baiduspider',
@@ -126,6 +145,42 @@ router.post('/visit', async (req, res) => {
   } catch (err) {
     console.error('Error recording visit:', err);
     res.status(500).json({ message: 'Failed to record visit' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/analytics/feature
+ * Public — records one feature-usage touch (anonymous or authenticated).
+ * Fired once per client session per feature by web/Android/iOS. Bot traffic
+ * is silently ignored. `feature` must be one of the known FEATURES keys.
+ */
+router.post('/feature', async (req, res) => {
+  const { feature, visitorId } = req.body;
+  if (!feature || !Object.prototype.hasOwnProperty.call(FEATURES, feature)) {
+    return res.status(400).json({ message: 'Unknown feature' });
+  }
+  if (!visitorId) {
+    return res.status(400).json({ message: 'visitorId is required' });
+  }
+
+  if (isBot(req)) {
+    return res.status(201).json({ message: 'Feature usage recorded' });
+  }
+
+  const platform = getPlatform(req);
+  const client = await getClient();
+  try {
+    const userId = await resolveUserId(req, client);
+    await client.query(
+      'INSERT INTO analytics_feature_usage (feature, visitor_id, user_id, platform) VALUES ($1, $2, $3, $4)',
+      [feature, visitorId, userId, platform]
+    );
+    res.status(201).json({ message: 'Feature usage recorded' });
+  } catch (err) {
+    console.error('Error recording feature usage:', err);
+    res.status(500).json({ message: 'Failed to record feature usage' });
   } finally {
     client.release();
   }

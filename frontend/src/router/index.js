@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import HomePage from '../views/HomePage.vue'
 import { user } from '@/stores/user.js'
+import { getVisitorId } from '@/utilities/visitorId.js'
 
 // Prosaurus-owned hosts. Anything else is a connected custom domain — that visitor
 // gets a dedicated minimal route table (see customDomainRoutes below) so their own
@@ -415,6 +416,55 @@ router.beforeEach(async (to, from, next) => {
   } else {
     next()
   }
+})
+
+// Feature-usage tracking. Route names map to one of the "major feature"
+// keys the backend knows about (backend/routes/analytics.js FEATURES).
+// Fired once per browser session per feature, mirroring how App.vue records
+// one visit per session. Web-only for now -- Android/iOS get their own
+// instrumentation later.
+const FEATURE_ROUTES = {
+  blog: ['blog', 'blogView'],
+  chat: ['chat'],
+  friends: ['friends'],
+  lyrics: ['lyrics'],
+  sessions: ['sessions'],
+  art_gallery: ['artGallery'],
+  artist_showcase: [
+    'collections',
+    'collectionDetail',
+    'collectionsStorefront',
+    'collectionsDomainSetup',
+    'collectionsPayment',
+    'collectionsShipping',
+    'collectionsOrders',
+  ],
+  kanban: ['kanban'],
+  tool_shed: ['toolShed'],
+  company_portal: ['aboutCompany', 'employment', 'helpDesk', 'companyPortal', 'companyDetail', 'projectDetail'],
+  band_pages: ['bandPageSetup', 'bandDomainSetup'],
+}
+
+const ROUTE_NAME_TO_FEATURE = {}
+for (const [feature, routeNames] of Object.entries(FEATURE_ROUTES)) {
+  for (const routeName of routeNames) ROUTE_NAME_TO_FEATURE[routeName] = feature
+}
+
+function recordFeatureUsage(feature) {
+  const sessionKey = `feature_logged_${feature}`
+  if (sessionStorage.getItem(sessionKey)) return
+  sessionStorage.setItem(sessionKey, '1')
+  fetch('/api/analytics/feature', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ feature, visitorId: getVisitorId() }),
+  }).catch(() => {})
+}
+
+router.afterEach((to) => {
+  const feature = ROUTE_NAME_TO_FEATURE[to.name]
+  if (feature) recordFeatureUsage(feature)
 })
 
 export default router
