@@ -1,16 +1,20 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 
-const loading = ref(true)
+const initialLoading = ref(true)
+const refreshing = ref(false)
 const error = ref('')
 const summary = ref(null)
 const daily = ref([])
 
-const windows = [
+const rangeDefs = [
   { key: 'today', label: 'Today' },
   { key: '7d', label: 'Last 7 Days' },
   { key: '30d', label: 'Last 30 Days' },
+  { key: 'year', label: 'Last Year' },
 ]
+const selectedRange = ref('30d')
+const selectedRangeLabel = computed(() => rangeDefs.find(r => r.key === selectedRange.value)?.label || '')
 
 const metricDefs = [
   { key: 'visits', label: 'Visitors', hasUnique: true },
@@ -27,12 +31,15 @@ function formatDate(dateStr) {
 const dailyDescending = ref([])
 
 async function loadAnalytics() {
-  loading.value = true
+  const isFirstLoad = !summary.value
+  if (isFirstLoad) initialLoading.value = true
+  else refreshing.value = true
   error.value = ''
   try {
+    const range = selectedRange.value
     const [summaryRes, dailyRes] = await Promise.all([
-      fetch('/api/analytics/summary', { credentials: 'include' }),
-      fetch('/api/analytics/daily', { credentials: 'include' }),
+      fetch(`/api/analytics/summary?range=${range}`, { credentials: 'include' }),
+      fetch(`/api/analytics/daily?range=${range}`, { credentials: 'include' }),
     ])
     if (!summaryRes.ok || !dailyRes.ok) throw new Error('Failed to load analytics')
     summary.value = await summaryRes.json()
@@ -42,11 +49,13 @@ async function loadAnalytics() {
   } catch (err) {
     error.value = 'Failed to load analytics data.'
   } finally {
-    loading.value = false
+    initialLoading.value = false
+    refreshing.value = false
   }
 }
 
 onMounted(loadAnalytics)
+watch(selectedRange, loadAnalytics)
 
 // --- Last 30 Days line chart ---------------------------------------------
 
@@ -211,174 +220,181 @@ const tooltipStyle = computed(() => {
   <section class="page-container">
     <h1>Marketing</h1>
 
-    <div v-if="loading" class="status-msg">Loading...</div>
+    <div v-if="initialLoading" class="status-msg">Loading...</div>
     <div v-else-if="error" class="status-msg error">{{ error }}</div>
 
     <template v-else-if="summary">
-      <div class="stat-grid">
-        <div v-for="metric in metricDefs" :key="metric.key" class="stat-card">
-          <h2>{{ metric.label }}</h2>
-          <div class="stat-windows">
-            <div v-for="w in windows" :key="w.key" class="stat-window">
-              <div class="stat-window-label">{{ w.label }}</div>
-              <div class="stat-value">
-                {{ metric.hasUnique ? summary[metric.key][w.key].unique : summary[metric.key][w.key].total }}
-              </div>
-              <div v-if="metric.hasUnique" class="stat-subvalue">
-                {{ summary[metric.key][w.key].total }} total visits
-              </div>
-              <div class="stat-platforms">
-                <span v-for="(label, platform) in platformLabels" :key="platform">
-                  {{ label }}: {{ metric.hasUnique
-                    ? summary[metric.key][w.key].byPlatform[platform].unique
-                    : summary[metric.key][w.key].byPlatform[platform].total }}
-                </span>
-              </div>
+      <section class="basic-stats-card" :class="{ refreshing }">
+        <div class="basic-stats-header">
+          <h2 class="basic-stats-title">Basic Stats</h2>
+          <div class="range-control">
+            <label for="range-select">Time range</label>
+            <select id="range-select" v-model="selectedRange">
+              <option v-for="r in rangeDefs" :key="r.key" :value="r.key">{{ r.label }}</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <div v-for="metric in metricDefs" :key="metric.key" class="stat-card">
+            <h3>{{ metric.label }}</h3>
+            <div class="stat-value">
+              {{ metric.hasUnique ? summary[metric.key].unique : summary[metric.key].total }}
+            </div>
+            <div v-if="metric.hasUnique" class="stat-subvalue">
+              {{ summary[metric.key].total }} total visits
+            </div>
+            <div class="stat-platforms">
+              <span v-for="(label, platform) in platformLabels" :key="platform">
+                {{ label }}: {{ metric.hasUnique
+                  ? summary[metric.key].byPlatform[platform].unique
+                  : summary[metric.key].byPlatform[platform].total }}
+              </span>
             </div>
           </div>
         </div>
-      </div>
 
-      <div class="daily-header">
-        <h2 class="daily-heading">Last 30 Days</h2>
-        <button type="button" class="table-toggle" @click="showTable = !showTable">
-          {{ showTable ? 'View as chart' : 'View as table' }}
-        </button>
-      </div>
-
-      <div v-if="!showTable" class="viz-root chart-card">
-        <div class="legend" role="group" aria-label="Toggle series">
-          <label v-for="s in seriesDefs" :key="s.key" class="legend-item">
-            <input
-              type="checkbox"
-              :checked="visibleSeries[s.key]"
-              @change="toggleSeries(s.key)"
-            />
-            <span class="legend-swatch" :class="{ dim: !visibleSeries[s.key] }" :style="{ background: `var(${s.varName})` }"></span>
-            <span class="legend-label" :class="{ dim: !visibleSeries[s.key] }">{{ s.label }}</span>
-          </label>
+        <div class="chart-section-header">
+          <h3 class="chart-section-title">{{ selectedRangeLabel }} Trend</h3>
+          <button type="button" class="table-toggle" @click="showTable = !showTable">
+            {{ showTable ? 'View as chart' : 'View as table' }}
+          </button>
         </div>
 
-        <div class="chart-wrap">
-          <svg
-            ref="svgEl"
-            :viewBox="`0 0 ${chartW} ${chartH}`"
-            class="chart-svg"
-            @pointermove="onPointerMove"
-            @pointerleave="onPointerLeave"
-          >
-            <!-- gridlines + y ticks -->
-            <g class="gridlines">
+        <div v-if="!showTable" class="viz-root chart-card">
+          <div class="legend" role="group" aria-label="Toggle series">
+            <label v-for="s in seriesDefs" :key="s.key" class="legend-item">
+              <input
+                type="checkbox"
+                :checked="visibleSeries[s.key]"
+                @change="toggleSeries(s.key)"
+              />
+              <span class="legend-swatch" :class="{ dim: !visibleSeries[s.key] }" :style="{ background: `var(${s.varName})` }"></span>
+              <span class="legend-label" :class="{ dim: !visibleSeries[s.key] }">{{ s.label }}</span>
+            </label>
+          </div>
+
+          <div class="chart-wrap">
+            <svg
+              ref="svgEl"
+              :viewBox="`0 0 ${chartW} ${chartH}`"
+              class="chart-svg"
+              @pointermove="onPointerMove"
+              @pointerleave="onPointerLeave"
+            >
+              <!-- gridlines + y ticks -->
+              <g class="gridlines">
+                <line
+                  v-for="(t, idx) in yTicks"
+                  :key="idx"
+                  :x1="margin.left"
+                  :x2="chartW - margin.right"
+                  :y1="yForValue(t)"
+                  :y2="yForValue(t)"
+                />
+                <text
+                  v-for="(t, idx) in yTicks"
+                  :key="'lbl' + idx"
+                  :x="margin.left - 8"
+                  :y="yForValue(t)"
+                  class="axis-label y-label"
+                >{{ Math.round(t).toLocaleString() }}</text>
+              </g>
+
+              <!-- x axis date labels -->
+              <g class="x-axis">
+                <text
+                  v-for="t in xAxisTicks"
+                  :key="t.i"
+                  :x="t.x"
+                  :y="chartH - margin.bottom + 18"
+                  class="axis-label x-label"
+                >{{ formatDate(t.date) }}</text>
+              </g>
+
+              <!-- crosshair -->
               <line
-                v-for="(t, idx) in yTicks"
-                :key="idx"
-                :x1="margin.left"
-                :x2="chartW - margin.right"
-                :y1="yForValue(t)"
-                :y2="yForValue(t)"
+                v-if="hoverDay"
+                class="crosshair"
+                :x1="hoverX"
+                :x2="hoverX"
+                :y1="margin.top"
+                :y2="chartH - margin.bottom"
               />
-              <text
-                v-for="(t, idx) in yTicks"
-                :key="'lbl' + idx"
-                :x="margin.left - 8"
-                :y="yForValue(t)"
-                class="axis-label y-label"
-              >{{ Math.round(t).toLocaleString() }}</text>
-            </g>
 
-            <!-- x axis date labels -->
-            <g class="x-axis">
-              <text
-                v-for="t in xAxisTicks"
-                :key="t.i"
-                :x="t.x"
-                :y="chartH - margin.bottom + 18"
-                class="axis-label x-label"
-              >{{ formatDate(t.date) }}</text>
-            </g>
+              <!-- series lines -->
+              <g v-for="s in seriesPaths" :key="s.key">
+                <path
+                  v-if="s.visible"
+                  :d="s.d"
+                  fill="none"
+                  :stroke="`var(${s.varName})`"
+                  stroke-width="2"
+                  stroke-linejoin="round"
+                  stroke-linecap="round"
+                />
+                <template v-if="s.visible && hoverDay">
+                  <circle
+                    :cx="xForIndex(hoverIndex)"
+                    :cy="yForValue(hoverDay[s.key] || 0)"
+                    r="4"
+                    :fill="`var(${s.varName})`"
+                    stroke="var(--color-background-soft)"
+                    stroke-width="2"
+                  />
+                </template>
+              </g>
 
-            <!-- crosshair -->
-            <line
-              v-if="hoverDay"
-              class="crosshair"
-              :x1="hoverX"
-              :x2="hoverX"
-              :y1="margin.top"
-              :y2="chartH - margin.bottom"
-            />
-
-            <!-- series lines -->
-            <g v-for="s in seriesPaths" :key="s.key">
-              <path
-                v-if="s.visible"
-                :d="s.d"
-                fill="none"
-                :stroke="`var(${s.varName})`"
-                stroke-width="2"
-                stroke-linejoin="round"
-                stroke-linecap="round"
-              />
-              <template v-if="s.visible && hoverDay">
+              <!-- direct end labels -->
+              <g v-for="lbl in endLabels" :key="'end' + lbl.key">
                 <circle
-                  :cx="xForIndex(hoverIndex)"
-                  :cy="yForValue(hoverDay[s.key] || 0)"
+                  :cx="chartW - margin.right"
+                  :cy="lbl.y"
                   r="4"
-                  :fill="`var(${s.varName})`"
-                  stroke="var(--color-background-card)"
+                  :fill="`var(${lbl.varName})`"
+                  stroke="var(--color-background-soft)"
                   stroke-width="2"
                 />
-              </template>
-            </g>
+                <text
+                  :x="chartW - margin.right + 8"
+                  :y="lbl.y"
+                  class="end-label"
+                >{{ lbl.value.toLocaleString() }}</text>
+              </g>
+            </svg>
 
-            <!-- direct end labels -->
-            <g v-for="lbl in endLabels" :key="'end' + lbl.key">
-              <circle
-                :cx="chartW - margin.right"
-                :cy="lbl.y"
-                r="4"
-                :fill="`var(${lbl.varName})`"
-                stroke="var(--color-background-card)"
-                stroke-width="2"
-              />
-              <text
-                :x="chartW - margin.right + 8"
-                :y="lbl.y"
-                class="end-label"
-              >{{ lbl.value.toLocaleString() }}</text>
-            </g>
-          </svg>
-
-          <div v-if="hoverDay" class="chart-tooltip" :style="tooltipStyle">
-            <div class="tooltip-date">{{ formatDate(hoverDay.date) }}</div>
-            <div v-for="s in seriesDefs" :key="s.key" v-show="visibleSeries[s.key]" class="tooltip-row">
-              <span class="tooltip-key" :style="{ background: `var(${s.varName})` }"></span>
-              <span class="tooltip-label">{{ s.label }}</span>
-              <span class="tooltip-value">{{ (hoverDay[s.key] || 0).toLocaleString() }}</span>
+            <div v-if="hoverDay" class="chart-tooltip" :style="tooltipStyle">
+              <div class="tooltip-date">{{ formatDate(hoverDay.date) }}</div>
+              <div v-for="s in seriesDefs" :key="s.key" v-show="visibleSeries[s.key]" class="tooltip-row">
+                <span class="tooltip-key" :style="{ background: `var(${s.varName})` }"></span>
+                <span class="tooltip-label">{{ s.label }}</span>
+                <span class="tooltip-value">{{ (hoverDay[s.key] || 0).toLocaleString() }}</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
 
-      <div v-else class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Visitors</th>
-              <th>Logins</th>
-              <th>Signups</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="day in dailyDescending" :key="day.date">
-              <td>{{ formatDate(day.date) }}</td>
-              <td>{{ day.uniqueVisitors }}</td>
-              <td>{{ day.logins }}</td>
-              <td>{{ day.signups }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+        <div v-else class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Visitors</th>
+                <th>Logins</th>
+                <th>Signups</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="day in dailyDescending" :key="day.date">
+                <td>{{ formatDate(day.date) }}</td>
+                <td>{{ day.uniqueVisitors }}</td>
+                <td>{{ day.logins }}</td>
+                <td>{{ day.signups }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </template>
   </section>
 </template>
@@ -397,47 +413,69 @@ const tooltipStyle = computed(() => {
   color: var(--color-error, #e53e3e);
 }
 
+.basic-stats-card {
+  background: var(--color-background-card);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-top: 16px;
+  transition: opacity 0.15s;
+}
+
+.basic-stats-card.refreshing {
+  opacity: 0.6;
+}
+
+.basic-stats-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.basic-stats-title {
+  margin: 0;
+}
+
+.range-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.range-control label {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.range-control select {
+  background: var(--color-background-input);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-input);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}
+
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
-  margin-top: 16px;
 }
 
 .stat-card {
-  background: var(--color-background-card);
+  background: var(--color-background-soft);
   border: 1px solid var(--color-border);
   border-radius: 10px;
   padding: 16px;
 }
 
-.stat-card h2 {
-  margin: 0 0 12px;
-  font-size: 1.05rem;
-}
-
-.stat-windows {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.stat-window {
-  border-top: 1px solid var(--color-border);
-  padding-top: 10px;
-}
-
-.stat-window:first-child {
-  border-top: none;
-  padding-top: 0;
-}
-
-.stat-window-label {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-text-muted);
-  margin-bottom: 2px;
+.stat-card h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  color: var(--color-text-secondary);
 }
 
 .stat-value {
@@ -460,17 +498,19 @@ const tooltipStyle = computed(() => {
   flex-wrap: wrap;
 }
 
-.daily-header {
+.chart-section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 28px;
+  margin-top: 24px;
   gap: 12px;
   flex-wrap: wrap;
 }
 
-.daily-heading {
+.chart-section-title {
   margin: 0;
+  font-size: 1rem;
+  color: var(--color-text-secondary);
 }
 
 .table-toggle {
@@ -507,7 +547,7 @@ const tooltipStyle = computed(() => {
 }
 
 .chart-card {
-  background: var(--color-background-card);
+  background: var(--color-background-soft);
   border: 1px solid var(--color-border);
   border-radius: 10px;
   padding: 16px;

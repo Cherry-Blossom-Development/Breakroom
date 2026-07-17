@@ -11,6 +11,20 @@ const SECRET_KEY = process.env.SECRET_KEY;
 
 const PLATFORMS = ['web', 'android', 'ios'];
 
+// Supported summary/daily time ranges. `sql` is a fixed, non-user-derived
+// fragment (req.query.range only ever selects a key here, never gets
+// interpolated itself), and `days` bounds how many rows /daily returns.
+const RANGES = {
+  today: { days: 1, sql: 'CURDATE()' },
+  '7d': { days: 7, sql: 'NOW() - INTERVAL 7 DAY' },
+  '30d': { days: 30, sql: 'NOW() - INTERVAL 30 DAY' },
+  year: { days: 365, sql: 'NOW() - INTERVAL 1 YEAR' },
+};
+
+function resolveRange(key) {
+  return RANGES[key] || RANGES['30d'];
+}
+
 // Known bot/crawler User-Agent patterns (case-insensitive matching)
 const BOT_PATTERNS = [
   'googlebot', 'bingbot', 'slurp', 'duckduckbot', 'baiduspider',
@@ -63,31 +77,22 @@ async function resolveUserId(req, client) {
   }
 }
 
-// Folds platform-grouped rows (one row per platform, with total_today/total_7d/total_30d
-// and optionally unique_today/unique_7d/unique_30d columns) into a { today, "7d", "30d" }
-// shape, each with a total (+ unique, if present) and a byPlatform breakdown.
+// Folds platform-grouped rows (one row per platform, with total and
+// optionally unique_count columns) into a single { total, unique?, byPlatform }
+// shape for one time range.
 function foldPlatformRows(rows, { withUnique } = {}) {
-  const windows = ['today', '7d', '30d'];
-  const suffix = { today: 'today', '7d': '7d', '30d': '30d' };
-  const result = {};
-  for (const w of windows) {
-    const byPlatform = {};
-    for (const p of PLATFORMS) byPlatform[p] = withUnique ? { total: 0, unique: 0 } : { total: 0 };
-    result[w] = withUnique
-      ? { total: 0, unique: 0, byPlatform }
-      : { total: 0, byPlatform };
-  }
+  const byPlatform = {};
+  for (const p of PLATFORMS) byPlatform[p] = withUnique ? { total: 0, unique: 0 } : { total: 0 };
+  const result = withUnique ? { total: 0, unique: 0, byPlatform } : { total: 0, byPlatform };
   for (const row of rows) {
     const platform = PLATFORMS.includes(row.platform) ? row.platform : 'web';
-    for (const w of windows) {
-      const total = Number(row[`total_${suffix[w]}`]) || 0;
-      result[w].total += total;
-      result[w].byPlatform[platform].total = total;
-      if (withUnique) {
-        const unique = Number(row[`unique_${suffix[w]}`]) || 0;
-        result[w].unique += unique;
-        result[w].byPlatform[platform].unique = unique;
-      }
+    const total = Number(row.total) || 0;
+    result.total += total;
+    result.byPlatform[platform].total = total;
+    if (withUnique) {
+      const unique = Number(row.unique_count) || 0;
+      result.unique += unique;
+      result.byPlatform[platform].unique = unique;
     }
   }
   return result;
@@ -127,50 +132,37 @@ router.post('/visit', async (req, res) => {
 });
 
 /**
- * GET /api/analytics/summary
- * Marketing-only. Today / 7-day / 30-day totals for visits, logins, and
- * signups, each broken down by platform. Internal users are excluded.
+ * GET /api/analytics/summary?range=today|7d|30d|year
+ * Marketing-only. Totals for visits, logins, and signups over the given
+ * range (defaults to 30d), each broken down by platform. Internal users
+ * are excluded.
  */
 router.get('/summary', authenticate, checkPermission('marketing_access'), async (req, res) => {
+  const range = resolveRange(req.query.range);
   const client = await getClient();
   try {
     const visitsResult = await client.query(`
-      SELECT
-        v.platform,
-        COUNT(*) AS total_30d,
-        COUNT(DISTINCT v.visitor_id) AS unique_30d,
-        SUM(CASE WHEN v.created_at >= CURDATE() THEN 1 ELSE 0 END) AS total_today,
-        COUNT(DISTINCT CASE WHEN v.created_at >= CURDATE() THEN v.visitor_id END) AS unique_today,
-        SUM(CASE WHEN v.created_at >= NOW() - INTERVAL 7 DAY THEN 1 ELSE 0 END) AS total_7d,
-        COUNT(DISTINCT CASE WHEN v.created_at >= NOW() - INTERVAL 7 DAY THEN v.visitor_id END) AS unique_7d
+      SELECT v.platform, COUNT(*) AS total, COUNT(DISTINCT v.visitor_id) AS unique_count
       FROM analytics_visits v
       LEFT JOIN users u ON u.id = v.user_id
-      WHERE v.created_at >= NOW() - INTERVAL 30 DAY
+      WHERE v.created_at >= ${range.sql}
         AND (v.user_id IS NULL OR u.is_internal = FALSE)
       GROUP BY v.platform
     `);
 
     const loginsResult = await client.query(`
-      SELECT
-        l.platform,
-        COUNT(*) AS total_30d,
-        SUM(CASE WHEN l.created_at >= CURDATE() THEN 1 ELSE 0 END) AS total_today,
-        SUM(CASE WHEN l.created_at >= NOW() - INTERVAL 7 DAY THEN 1 ELSE 0 END) AS total_7d
+      SELECT l.platform, COUNT(*) AS total
       FROM analytics_logins l
       JOIN users u ON u.id = l.user_id
-      WHERE l.created_at >= NOW() - INTERVAL 30 DAY
+      WHERE l.created_at >= ${range.sql}
         AND u.is_internal = FALSE
       GROUP BY l.platform
     `);
 
     const signupsResult = await client.query(`
-      SELECT
-        signup_platform AS platform,
-        COUNT(*) AS total_30d,
-        SUM(CASE WHEN created_at >= CURDATE() THEN 1 ELSE 0 END) AS total_today,
-        SUM(CASE WHEN created_at >= NOW() - INTERVAL 7 DAY THEN 1 ELSE 0 END) AS total_7d
+      SELECT signup_platform AS platform, COUNT(*) AS total
       FROM users
-      WHERE created_at >= NOW() - INTERVAL 30 DAY
+      WHERE created_at >= ${range.sql}
         AND is_internal = FALSE
       GROUP BY signup_platform
     `);
@@ -189,18 +181,21 @@ router.get('/summary', authenticate, checkPermission('marketing_access'), async 
 });
 
 /**
- * GET /api/analytics/daily
- * Marketing-only. Last 30 days, one row per day: visit count (+ unique
- * visitors), login count, signup count. Internal users are excluded.
+ * GET /api/analytics/daily?range=today|7d|30d|year
+ * Marketing-only. One row per day covering the given range (defaults to
+ * 30d): visit count (+ unique visitors), login count, signup count.
+ * Internal users are excluded.
  */
 router.get('/daily', authenticate, checkPermission('marketing_access'), async (req, res) => {
+  const { days } = resolveRange(req.query.range);
+  const lookback = days - 1;
   const client = await getClient();
   try {
     const visitsResult = await client.query(`
       SELECT DATE(v.created_at) AS day, COUNT(*) AS total, COUNT(DISTINCT v.visitor_id) AS unique_count
       FROM analytics_visits v
       LEFT JOIN users u ON u.id = v.user_id
-      WHERE v.created_at >= CURDATE() - INTERVAL 29 DAY
+      WHERE v.created_at >= CURDATE() - INTERVAL ${lookback} DAY
         AND (v.user_id IS NULL OR u.is_internal = FALSE)
       GROUP BY DATE(v.created_at)
     `);
@@ -209,7 +204,7 @@ router.get('/daily', authenticate, checkPermission('marketing_access'), async (r
       SELECT DATE(l.created_at) AS day, COUNT(*) AS total
       FROM analytics_logins l
       JOIN users u ON u.id = l.user_id
-      WHERE l.created_at >= CURDATE() - INTERVAL 29 DAY
+      WHERE l.created_at >= CURDATE() - INTERVAL ${lookback} DAY
         AND u.is_internal = FALSE
       GROUP BY DATE(l.created_at)
     `);
@@ -217,7 +212,7 @@ router.get('/daily', authenticate, checkPermission('marketing_access'), async (r
     const signupsResult = await client.query(`
       SELECT DATE(created_at) AS day, COUNT(*) AS total
       FROM users
-      WHERE created_at >= CURDATE() - INTERVAL 29 DAY
+      WHERE created_at >= CURDATE() - INTERVAL ${lookback} DAY
         AND is_internal = FALSE
       GROUP BY DATE(created_at)
     `);
@@ -231,12 +226,12 @@ router.get('/daily', authenticate, checkPermission('marketing_access'), async (r
     const loginsByDay = Object.fromEntries(loginsResult.rows.map(r => [toDateKey(r.day), r]));
     const signupsByDay = Object.fromEntries(signupsResult.rows.map(r => [toDateKey(r.day), r]));
 
-    const days = [];
-    for (let i = 29; i >= 0; i--) {
+    const daysOut = [];
+    for (let i = lookback; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const key = d.toISOString().slice(0, 10);
-      days.push({
+      daysOut.push({
         date: key,
         visits: Number(visitsByDay[key]?.total) || 0,
         uniqueVisitors: Number(visitsByDay[key]?.unique_count) || 0,
@@ -245,7 +240,7 @@ router.get('/daily', authenticate, checkPermission('marketing_access'), async (r
       });
     }
 
-    res.status(200).json({ days });
+    res.status(200).json({ days: daysOut });
   } catch (err) {
     console.error('Error fetching daily analytics:', err);
     res.status(500).json({ message: 'Failed to fetch daily analytics' });
