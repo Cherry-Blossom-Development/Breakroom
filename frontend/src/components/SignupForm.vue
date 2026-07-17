@@ -50,6 +50,7 @@
 import axios from 'axios';
 import { useRouter, useRoute } from 'vue-router';
 import { user } from '@/stores/user.js';
+import { getVisitorId } from '@/utilities/visitorId.js';
 
 // Function to generate a random salt using the Web Crypto API
 function generateSalt(length = 16) {
@@ -158,7 +159,8 @@ export default {
             last_name: this.last_name,
             email: this.email,
             hash: hash,
-            salt: salt
+            salt: salt,
+            visitorId: getVisitorId()
           }, {
             withCredentials: true
           });

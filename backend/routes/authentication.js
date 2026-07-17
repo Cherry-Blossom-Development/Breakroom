@@ -37,8 +37,8 @@ router.post('/signup', async (req, res) => {
     expiresAt.setHours(expiresAt.getHours() + 1);
 
     const result = await client.query(`INSERT INTO
-      "users" (handle, first_name, last_name, email, verification_token, verification_expires_at, hash, salt, signup_platform)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);`, [
+      "users" (handle, first_name, last_name, email, verification_token, verification_expires_at, hash, salt, signup_platform, signup_visitor_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);`, [
         req.body.handle,
         req.body.first_name,
         req.body.last_name,
@@ -47,7 +47,8 @@ router.post('/signup', async (req, res) => {
         expiresAt,
         req.body.hash,
         req.body.salt,
-        getPlatform(req)
+        getPlatform(req),
+        req.body.visitorId || null
       ]);
 
     // Assign new user to Standard group

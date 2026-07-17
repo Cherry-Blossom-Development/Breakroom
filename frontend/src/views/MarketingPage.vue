@@ -92,6 +92,44 @@ watch(featureRange, loadFeatureUsage)
 
 const featureMax = computed(() => Math.max(1, ...features.value.map(f => f.total)))
 
+// --- Unauthenticated paths (pre-signup /explore pageviews) -----------------
+// Same shape as Feature Usage above, but for anonymous visitors browsing the
+// public marketing pages, plus a conversion count (of that page's visitors,
+// how many later signed up -- see GET /api/analytics/marketing-pages).
+
+const marketingRange = ref('30d')
+const marketingRangeLabel = computed(() => rangeDefs.find(r => r.key === marketingRange.value)?.label || '')
+const marketingInitialLoading = ref(true)
+const marketingRefreshing = ref(false)
+const marketingError = ref('')
+const marketingPages = ref([])
+
+async function loadMarketingPages() {
+  const isFirstLoad = !marketingPages.value.length
+  if (isFirstLoad) marketingInitialLoading.value = true
+  else marketingRefreshing.value = true
+  marketingError.value = ''
+  try {
+    const res = await fetch(`/api/analytics/marketing-pages?range=${marketingRange.value}`, { credentials: 'include' })
+    if (!res.ok) throw new Error('Failed to load marketing page stats')
+    const data = await res.json()
+    marketingPages.value = data.pages || []
+  } catch (err) {
+    marketingError.value = 'Failed to load unauthenticated path data.'
+  } finally {
+    marketingInitialLoading.value = false
+    marketingRefreshing.value = false
+  }
+}
+
+onMounted(loadMarketingPages)
+watch(marketingRange, loadMarketingPages)
+
+const marketingMax = computed(() => Math.max(1, ...marketingPages.value.map(p => p.views)))
+function conversionRate(p) {
+  return p.unique ? Math.round((p.conversions / p.unique) * 100) : 0
+}
+
 // --- Last 30 Days line chart ---------------------------------------------
 
 const seriesDefs = [
@@ -472,6 +510,59 @@ const tooltipStyle = computed(() => {
               <span class="feature-bar-value">
                 {{ f.total.toLocaleString() }}
                 <span v-if="f.unique !== f.total" class="feature-bar-unique">({{ f.unique.toLocaleString() }} unique)</span>
+              </span>
+            </div>
+          </div>
+        </template>
+      </section>
+
+      <section class="basic-stats-card feature-usage-card viz-root" :class="{ refreshing: marketingRefreshing }">
+        <div class="basic-stats-header">
+          <h2 class="basic-stats-title">Unauthenticated Paths</h2>
+          <div class="range-control">
+            <label for="marketing-range-select">Time range</label>
+            <select id="marketing-range-select" v-model="marketingRange">
+              <option v-for="r in rangeDefs" :key="r.key" :value="r.key">{{ r.label }}</option>
+            </select>
+          </div>
+        </div>
+
+        <div v-if="marketingInitialLoading" class="status-msg">Loading...</div>
+        <div v-else-if="marketingError" class="status-msg error">{{ marketingError }}</div>
+
+        <template v-else>
+          <p class="feature-usage-sub">
+            What logged-out visitors look at on the public /explore pages, and how many of them go on to sign up, over the {{ marketingRangeLabel.toLowerCase() }}.
+          </p>
+
+          <div class="legend feature-legend">
+            <span class="legend-item legend-item--static">
+              <span class="legend-swatch" style="background: var(--series-free)"></span>
+              <span class="legend-label">Free</span>
+            </span>
+            <span class="legend-item legend-item--static">
+              <span class="legend-swatch" style="background: var(--series-monetized)"></span>
+              <span class="legend-label">Monetized</span>
+            </span>
+          </div>
+
+          <div class="feature-bars">
+            <div v-for="p in marketingPages" :key="p.key" class="feature-bar-row marketing-bar-row">
+              <span class="feature-bar-label">{{ p.label }}</span>
+              <div class="feature-bar-track">
+                <div
+                  class="feature-bar-fill"
+                  :class="{ monetized: p.monetized }"
+                  :style="{ width: (p.views / marketingMax * 100) + '%' }"
+                ></div>
+              </div>
+              <span class="feature-bar-value">
+                {{ p.views.toLocaleString() }}
+                <span v-if="p.unique !== p.views" class="feature-bar-unique">({{ p.unique.toLocaleString() }} unique)</span>
+              </span>
+              <span class="conversion-value" :class="{ 'has-conversions': p.conversions > 0 }">
+                {{ p.conversions.toLocaleString() }} signed up
+                <span v-if="p.unique" class="conversion-rate">({{ conversionRate(p) }}%)</span>
               </span>
             </div>
           </div>
@@ -878,6 +969,39 @@ th {
   }
   .feature-bar-label {
     font-size: 0.78rem;
+  }
+}
+
+.marketing-bar-row {
+  grid-template-columns: 130px 1fr auto auto;
+}
+
+.conversion-value {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  min-width: 110px;
+  text-align: right;
+}
+
+.conversion-value.has-conversions {
+  color: #276749;
+  font-weight: 600;
+}
+
+.conversion-rate {
+  color: var(--color-text-muted);
+  font-weight: 400;
+}
+
+@media (max-width: 700px) {
+  .marketing-bar-row {
+    grid-template-columns: 90px 1fr auto;
+  }
+  .conversion-value {
+    grid-column: 1 / -1;
+    text-align: left;
+    min-width: 0;
   }
 }
 </style>

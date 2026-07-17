@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import HomePage from '../views/HomePage.vue'
 import { user } from '@/stores/user.js'
 import { getVisitorId } from '@/utilities/visitorId.js'
+import { exploreFeatures } from '@/data/exploreFeatures.js'
 
 // Prosaurus-owned hosts. Anything else is a connected custom domain — that visitor
 // gets a dedicated minimal route table (see customDomainRoutes below) so their own
@@ -61,6 +62,18 @@ const router = createRouter({
       path: '/about',
       name: 'about',
       component: () => import('../views/AboutPage.vue'),
+    },
+    {
+      path: '/explore',
+      name: 'exploreHub',
+      component: () => import('../views/ExploreHubPage.vue'),
+      // No requiresAuth - public marketing hub
+    },
+    {
+      path: '/explore/:featureKey',
+      name: 'exploreFeature',
+      component: () => import('../views/ExploreFeaturePage.vue'),
+      // No requiresAuth - public marketing page per feature
     },
     {
       path: '/privacy',
@@ -465,6 +478,32 @@ function recordFeatureUsage(feature) {
 router.afterEach((to) => {
   const feature = ROUTE_NAME_TO_FEATURE[to.name]
   if (feature) recordFeatureUsage(feature)
+})
+
+// Pre-signup marketing-page tracking (the public /explore pages). Separate
+// from feature-usage tracking above -- this is anonymous visitor interest,
+// only meaningful while logged out, feeding the "Unauthenticated Paths"
+// section of the Marketing dashboard (backend/routes/analytics.js
+// MARKETING_PAGES / POST /marketing-pageview).
+function recordMarketingPageview(page) {
+  const sessionKey = `marketing_pageview_logged_${page}`
+  if (sessionStorage.getItem(sessionKey)) return
+  sessionStorage.setItem(sessionKey, '1')
+  fetch('/api/analytics/marketing-pageview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ page, visitorId: getVisitorId() }),
+  }).catch(() => {})
+}
+
+router.afterEach((to) => {
+  if (user.username) return // only tracking pre-signup interest here
+  if (to.name === 'exploreHub') {
+    recordMarketingPageview('explore_hub')
+  } else if (to.name === 'exploreFeature' && exploreFeatures[to.params.featureKey]) {
+    recordMarketingPageview(`explore_${to.params.featureKey}`)
+  }
 })
 
 export default router

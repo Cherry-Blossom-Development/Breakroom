@@ -255,7 +255,8 @@ setInterval(() => {
 
   // Only redirect if on a protected route and not logged in.
   // Routes with publicLayout:true (e.g. public blog) are always accessible — never redirect from them.
-  if (!user.username && !publicRoutes.includes(route.path) && !route.meta.publicLayout) {
+  // /explore and /explore/:featureKey (the public marketing pages) are also always accessible.
+  if (!user.username && !publicRoutes.includes(route.path) && !route.path.startsWith('/explore') && !route.meta.publicLayout) {
     router.push('/')
   }
 }, 5 * 60 * 1000) // every 5 minutes
@@ -360,6 +361,7 @@ setInterval(() => {
           <!-- Logged-in user previewing a public-layout page: no Login/Signup, add Back + Logout -->
           <template v-if="user.username">
             <RouterLink to="/">Home</RouterLink>
+            <RouterLink to="/explore">Explore</RouterLink>
             <RouterLink to="/about">About</RouterLink>
             <RouterLink to="/eula">EULA</RouterLink>
             <RouterLink v-if="route.name === 'publicBlog' || route.name === 'publicBlogPost'" to="/blog" class="back-link">← Blog Edit</RouterLink>
@@ -370,6 +372,7 @@ setInterval(() => {
           <!-- Standard public nav for non-logged-in visitors -->
           <template v-else>
             <RouterLink to="/">Home</RouterLink>
+            <RouterLink to="/explore">Explore</RouterLink>
             <RouterLink to="/about">About</RouterLink>
             <RouterLink to="/eula">EULA</RouterLink>
             <a href="#" @click.prevent="showSupport = true">Support</a>

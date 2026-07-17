@@ -8,10 +8,10 @@
     </div>
 
     <div class="features">
-      <div class="feature">
+      <RouterLink to="/explore/friends" class="feature">
         <h2>🧑‍🤝‍🧑 Real Connections</h2>
         <p>Everything you see is from people you know — no influencers, no algorithms.</p>
-      </div>
+      </RouterLink>
       <div class="feature">
         <h2>🚫 No Ads</h2>
         <p>We'll never sell your attention. No promoted posts, ever.</p>
@@ -20,23 +20,24 @@
         <h2>🤖 No AI-Generated Junk</h2>
         <p>Only human-made posts. No synthetic content. Just real thoughts and updates.</p>
       </div>
-      <div class="feature">
+      <RouterLink to="/explore/blog" class="feature">
         <h2>✍️ For Writers</h2>
         <p>Tools for the writing process — from drafting to sharing your work.</p>
-      </div>
-      <div class="feature">
+      </RouterLink>
+      <RouterLink to="/explore/sessions" class="feature">
         <h2>🎵 For Musicians</h2>
         <p>A space for music creation — compose, collaborate, and share.</p>
-      </div>
-      <div class="feature">
+      </RouterLink>
+      <RouterLink to="/explore/kanban" class="feature">
         <h2>💻 For Developers</h2>
         <p>Utilities for building software — lightweight tools that stay out of your way.</p>
-      </div>
+      </RouterLink>
     </div>
 
     <div class="closing">
       <h2>🌐 For Everyone</h2>
       <p>Social, creative, and technical — all in one place. Prosaurus brings it all together so you don't have to jump between a dozen apps.</p>
+      <RouterLink to="/explore" class="explore-link">See everything Prosaurus can do →</RouterLink>
     </div>
 
     <p class="version-label">v1.8.2</p>
@@ -109,6 +110,22 @@
   color: var(--color-text-muted);
 }
 
+a.feature {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  border-radius: 10px;
+  transition: background 0.15s;
+}
+
+a.feature:hover {
+  background: var(--color-background-hover);
+}
+
+a.feature:hover h2 {
+  color: var(--color-link);
+}
+
 .closing {
   margin-top: 40px;
 }
@@ -123,6 +140,18 @@
   color: var(--color-text-muted);
   max-width: 500px;
   margin: 0 auto;
+}
+
+.explore-link {
+  display: inline-block;
+  margin-top: 16px;
+  color: var(--color-link);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.explore-link:hover {
+  text-decoration: underline;
 }
 
 .version-label {

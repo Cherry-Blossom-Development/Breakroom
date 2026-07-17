@@ -44,6 +44,24 @@ const FEATURES = {
   band_pages: { label: 'Band Pages', monetized: false },
 };
 
+// Public marketing-page registry (the /explore pages a logged-out visitor can
+// browse before signing up). Kept separate from FEATURES -- these track
+// anonymous pre-signup interest, not authenticated in-app usage. `monetized`
+// marks the pages promoting the two paid-adjacent features.
+const MARKETING_PAGES = {
+  explore_hub: { label: 'Explore Hub', monetized: false },
+  explore_blog: { label: 'Blog', monetized: false },
+  explore_chat: { label: 'Chat', monetized: false },
+  explore_friends: { label: 'Friends', monetized: false },
+  explore_lyrics: { label: 'Lyric Lab', monetized: false },
+  explore_sessions: { label: 'Sessions', monetized: true },
+  explore_art_gallery: { label: 'Art Gallery', monetized: false },
+  explore_artist_showcase: { label: 'Artist Showcase', monetized: true },
+  explore_kanban: { label: 'Kanban', monetized: false },
+  explore_company_portal: { label: 'Company Portal', monetized: false },
+  explore_band_pages: { label: 'Band Pages', monetized: false },
+};
+
 // Known bot/crawler User-Agent patterns (case-insensitive matching)
 const BOT_PATTERNS = [
   'googlebot', 'bingbot', 'slurp', 'duckduckbot', 'baiduspider',
@@ -181,6 +199,41 @@ router.post('/feature', async (req, res) => {
   } catch (err) {
     console.error('Error recording feature usage:', err);
     res.status(500).json({ message: 'Failed to record feature usage' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/analytics/marketing-pageview
+ * Public — records one touch of a public /explore marketing page (anonymous
+ * pre-signup interest). Fired once per client session per page by the
+ * frontend router, only while logged out. Bot traffic is silently ignored.
+ * `page` must be one of the known MARKETING_PAGES keys.
+ */
+router.post('/marketing-pageview', async (req, res) => {
+  const { page, visitorId } = req.body;
+  if (!page || !Object.prototype.hasOwnProperty.call(MARKETING_PAGES, page)) {
+    return res.status(400).json({ message: 'Unknown page' });
+  }
+  if (!visitorId) {
+    return res.status(400).json({ message: 'visitorId is required' });
+  }
+
+  if (isBot(req)) {
+    return res.status(201).json({ message: 'Pageview recorded' });
+  }
+
+  const client = await getClient();
+  try {
+    await client.query(
+      'INSERT INTO analytics_marketing_pageviews (page, visitor_id) VALUES ($1, $2)',
+      [page, visitorId]
+    );
+    res.status(201).json({ message: 'Pageview recorded' });
+  } catch (err) {
+    console.error('Error recording marketing pageview:', err);
+    res.status(500).json({ message: 'Failed to record pageview' });
   } finally {
     client.release();
   }
@@ -338,6 +391,49 @@ router.get('/features', authenticate, checkPermission('marketing_access'), async
   } catch (err) {
     console.error('Error fetching feature usage:', err);
     res.status(500).json({ message: 'Failed to fetch feature usage' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * GET /api/analytics/marketing-pages?range=today|7d|30d|year
+ * Marketing-only. Views, unique visitors, and signup conversions per public
+ * /explore page over the given range (defaults to 30d). A "conversion" is a
+ * distinct visitor who viewed that page in-range and whose visitor_id later
+ * shows up as some user's signup_visitor_id -- the signup itself doesn't
+ * have to fall inside the range, only the pageview does.
+ */
+router.get('/marketing-pages', authenticate, checkPermission('marketing_access'), async (req, res) => {
+  const range = resolveRange(req.query.range);
+  const client = await getClient();
+  try {
+    const result = await client.query(`
+      SELECT m.page,
+        COUNT(*) AS views,
+        COUNT(DISTINCT m.visitor_id) AS unique_count,
+        COUNT(DISTINCT CASE WHEN u.id IS NOT NULL THEN m.visitor_id END) AS conversions
+      FROM analytics_marketing_pageviews m
+      LEFT JOIN users u ON u.signup_visitor_id = m.visitor_id
+      WHERE m.created_at >= ${range.sql}
+      GROUP BY m.page
+    `);
+
+    const byPage = Object.fromEntries(result.rows.map(r => [r.page, r]));
+
+    const pages = Object.entries(MARKETING_PAGES).map(([key, def]) => ({
+      key,
+      label: def.label,
+      monetized: def.monetized,
+      views: Number(byPage[key]?.views) || 0,
+      unique: Number(byPage[key]?.unique_count) || 0,
+      conversions: Number(byPage[key]?.conversions) || 0,
+    })).sort((a, b) => b.views - a.views);
+
+    res.status(200).json({ pages });
+  } catch (err) {
+    console.error('Error fetching marketing page stats:', err);
+    res.status(500).json({ message: 'Failed to fetch marketing page stats' });
   } finally {
     client.release();
   }
