@@ -1,9 +1,27 @@
 <script setup>
 import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import draggable from 'vuedraggable'
 import { sessions } from '@/stores/sessions'
 import { authFetch } from '@/utilities/authFetch'
 import { buildDevicePayload } from '@/utilities/deviceId'
+import SessionsPaywallModal from '@/components/SessionsPaywallModal.vue'
+
+const route = useRoute()
+
+// --- Pro paywall (free-tier session limit) ---
+const paywallVisible = ref(false)
+const paywallMessage = ref('')
+const subscribedBanner = ref(false)
+
+function handleUploadError(err, errorRef) {
+  if (err.requiresSubscription) {
+    paywallMessage.value = err.message
+    paywallVisible.value = true
+  } else {
+    errorRef.value = err.message
+  }
+}
 
 // --- Audio Defaults ---
 const showAudioDefaults = ref(false)
@@ -860,7 +878,7 @@ async function handleUpload() {
     const dateToUse = keepFilename ? null : (recordedAt.value || null)
     await sessions.upload(selectedFile.value, nameToUse, dateToUse, uploadBandId.value || null)
     resetRecordMode()
-  } catch (err) { uploadError.value = err.message }
+  } catch (err) { handleUploadError(err, uploadError) }
   finally { uploading.value = false }
 }
 
@@ -881,7 +899,7 @@ async function handleIndivUpload() {
     const dateToUse = keepFilename ? null : (indivRecordedAt.value || null)
     await sessions.upload(indivFile.value, nameToUse, dateToUse, indivUploadBandId.value || null, 'individual', indivInstrumentId.value || null)
     resetIndivRecordMode()
-  } catch (err) { indivUploadError.value = err.message }
+  } catch (err) { handleUploadError(err, indivUploadError) }
   finally { indivUploading.value = false }
 }
 
@@ -1210,7 +1228,7 @@ async function saveMerged() {
     }).catch(err => console.warn('Failed to record mashup sources:', err))
 
   } catch (err) {
-    mergeError.value = err.message
+    handleUploadError(err, mergeError)
   } finally {
     isMerging.value = false
   }
@@ -1301,7 +1319,7 @@ async function handleMashupUpload() {
     mashupBandId.value = ''
     if (mashupPreviewUrl.value) { URL.revokeObjectURL(mashupPreviewUrl.value); mashupPreviewUrl.value = null }
   } catch (err) {
-    mashupUploadError.value = err.message
+    handleUploadError(err, mashupUploadError)
   } finally {
     mashupUploading.value = false
   }
@@ -1314,6 +1332,11 @@ onMounted(async () => {
   document.addEventListener('click', closeRatingPopup)
   await Promise.all([loadBands(), loadInstruments(), loadBandMemberSessions()])
   await refreshMicDevices()
+
+  // Returning from Stripe subscription checkout (see SessionsPaywallModal)
+  if (route.query.stripe === 'subscribed') {
+    subscribedBanner.value = true
+  }
 })
 </script>
 
@@ -1323,6 +1346,10 @@ onMounted(async () => {
       <h1>Sessions</h1>
       <p class="subtitle">Track and manage your recording sessions</p>
     </header>
+
+    <p v-if="subscribedBanner" class="subscribed-banner">
+      You're now on Prosaurus Pro — unlimited sessions are active.
+    </p>
 
     <!-- Section tabs + Audio Defaults button -->
     <div class="tabs-bar">
@@ -2523,6 +2550,12 @@ onMounted(async () => {
 
     </template>
 
+    <SessionsPaywallModal
+      :visible="paywallVisible"
+      :message="paywallMessage"
+      @close="paywallVisible = false"
+    />
+
   </div>
 </template>
 
@@ -2532,6 +2565,16 @@ onMounted(async () => {
 .page-header { margin-bottom: 28px; }
 .page-header h1 { font-size: 2.2rem; font-weight: 700; color: var(--color-accent); margin: 0 0 8px; }
 .subtitle { color: var(--color-text-muted); margin: 0; font-size: 1.1rem; }
+
+.subscribed-banner {
+  font-size: 0.9rem;
+  color: #276749;
+  margin: 0 0 20px;
+  padding: 10px 14px;
+  background: rgba(47, 133, 90, 0.08);
+  border-radius: 6px;
+  border: 1px solid rgba(47, 133, 90, 0.2);
+}
 
 .card { background: var(--color-background-card); border-radius: var(--card-radius); padding: 24px; box-shadow: var(--shadow-sm); margin-bottom: 24px; }
 .card-title { font-size: 1.1rem; font-weight: 600; color: var(--color-text); margin: 0 0 20px; }

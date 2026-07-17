@@ -141,7 +141,15 @@ router.post('/subscribe', authenticate, async (req, res) => {
     const customerId = await getOrCreateStripeCustomer(req.user.id, req.user.handle, client);
     const baseUrl = process.env.CORS_ORIGIN;
 
+    // Defaults to the Collections payment-setup page (where this originally only
+    // lived); any page that gates a feature behind Pro (e.g. Sessions) can pass
+    // returnTo to land the user back where they started after checkout.
+    const returnPath = typeof req.body?.returnTo === 'string' && req.body.returnTo.startsWith('/')
+      ? req.body.returnTo
+      : '/collections/payment-setup';
     const from = req.body?.from ? `&from=${encodeURIComponent(req.body.from)}` : '';
+    const successSep = returnPath.includes('?') ? '&' : '?';
+
     const session = await getStripe().checkout.sessions.create({
       customer: customerId,
       mode: 'subscription',
@@ -150,15 +158,15 @@ router.post('/subscribe', authenticate, async (req, res) => {
           currency: 'usd',
           product_data: {
             name: 'Prosaurus Pro',
-            description: 'Waives the 5% platform fee on all artwork sales'
+            description: 'Waives the 5% platform fee on art sales and unlocks unlimited Sessions'
           },
           unit_amount: 399,
           recurring: { interval: 'month' }
         },
         quantity: 1
       }],
-      success_url: `${baseUrl}/collections/payment-setup?stripe=subscribed${from}`,
-      cancel_url:  `${baseUrl}/collections/payment-setup${from ? '?' + from.slice(1) : ''}`
+      success_url: `${baseUrl}${returnPath}${successSep}stripe=subscribed${from}`,
+      cancel_url:  `${baseUrl}${returnPath}${from ? (returnPath.includes('?') ? '&' : '?') + from.slice(1) : ''}`
     });
 
     res.json({ url: session.url });

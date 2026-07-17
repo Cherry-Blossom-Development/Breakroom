@@ -40,7 +40,9 @@ export const sessions = {
 
     if (!res.ok) {
       const err = await res.json()
-      throw new Error(err.message || 'Upload failed')
+      const error = new Error(err.message || 'Upload failed')
+      if (err.requiresSubscription) error.requiresSubscription = true
+      throw error
     }
 
     const data = await res.json()
