@@ -197,7 +197,7 @@ function formatFileSize(bytes) {
 
       <!-- Rating -->
       <div v-if="session.avg_rating || session.rating_count > 0" class="rating-info">
-        <span class="rating-value">{{ session.avg_rating?.toFixed(1) || '—' }}</span>
+        <span class="rating-value">{{ session.avg_rating ? Number(session.avg_rating).toFixed(1) : '—' }}</span>
         <span class="rating-label">/ 10</span>
         <span class="rating-count">({{ session.rating_count }} {{ session.rating_count === 1 ? 'rating' : 'ratings' }})</span>
       </div>
