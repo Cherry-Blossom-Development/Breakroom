@@ -1,0 +1,18 @@
+# /etc/systemd/system/docker-image-prune.timer
+# Install to /etc/systemd/system/docker-image-prune.timer on the EC2 host.
+# Enable with: sudo systemctl enable --now docker-image-prune.timer
+#
+# Type=oneshot on the paired .service means systemd will not start a new run
+# while the previous one is still active — free overlap protection, no lock
+# file needed in the script itself.
+
+[Unit]
+Description=Prune dangling Docker images every 2 hours
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=2h
+Unit=docker-image-prune.service
+
+[Install]
+WantedBy=timers.target

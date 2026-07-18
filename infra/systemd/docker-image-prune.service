@@ -1,0 +1,24 @@
+# /etc/systemd/system/docker-image-prune.service
+# Install to /etc/systemd/system/docker-image-prune.service on the EC2 host.
+# Triggered by docker-image-prune.timer — not enabled/started directly.
+#
+# Removes dangling (untagged) Docker images only -- `docker image prune -f`
+# without `-a`. This is exactly the layer type that piles up one per
+# `docker compose pull` + `up -d --force-recreate` deploy cycle: the previous
+# "latest"-tagged breakroom-backend image becomes untagged/dangling the
+# moment the new pull reassigns that tag. It never touches images still
+# tagged or in use by a running/stopped container, and it's a no-op (fast,
+# harmless) when there's nothing dangling to remove.
+#
+# Added 2026-07-18 after the disk filled to 98% (12 accumulated dangling
+# breakroom-backend layers, ~2.3GB) mid-deploy-session and broke a deploy
+# with "no space left on device". Runs as ec2-user (already in the docker
+# group for deploys) rather than root, matching least-privilege.
+
+[Unit]
+Description=Prune dangling Docker images (one cycle)
+
+[Service]
+Type=oneshot
+User=ec2-user
+ExecStart=/usr/bin/docker image prune -f
