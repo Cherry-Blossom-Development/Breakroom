@@ -41,11 +41,15 @@ const authenticate = async (req, res, next) => {
 router.get('/', authenticate, async (req, res) => {
   const client = await getClient();
   try {
-    // Get friends where either user_id or friend_id is the current user
+    // Get friends where either user_id or friend_id is the current user.
+    // GROUP BY defends against a relationship somehow existing as two rows
+    // (one per direction) -- that shouldn't happen via the normal request/
+    // accept flow (which checks both directions before inserting), but if
+    // it ever does, this keeps a friend from appearing twice in the list.
     const friends = await client.query(
       `SELECT
         u.id, u.handle, u.first_name, u.last_name, u.photo_path,
-        f.created_at as friends_since
+        MIN(f.created_at) as friends_since
        FROM friends f
        JOIN users u ON (
          (f.user_id = $1 AND f.friend_id = u.id) OR
@@ -53,6 +57,7 @@ router.get('/', authenticate, async (req, res) => {
        )
        WHERE (f.user_id = $3 OR f.friend_id = $4)
          AND f.status = 'accepted'
+       GROUP BY u.id, u.handle, u.first_name, u.last_name, u.photo_path
        ORDER BY u.handle`,
       [req.user.id, req.user.id, req.user.id, req.user.id]
     );
