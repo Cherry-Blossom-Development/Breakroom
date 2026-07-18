@@ -1834,6 +1834,7 @@ onMounted(async () => {
                       <th>Size</th>
                       <th>Rating</th>
                       <th>Band</th>
+                      <th></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1877,9 +1878,12 @@ onMounted(async () => {
                         </div>
                       </td>
                       <td class="muted">{{ session.band_name || '—' }}</td>
+                      <td>
+                        <button class="share-btn" @click="shareSession(session)" title="Share">⬆</button>
+                      </td>
                     </tr>
                     <tr v-if="playingId === session.id" class="player-row">
-                      <td colspan="6">
+                      <td colspan="7">
                         <audio ref="audioEl" :src="`/api/sessions/${playingId}/stream`"
                                @play="onAudioPlay" @pause="onAudioPause" @ended="onAudioEnded"
                                @loadedmetadata="onAudioMetadata"
