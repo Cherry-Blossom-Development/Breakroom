@@ -6,6 +6,7 @@
 .env.staging
 .env.production
 */node_modules/*
+tools/screenshots/node_modules/
 */.env*
 */etc/encrypt
 *cert.pem
