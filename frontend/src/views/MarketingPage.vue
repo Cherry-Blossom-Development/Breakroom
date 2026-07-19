@@ -172,6 +172,51 @@ watch(registrationRange, loadRegistrationPaths)
 
 const registrationMax = computed(() => Math.max(1, ...registrationPaths.value.map(p => p.count)))
 
+// --- Paying customers ---------------------------------------------------
+// New paying customers by monetization path: subscriptions (Stripe web,
+// Apple, Android) plus storefront sales. See GET /api/analytics/paying-customers
+// -- storefront buyers aren't linked to accounts (guest checkout), so that
+// side is reported as revenue/orders rather than a customer count.
+
+const payingRange = ref('30d')
+const payingRangeLabel = computed(() => rangeDefs.find(r => r.key === payingRange.value)?.label || '')
+const payingInitialLoading = ref(true)
+const payingRefreshing = ref(false)
+const payingError = ref('')
+const payingCollapsed = ref(false)
+const subscriptions = ref([])
+const totalNewSubscribers = ref(0)
+const storefront = ref({ orders: 0, revenueCents: 0 })
+
+async function loadPayingCustomers() {
+  const isFirstLoad = !subscriptions.value.length
+  if (isFirstLoad) payingInitialLoading.value = true
+  else payingRefreshing.value = true
+  payingError.value = ''
+  try {
+    const res = await fetch(`/api/analytics/paying-customers?range=${payingRange.value}`, { credentials: 'include' })
+    if (!res.ok) throw new Error('Failed to load paying customer data')
+    const data = await res.json()
+    subscriptions.value = data.subscriptions || []
+    totalNewSubscribers.value = data.totalNewSubscribers || 0
+    storefront.value = data.storefront || { orders: 0, revenueCents: 0 }
+  } catch (err) {
+    payingError.value = 'Failed to load paying customer data.'
+  } finally {
+    payingInitialLoading.value = false
+    payingRefreshing.value = false
+  }
+}
+
+onMounted(loadPayingCustomers)
+watch(payingRange, loadPayingCustomers)
+
+const payingMax = computed(() => Math.max(1, ...subscriptions.value.map(s => s.count)))
+
+function formatCents(cents) {
+  return (cents / 100).toLocaleString(undefined, { style: 'currency', currency: 'USD' })
+}
+
 // --- Last 30 Days line chart ---------------------------------------------
 
 const seriesDefs = [
@@ -693,6 +738,60 @@ const tooltipStyle = computed(() => {
           </template>
         </div>
       </section>
+
+      <section class="basic-stats-card feature-usage-card viz-root" :class="{ refreshing: payingRefreshing }">
+        <div class="basic-stats-header">
+          <h2 class="basic-stats-title">Paying Customers</h2>
+          <div class="range-control">
+            <label for="paying-range-select">Time range</label>
+            <select id="paying-range-select" v-model="payingRange">
+              <option v-for="r in rangeDefs" :key="r.key" :value="r.key">{{ r.label }}</option>
+            </select>
+          </div>
+          <button
+            type="button"
+            class="collapse-toggle"
+            :aria-expanded="!payingCollapsed"
+            aria-label="Toggle Paying Customers section"
+            @click="payingCollapsed = !payingCollapsed"
+          >
+            <span class="collapse-icon" :class="{ collapsed: payingCollapsed }">&#9662;</span>
+          </button>
+        </div>
+
+        <div v-show="!payingCollapsed">
+          <div v-if="payingInitialLoading" class="status-msg">Loading...</div>
+          <div v-else-if="payingError" class="status-msg error">{{ payingError }}</div>
+
+          <template v-else>
+            <p class="feature-usage-sub">New subscribers by platform, plus storefront sales, over the {{ payingRangeLabel.toLowerCase() }}.</p>
+
+            <div class="stat-grid paying-stat-grid">
+              <div class="stat-card">
+                <h3>New Subscribers</h3>
+                <div class="stat-value">{{ totalNewSubscribers.toLocaleString() }}</div>
+              </div>
+              <div class="stat-card">
+                <h3>Storefront Revenue</h3>
+                <div class="stat-value">{{ formatCents(storefront.revenueCents) }}</div>
+                <div class="stat-subvalue">{{ storefront.orders.toLocaleString() }} order{{ storefront.orders === 1 ? '' : 's' }}</div>
+              </div>
+            </div>
+
+            <div class="feature-bars paying-bars">
+              <div v-for="s in subscriptions" :key="s.key" class="feature-bar-row">
+                <span class="feature-bar-label">{{ s.label }}</span>
+                <div class="feature-bar-track">
+                  <div class="feature-bar-fill monetized" :style="{ width: (s.count / payingMax * 100) + '%' }"></div>
+                </div>
+                <span class="feature-bar-value">{{ s.count.toLocaleString() }}</span>
+              </div>
+            </div>
+
+            <p class="paying-note">Storefront buyers aren't linked to accounts (guest checkout), so sales are shown as revenue rather than a customer count.</p>
+          </template>
+        </div>
+      </section>
     </template>
   </section>
 </template>
@@ -1170,5 +1269,20 @@ th {
   .registration-bar-row {
     grid-template-columns: 140px 1fr auto;
   }
+}
+
+.paying-stat-grid {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  margin-bottom: 18px;
+}
+
+.paying-bars {
+  margin-bottom: 12px;
+}
+
+.paying-note {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  margin: 4px 0 0;
 }
 </style>

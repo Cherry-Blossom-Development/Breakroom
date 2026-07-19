@@ -526,4 +526,68 @@ router.get('/marketing-pages', authenticate, checkPermission('marketing_access')
   }
 });
 
+const SUBSCRIPTION_PLATFORMS = {
+  stripe: 'Web (Stripe)',
+  apple: 'Apple',
+  google: 'Android',
+};
+
+/**
+ * GET /api/analytics/paying-customers?range=today|7d|30d|year
+ * Marketing-only. New paying customers over the given range (defaults to
+ * 30d), broken out by monetization path:
+ *  - Subscriptions (Stripe web, Apple, Google) -- counted by first-ever
+ *    user_subscriptions.created_at falling in range. platform='promo' rows
+ *    are comped accounts granted by an admin, not revenue, and excluded.
+ *  - Storefront -- orders that reached a paid status in range. Buyers
+ *    aren't linked to user accounts (guest checkout), so this is reported
+ *    as revenue + order count rather than a customer count.
+ * Internal users/sellers are excluded.
+ */
+router.get('/paying-customers', authenticate, checkPermission('marketing_access'), async (req, res) => {
+  const range = resolveRange(req.query.range);
+  const client = await getClient();
+  try {
+    const subsResult = await client.query(`
+      SELECT s.platform, COUNT(*) AS total
+      FROM user_subscriptions s
+      JOIN users u ON u.id = s.user_id
+      WHERE s.created_at >= ${range.sql}
+        AND s.platform != 'promo'
+        AND u.is_internal = FALSE
+      GROUP BY s.platform
+    `);
+    const byPlatform = Object.fromEntries(subsResult.rows.map(r => [r.platform, r.total]));
+    const subscriptions = Object.entries(SUBSCRIPTION_PLATFORMS).map(([key, label]) => ({
+      key,
+      label,
+      count: Number(byPlatform[key]) || 0,
+    }));
+
+    const storefrontResult = await client.query(`
+      SELECT COUNT(*) AS orders, COALESCE(SUM(o.total_cents), 0) AS revenue_cents
+      FROM orders o
+      JOIN users u ON u.id = o.seller_user_id
+      WHERE o.created_at >= ${range.sql}
+        AND o.status IN ('paid', 'processing', 'shipped', 'delivered')
+        AND u.is_internal = FALSE
+    `);
+    const storefrontRow = storefrontResult.rows[0] || {};
+
+    res.status(200).json({
+      subscriptions,
+      totalNewSubscribers: subscriptions.reduce((sum, s) => sum + s.count, 0),
+      storefront: {
+        orders: Number(storefrontRow.orders) || 0,
+        revenueCents: Number(storefrontRow.revenue_cents) || 0,
+      },
+    });
+  } catch (err) {
+    console.error('Error fetching paying customer stats:', err);
+    res.status(500).json({ message: 'Failed to fetch paying customer stats' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
