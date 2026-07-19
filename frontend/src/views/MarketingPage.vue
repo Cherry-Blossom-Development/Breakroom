@@ -16,6 +16,10 @@ const rangeDefs = [
 const selectedRange = ref('30d')
 const selectedRangeLabel = computed(() => rangeDefs.find(r => r.key === selectedRange.value)?.label || '')
 
+const statsCollapsed = ref(false)
+const marketingCollapsed = ref(false)
+const featureCollapsed = ref(false)
+
 const metricDefs = [
   { key: 'visits', label: 'Visitors', hasUnique: true },
   { key: 'logins', label: 'Logins', hasUnique: false },
@@ -306,166 +310,241 @@ const tooltipStyle = computed(() => {
               <option v-for="r in rangeDefs" :key="r.key" :value="r.key">{{ r.label }}</option>
             </select>
           </div>
-        </div>
-
-        <div class="stat-grid">
-          <div v-for="metric in metricDefs" :key="metric.key" class="stat-card">
-            <h3>{{ metric.label }}</h3>
-            <div class="stat-value">
-              {{ metric.hasUnique ? summary[metric.key].unique : summary[metric.key].total }}
-            </div>
-            <div v-if="metric.hasUnique" class="stat-subvalue">
-              {{ summary[metric.key].total }} total visits
-            </div>
-            <div class="stat-platforms">
-              <span v-for="(label, platform) in platformLabels" :key="platform">
-                {{ label }}: {{ metric.hasUnique
-                  ? summary[metric.key].byPlatform[platform].unique
-                  : summary[metric.key].byPlatform[platform].total }}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div class="chart-section-header">
-          <h3 class="chart-section-title">{{ selectedRangeLabel }} Trend</h3>
-          <button type="button" class="table-toggle" @click="showTable = !showTable">
-            {{ showTable ? 'View as chart' : 'View as table' }}
+          <button
+            type="button"
+            class="collapse-toggle"
+            :aria-expanded="!statsCollapsed"
+            aria-label="Toggle Basic Stats section"
+            @click="statsCollapsed = !statsCollapsed"
+          >
+            <span class="collapse-icon" :class="{ collapsed: statsCollapsed }">&#9662;</span>
           </button>
         </div>
 
-        <div v-if="!showTable" class="viz-root chart-card">
-          <div class="legend" role="group" aria-label="Toggle series">
-            <label v-for="s in seriesDefs" :key="s.key" class="legend-item">
-              <input
-                type="checkbox"
-                :checked="visibleSeries[s.key]"
-                @change="toggleSeries(s.key)"
-              />
-              <span class="legend-swatch" :class="{ dim: !visibleSeries[s.key] }" :style="{ background: `var(${s.varName})` }"></span>
-              <span class="legend-label" :class="{ dim: !visibleSeries[s.key] }">{{ s.label }}</span>
-            </label>
-          </div>
-
-          <div class="chart-wrap">
-            <svg
-              ref="svgEl"
-              :viewBox="`0 0 ${chartW} ${chartH}`"
-              class="chart-svg"
-              @pointermove="onPointerMove"
-              @pointerleave="onPointerLeave"
-            >
-              <!-- gridlines + y ticks -->
-              <g class="gridlines">
-                <line
-                  v-for="(t, idx) in yTicks"
-                  :key="idx"
-                  :x1="margin.left"
-                  :x2="chartW - margin.right"
-                  :y1="yForValue(t)"
-                  :y2="yForValue(t)"
-                />
-                <text
-                  v-for="(t, idx) in yTicks"
-                  :key="'lbl' + idx"
-                  :x="margin.left - 8"
-                  :y="yForValue(t)"
-                  class="axis-label y-label"
-                >{{ Math.round(t).toLocaleString() }}</text>
-              </g>
-
-              <!-- x axis date labels -->
-              <g class="x-axis">
-                <text
-                  v-for="t in xAxisTicks"
-                  :key="t.i"
-                  :x="t.x"
-                  :y="chartH - margin.bottom + 18"
-                  class="axis-label x-label"
-                >{{ formatDate(t.date) }}</text>
-              </g>
-
-              <!-- crosshair -->
-              <line
-                v-if="hoverDay"
-                class="crosshair"
-                :x1="hoverX"
-                :x2="hoverX"
-                :y1="margin.top"
-                :y2="chartH - margin.bottom"
-              />
-
-              <!-- series lines -->
-              <g v-for="s in seriesPaths" :key="s.key">
-                <path
-                  v-if="s.visible"
-                  :d="s.d"
-                  fill="none"
-                  :stroke="`var(${s.varName})`"
-                  stroke-width="2"
-                  stroke-linejoin="round"
-                  stroke-linecap="round"
-                />
-                <template v-if="s.visible && hoverDay">
-                  <circle
-                    :cx="xForIndex(hoverIndex)"
-                    :cy="yForValue(hoverDay[s.key] || 0)"
-                    r="4"
-                    :fill="`var(${s.varName})`"
-                    stroke="var(--color-background-soft)"
-                    stroke-width="2"
-                  />
-                </template>
-              </g>
-
-              <!-- direct end labels -->
-              <g v-for="lbl in endLabels" :key="'end' + lbl.key">
-                <circle
-                  :cx="chartW - margin.right"
-                  :cy="lbl.y"
-                  r="4"
-                  :fill="`var(${lbl.varName})`"
-                  stroke="var(--color-background-soft)"
-                  stroke-width="2"
-                />
-                <text
-                  :x="chartW - margin.right + 8"
-                  :y="lbl.y"
-                  class="end-label"
-                >{{ lbl.value.toLocaleString() }}</text>
-              </g>
-            </svg>
-
-            <div v-if="hoverDay" class="chart-tooltip" :style="tooltipStyle">
-              <div class="tooltip-date">{{ formatDate(hoverDay.date) }}</div>
-              <div v-for="s in seriesDefs" :key="s.key" v-show="visibleSeries[s.key]" class="tooltip-row">
-                <span class="tooltip-key" :style="{ background: `var(${s.varName})` }"></span>
-                <span class="tooltip-label">{{ s.label }}</span>
-                <span class="tooltip-value">{{ (hoverDay[s.key] || 0).toLocaleString() }}</span>
+        <div v-show="!statsCollapsed">
+          <div class="stat-grid">
+            <div v-for="metric in metricDefs" :key="metric.key" class="stat-card">
+              <h3>{{ metric.label }}</h3>
+              <div class="stat-value">
+                {{ metric.hasUnique ? summary[metric.key].unique : summary[metric.key].total }}
+              </div>
+              <div v-if="metric.hasUnique" class="stat-subvalue">
+                {{ summary[metric.key].total }} total visits
+              </div>
+              <div class="stat-platforms">
+                <span v-for="(label, platform) in platformLabels" :key="platform">
+                  {{ label }}: {{ metric.hasUnique
+                    ? summary[metric.key].byPlatform[platform].unique
+                    : summary[metric.key].byPlatform[platform].total }}
+                </span>
               </div>
             </div>
           </div>
+
+          <div class="chart-section-header">
+            <h3 class="chart-section-title">{{ selectedRangeLabel }} Trend</h3>
+            <button type="button" class="table-toggle" @click="showTable = !showTable">
+              {{ showTable ? 'View as chart' : 'View as table' }}
+            </button>
+          </div>
+
+          <div v-if="!showTable" class="viz-root chart-card">
+            <div class="legend" role="group" aria-label="Toggle series">
+              <label v-for="s in seriesDefs" :key="s.key" class="legend-item">
+                <input
+                  type="checkbox"
+                  :checked="visibleSeries[s.key]"
+                  @change="toggleSeries(s.key)"
+                />
+                <span class="legend-swatch" :class="{ dim: !visibleSeries[s.key] }" :style="{ background: `var(${s.varName})` }"></span>
+                <span class="legend-label" :class="{ dim: !visibleSeries[s.key] }">{{ s.label }}</span>
+              </label>
+            </div>
+
+            <div class="chart-wrap">
+              <svg
+                ref="svgEl"
+                :viewBox="`0 0 ${chartW} ${chartH}`"
+                class="chart-svg"
+                @pointermove="onPointerMove"
+                @pointerleave="onPointerLeave"
+              >
+                <!-- gridlines + y ticks -->
+                <g class="gridlines">
+                  <line
+                    v-for="(t, idx) in yTicks"
+                    :key="idx"
+                    :x1="margin.left"
+                    :x2="chartW - margin.right"
+                    :y1="yForValue(t)"
+                    :y2="yForValue(t)"
+                  />
+                  <text
+                    v-for="(t, idx) in yTicks"
+                    :key="'lbl' + idx"
+                    :x="margin.left - 8"
+                    :y="yForValue(t)"
+                    class="axis-label y-label"
+                  >{{ Math.round(t).toLocaleString() }}</text>
+                </g>
+
+                <!-- x axis date labels -->
+                <g class="x-axis">
+                  <text
+                    v-for="t in xAxisTicks"
+                    :key="t.i"
+                    :x="t.x"
+                    :y="chartH - margin.bottom + 18"
+                    class="axis-label x-label"
+                  >{{ formatDate(t.date) }}</text>
+                </g>
+
+                <!-- crosshair -->
+                <line
+                  v-if="hoverDay"
+                  class="crosshair"
+                  :x1="hoverX"
+                  :x2="hoverX"
+                  :y1="margin.top"
+                  :y2="chartH - margin.bottom"
+                />
+
+                <!-- series lines -->
+                <g v-for="s in seriesPaths" :key="s.key">
+                  <path
+                    v-if="s.visible"
+                    :d="s.d"
+                    fill="none"
+                    :stroke="`var(${s.varName})`"
+                    stroke-width="2"
+                    stroke-linejoin="round"
+                    stroke-linecap="round"
+                  />
+                  <template v-if="s.visible && hoverDay">
+                    <circle
+                      :cx="xForIndex(hoverIndex)"
+                      :cy="yForValue(hoverDay[s.key] || 0)"
+                      r="4"
+                      :fill="`var(${s.varName})`"
+                      stroke="var(--color-background-soft)"
+                      stroke-width="2"
+                    />
+                  </template>
+                </g>
+
+                <!-- direct end labels -->
+                <g v-for="lbl in endLabels" :key="'end' + lbl.key">
+                  <circle
+                    :cx="chartW - margin.right"
+                    :cy="lbl.y"
+                    r="4"
+                    :fill="`var(${lbl.varName})`"
+                    stroke="var(--color-background-soft)"
+                    stroke-width="2"
+                  />
+                  <text
+                    :x="chartW - margin.right + 8"
+                    :y="lbl.y"
+                    class="end-label"
+                  >{{ lbl.value.toLocaleString() }}</text>
+                </g>
+              </svg>
+
+              <div v-if="hoverDay" class="chart-tooltip" :style="tooltipStyle">
+                <div class="tooltip-date">{{ formatDate(hoverDay.date) }}</div>
+                <div v-for="s in seriesDefs" :key="s.key" v-show="visibleSeries[s.key]" class="tooltip-row">
+                  <span class="tooltip-key" :style="{ background: `var(${s.varName})` }"></span>
+                  <span class="tooltip-label">{{ s.label }}</span>
+                  <span class="tooltip-value">{{ (hoverDay[s.key] || 0).toLocaleString() }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div v-else class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Visitors</th>
+                  <th>Logins</th>
+                  <th>Signups</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="day in dailyDescending" :key="day.date">
+                  <td>{{ formatDate(day.date) }}</td>
+                  <td>{{ day.uniqueVisitors }}</td>
+                  <td>{{ day.logins }}</td>
+                  <td>{{ day.signups }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="basic-stats-card feature-usage-card viz-root" :class="{ refreshing: marketingRefreshing }">
+        <div class="basic-stats-header">
+          <h2 class="basic-stats-title">Unauthenticated Paths</h2>
+          <div class="range-control">
+            <label for="marketing-range-select">Time range</label>
+            <select id="marketing-range-select" v-model="marketingRange">
+              <option v-for="r in rangeDefs" :key="r.key" :value="r.key">{{ r.label }}</option>
+            </select>
+          </div>
+          <button
+            type="button"
+            class="collapse-toggle"
+            :aria-expanded="!marketingCollapsed"
+            aria-label="Toggle Unauthenticated Paths section"
+            @click="marketingCollapsed = !marketingCollapsed"
+          >
+            <span class="collapse-icon" :class="{ collapsed: marketingCollapsed }">&#9662;</span>
+          </button>
         </div>
 
-        <div v-else class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Visitors</th>
-                <th>Logins</th>
-                <th>Signups</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="day in dailyDescending" :key="day.date">
-                <td>{{ formatDate(day.date) }}</td>
-                <td>{{ day.uniqueVisitors }}</td>
-                <td>{{ day.logins }}</td>
-                <td>{{ day.signups }}</td>
-              </tr>
-            </tbody>
-          </table>
+        <div v-show="!marketingCollapsed">
+          <div v-if="marketingInitialLoading" class="status-msg">Loading...</div>
+          <div v-else-if="marketingError" class="status-msg error">{{ marketingError }}</div>
+
+          <template v-else>
+            <p class="feature-usage-sub">
+              What logged-out visitors look at on the public /explore pages, and how many of them go on to sign up, over the {{ marketingRangeLabel.toLowerCase() }}.
+            </p>
+
+            <div class="legend feature-legend">
+              <span class="legend-item legend-item--static">
+                <span class="legend-swatch" style="background: var(--series-free)"></span>
+                <span class="legend-label">Free</span>
+              </span>
+              <span class="legend-item legend-item--static">
+                <span class="legend-swatch" style="background: var(--series-monetized)"></span>
+                <span class="legend-label">Monetized</span>
+              </span>
+            </div>
+
+            <div class="feature-bars">
+              <div v-for="p in marketingPages" :key="p.key" class="feature-bar-row marketing-bar-row">
+                <span class="feature-bar-label">{{ p.label }}</span>
+                <div class="feature-bar-track">
+                  <div
+                    class="feature-bar-fill"
+                    :class="{ monetized: p.monetized }"
+                    :style="{ width: (p.views / marketingMax * 100) + '%' }"
+                  ></div>
+                </div>
+                <span class="feature-bar-value">
+                  {{ p.views.toLocaleString() }}
+                  <span v-if="p.unique !== p.views" class="feature-bar-unique">({{ p.unique.toLocaleString() }} unique)</span>
+                </span>
+                <span class="conversion-value" :class="{ 'has-conversions': p.conversions > 0 }">
+                  {{ p.conversions.toLocaleString() }} signed up
+                  <span v-if="p.unique" class="conversion-rate">({{ conversionRate(p) }}%)</span>
+                </span>
+              </div>
+            </div>
+          </template>
         </div>
       </section>
 
@@ -478,95 +557,53 @@ const tooltipStyle = computed(() => {
               <option v-for="r in rangeDefs" :key="r.key" :value="r.key">{{ r.label }}</option>
             </select>
           </div>
+          <button
+            type="button"
+            class="collapse-toggle"
+            :aria-expanded="!featureCollapsed"
+            aria-label="Toggle Feature Usage section"
+            @click="featureCollapsed = !featureCollapsed"
+          >
+            <span class="collapse-icon" :class="{ collapsed: featureCollapsed }">&#9662;</span>
+          </button>
         </div>
 
-        <div v-if="featureInitialLoading" class="status-msg">Loading...</div>
-        <div v-else-if="featureError" class="status-msg error">{{ featureError }}</div>
+        <div v-show="!featureCollapsed">
+          <div v-if="featureInitialLoading" class="status-msg">Loading...</div>
+          <div v-else-if="featureError" class="status-msg error">{{ featureError }}</div>
 
-        <template v-else>
-          <p class="feature-usage-sub">Which parts of the site members actually use, over the {{ featureRangeLabel.toLowerCase() }}.</p>
+          <template v-else>
+            <p class="feature-usage-sub">Which parts of the site members actually use, over the {{ featureRangeLabel.toLowerCase() }}.</p>
 
-          <div class="legend feature-legend">
-            <span class="legend-item legend-item--static">
-              <span class="legend-swatch" style="background: var(--series-free)"></span>
-              <span class="legend-label">Free</span>
-            </span>
-            <span class="legend-item legend-item--static">
-              <span class="legend-swatch" style="background: var(--series-monetized)"></span>
-              <span class="legend-label">Monetized</span>
-            </span>
-          </div>
-
-          <div class="feature-bars">
-            <div v-for="f in features" :key="f.key" class="feature-bar-row">
-              <span class="feature-bar-label">{{ f.label }}</span>
-              <div class="feature-bar-track">
-                <div
-                  class="feature-bar-fill"
-                  :class="{ monetized: f.monetized }"
-                  :style="{ width: (f.total / featureMax * 100) + '%' }"
-                ></div>
-              </div>
-              <span class="feature-bar-value">
-                {{ f.total.toLocaleString() }}
-                <span v-if="f.unique !== f.total" class="feature-bar-unique">({{ f.unique.toLocaleString() }} unique)</span>
+            <div class="legend feature-legend">
+              <span class="legend-item legend-item--static">
+                <span class="legend-swatch" style="background: var(--series-free)"></span>
+                <span class="legend-label">Free</span>
+              </span>
+              <span class="legend-item legend-item--static">
+                <span class="legend-swatch" style="background: var(--series-monetized)"></span>
+                <span class="legend-label">Monetized</span>
               </span>
             </div>
-          </div>
-        </template>
-      </section>
 
-      <section class="basic-stats-card feature-usage-card viz-root" :class="{ refreshing: marketingRefreshing }">
-        <div class="basic-stats-header">
-          <h2 class="basic-stats-title">Unauthenticated Paths</h2>
-          <div class="range-control">
-            <label for="marketing-range-select">Time range</label>
-            <select id="marketing-range-select" v-model="marketingRange">
-              <option v-for="r in rangeDefs" :key="r.key" :value="r.key">{{ r.label }}</option>
-            </select>
-          </div>
+            <div class="feature-bars">
+              <div v-for="f in features" :key="f.key" class="feature-bar-row">
+                <span class="feature-bar-label">{{ f.label }}</span>
+                <div class="feature-bar-track">
+                  <div
+                    class="feature-bar-fill"
+                    :class="{ monetized: f.monetized }"
+                    :style="{ width: (f.total / featureMax * 100) + '%' }"
+                  ></div>
+                </div>
+                <span class="feature-bar-value">
+                  {{ f.total.toLocaleString() }}
+                  <span v-if="f.unique !== f.total" class="feature-bar-unique">({{ f.unique.toLocaleString() }} unique)</span>
+                </span>
+              </div>
+            </div>
+          </template>
         </div>
-
-        <div v-if="marketingInitialLoading" class="status-msg">Loading...</div>
-        <div v-else-if="marketingError" class="status-msg error">{{ marketingError }}</div>
-
-        <template v-else>
-          <p class="feature-usage-sub">
-            What logged-out visitors look at on the public /explore pages, and how many of them go on to sign up, over the {{ marketingRangeLabel.toLowerCase() }}.
-          </p>
-
-          <div class="legend feature-legend">
-            <span class="legend-item legend-item--static">
-              <span class="legend-swatch" style="background: var(--series-free)"></span>
-              <span class="legend-label">Free</span>
-            </span>
-            <span class="legend-item legend-item--static">
-              <span class="legend-swatch" style="background: var(--series-monetized)"></span>
-              <span class="legend-label">Monetized</span>
-            </span>
-          </div>
-
-          <div class="feature-bars">
-            <div v-for="p in marketingPages" :key="p.key" class="feature-bar-row marketing-bar-row">
-              <span class="feature-bar-label">{{ p.label }}</span>
-              <div class="feature-bar-track">
-                <div
-                  class="feature-bar-fill"
-                  :class="{ monetized: p.monetized }"
-                  :style="{ width: (p.views / marketingMax * 100) + '%' }"
-                ></div>
-              </div>
-              <span class="feature-bar-value">
-                {{ p.views.toLocaleString() }}
-                <span v-if="p.unique !== p.views" class="feature-bar-unique">({{ p.unique.toLocaleString() }} unique)</span>
-              </span>
-              <span class="conversion-value" :class="{ 'has-conversions': p.conversions > 0 }">
-                {{ p.conversions.toLocaleString() }} signed up
-                <span v-if="p.unique" class="conversion-rate">({{ conversionRate(p) }}%)</span>
-              </span>
-            </div>
-          </div>
-        </template>
       </section>
     </template>
   </section>
@@ -630,6 +667,34 @@ const tooltipStyle = computed(() => {
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 0.85rem;
+}
+
+.collapse-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: var(--color-button-secondary-bg);
+  color: var(--color-button-secondary-text);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.collapse-toggle:hover {
+  background: var(--color-button-secondary-hover);
+}
+
+.collapse-icon {
+  display: inline-block;
+  font-size: 0.8rem;
+  line-height: 1;
+  transition: transform 0.15s;
+}
+
+.collapse-icon.collapsed {
+  transform: rotate(-90deg);
 }
 
 .stat-grid {
