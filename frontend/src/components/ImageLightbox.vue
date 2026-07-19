@@ -1,17 +1,21 @@
 <template>
-  <div v-if="visible" class="lightbox-overlay" @click.self="$emit('close')">
-    <button type="button" class="lightbox-close" aria-label="Close" @click="$emit('close')">&times;</button>
-    <div class="lightbox-viewport" :class="{ zoomed }">
-      <img
-        :src="src"
-        :alt="alt"
-        class="lightbox-image"
-        :class="{ zoomed }"
-        :title="zoomed ? 'Click to zoom out' : 'Click to zoom in'"
-        @click="zoomed = !zoomed"
-      />
+  <Teleport to="body">
+    <div v-if="visible" class="lightbox-overlay" @click.self="$emit('close')">
+      <div class="lightbox-frame" :class="{ zoomed }">
+        <button type="button" class="lightbox-close" aria-label="Close" @click="$emit('close')">&times;</button>
+        <div class="lightbox-viewport" :class="{ zoomed }">
+          <img
+            :src="src"
+            :alt="alt"
+            class="lightbox-image"
+            :class="{ zoomed }"
+            :title="zoomed ? 'Click to zoom out' : 'Click to zoom in'"
+            @click="zoomed = !zoomed"
+          />
+        </div>
+      </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <script setup>
@@ -55,24 +59,58 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   z-index: 2000;
+  padding: 24px;
+  box-sizing: border-box;
 }
 
+/* Standard size regardless of where the image was opened from -- 80% of
+   the viewport, not the triggering widget. */
+.lightbox-frame {
+  position: relative;
+  background: var(--color-background-card);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+  padding: 14px;
+  max-width: 80vw;
+  max-height: 80vh;
+  box-sizing: border-box;
+  display: flex;
+}
+
+.lightbox-frame.zoomed {
+  max-width: 95vw;
+  max-height: 90vh;
+}
+
+/* Anchored to the frame's corner, outside the image area, so it always
+   sits against the overlay backdrop rather than arbitrary image pixels. */
 .lightbox-close {
   position: absolute;
-  top: 16px;
-  right: 20px;
-  background: none;
-  border: none;
-  color: #fff;
-  font-size: 2rem;
+  top: -16px;
+  right: -16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--color-background-card);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 1.4rem;
   line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
-  z-index: 2001;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.lightbox-close:hover {
+  background: var(--color-button-secondary-hover);
 }
 
 .lightbox-viewport {
-  max-width: 90vw;
-  max-height: 85vh;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
   display: flex;
   align-items: center;
@@ -81,15 +119,13 @@ onUnmounted(() => {
 
 .lightbox-viewport.zoomed {
   overflow: auto;
-  max-width: 95vw;
-  max-height: 90vh;
   align-items: flex-start;
   justify-content: flex-start;
 }
 
 .lightbox-image {
-  max-width: 90vw;
-  max-height: 85vh;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
   cursor: zoom-in;
   display: block;
