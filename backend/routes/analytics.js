@@ -397,6 +397,93 @@ router.get('/features', authenticate, checkPermission('marketing_access'), async
 });
 
 /**
+ * GET /api/analytics/registration-paths?range=today|7d|30d|year
+ * Marketing-only. For every registration in the given range (defaults to
+ * 30d, filtered by the user's created_at -- this is about registration
+ * outcomes, not pageview timing), reconstructs the distinct sequence of
+ * /explore pages that visitor touched pre-signup (in first-touch order,
+ * repeats collapsed) and groups registrations by identical path. Signups
+ * with no tracked touches (direct link, invite, mobile signups that never
+ * send a visitorId, etc.) bucket into "Direct / No Tracked Path". Ranked
+ * by count descending; only the top 10 distinct paths are broken out, the
+ * rest roll up into "Other combinations".
+ */
+router.get('/registration-paths', authenticate, checkPermission('marketing_access'), async (req, res) => {
+  const range = resolveRange(req.query.range);
+  const TOP_N = 10;
+  const client = await getClient();
+  try {
+    const usersResult = await client.query(`
+      SELECT signup_visitor_id AS visitor_id
+      FROM users
+      WHERE created_at >= ${range.sql}
+        AND is_internal = FALSE
+    `);
+    const registrants = usersResult.rows;
+    const totalRegistrations = registrants.length;
+
+    const visitorIds = [...new Set(registrants.map(r => r.visitor_id).filter(Boolean))];
+
+    const touchesByVisitor = {};
+    if (visitorIds.length > 0) {
+      const placeholders = visitorIds.map((_, i) => `$${i + 1}`).join(', ');
+      const touchesResult = await client.query(
+        `SELECT visitor_id, page FROM analytics_marketing_pageviews
+         WHERE visitor_id IN (${placeholders}) ORDER BY visitor_id, created_at`,
+        visitorIds
+      );
+      for (const row of touchesResult.rows) {
+        if (!touchesByVisitor[row.visitor_id]) touchesByVisitor[row.visitor_id] = [];
+        touchesByVisitor[row.visitor_id].push(row.page);
+      }
+    }
+
+    const pathCounts = new Map();
+    for (const r of registrants) {
+      const rawTouches = r.visitor_id ? (touchesByVisitor[r.visitor_id] || []) : [];
+      const seen = new Set();
+      const pages = [];
+      for (const page of rawTouches) {
+        if (!seen.has(page)) {
+          seen.add(page);
+          pages.push(page);
+        }
+      }
+      const key = pages.length ? pages.join(',') : '__direct__';
+      if (!pathCounts.has(key)) pathCounts.set(key, { pages, count: 0 });
+      pathCounts.get(key).count += 1;
+    }
+
+    const ranked = [...pathCounts.values()].sort((a, b) => b.count - a.count);
+    const top = ranked.slice(0, TOP_N);
+    const otherCount = ranked.slice(TOP_N).reduce((sum, p) => sum + p.count, 0);
+
+    const toLabel = (pages) => pages.length
+      ? pages.map(p => MARKETING_PAGES[p]?.label || p).join(' → ')
+      : 'Direct / No Tracked Path';
+    const toPercent = (count) => totalRegistrations ? Math.round((count / totalRegistrations) * 100) : 0;
+
+    const paths = top.map(p => ({
+      key: p.pages.length ? p.pages.join(',') : '__direct__',
+      label: toLabel(p.pages),
+      count: p.count,
+      percent: toPercent(p.count),
+    }));
+
+    if (otherCount > 0) {
+      paths.push({ key: '__other__', label: 'Other combinations', count: otherCount, percent: toPercent(otherCount) });
+    }
+
+    res.status(200).json({ totalRegistrations, paths });
+  } catch (err) {
+    console.error('Error fetching registration paths:', err);
+    res.status(500).json({ message: 'Failed to fetch registration paths' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
  * GET /api/analytics/marketing-pages?range=today|7d|30d|year
  * Marketing-only. Views, unique visitors, and signup conversions per public
  * /explore page over the given range (defaults to 30d). A "conversion" is a

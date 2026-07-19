@@ -134,6 +134,44 @@ function conversionRate(p) {
   return p.unique ? Math.round((p.conversions / p.unique) * 100) : 0
 }
 
+// --- Registration paths -----------------------------------------------
+// Which sequence of /explore pages (if any) a visitor touched before
+// registering, ranked by how many registrations followed that exact path.
+// See GET /api/analytics/registration-paths.
+
+const registrationRange = ref('30d')
+const registrationRangeLabel = computed(() => rangeDefs.find(r => r.key === registrationRange.value)?.label || '')
+const registrationInitialLoading = ref(true)
+const registrationRefreshing = ref(false)
+const registrationError = ref('')
+const registrationPaths = ref([])
+const totalRegistrations = ref(0)
+const registrationCollapsed = ref(false)
+
+async function loadRegistrationPaths() {
+  const isFirstLoad = !registrationPaths.value.length
+  if (isFirstLoad) registrationInitialLoading.value = true
+  else registrationRefreshing.value = true
+  registrationError.value = ''
+  try {
+    const res = await fetch(`/api/analytics/registration-paths?range=${registrationRange.value}`, { credentials: 'include' })
+    if (!res.ok) throw new Error('Failed to load registration paths')
+    const data = await res.json()
+    registrationPaths.value = data.paths || []
+    totalRegistrations.value = data.totalRegistrations || 0
+  } catch (err) {
+    registrationError.value = 'Failed to load registration path data.'
+  } finally {
+    registrationInitialLoading.value = false
+    registrationRefreshing.value = false
+  }
+}
+
+onMounted(loadRegistrationPaths)
+watch(registrationRange, loadRegistrationPaths)
+
+const registrationMax = computed(() => Math.max(1, ...registrationPaths.value.map(p => p.count)))
+
 // --- Last 30 Days line chart ---------------------------------------------
 
 const seriesDefs = [
@@ -541,6 +579,56 @@ const tooltipStyle = computed(() => {
                 <span class="conversion-value" :class="{ 'has-conversions': p.conversions > 0 }">
                   {{ p.conversions.toLocaleString() }} signed up
                   <span v-if="p.unique" class="conversion-rate">({{ conversionRate(p) }}%)</span>
+                </span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </section>
+
+      <section class="basic-stats-card feature-usage-card viz-root" :class="{ refreshing: registrationRefreshing }">
+        <div class="basic-stats-header">
+          <h2 class="basic-stats-title">Registration Paths</h2>
+          <div class="range-control">
+            <label for="registration-range-select">Time range</label>
+            <select id="registration-range-select" v-model="registrationRange">
+              <option v-for="r in rangeDefs" :key="r.key" :value="r.key">{{ r.label }}</option>
+            </select>
+          </div>
+          <button
+            type="button"
+            class="collapse-toggle"
+            :aria-expanded="!registrationCollapsed"
+            aria-label="Toggle Registration Paths section"
+            @click="registrationCollapsed = !registrationCollapsed"
+          >
+            <span class="collapse-icon" :class="{ collapsed: registrationCollapsed }">&#9662;</span>
+          </button>
+        </div>
+
+        <div v-show="!registrationCollapsed">
+          <div v-if="registrationInitialLoading" class="status-msg">Loading...</div>
+          <div v-else-if="registrationError" class="status-msg error">{{ registrationError }}</div>
+
+          <template v-else>
+            <p class="feature-usage-sub">
+              Which sequence of unauthenticated pages a new member visited before registering, over the {{ registrationRangeLabel.toLowerCase() }} -- highest-count path first.
+            </p>
+
+            <div v-if="!registrationPaths.length" class="status-msg">No registrations in this range.</div>
+
+            <div v-else class="feature-bars">
+              <div v-for="p in registrationPaths" :key="p.key" class="feature-bar-row registration-bar-row">
+                <span class="feature-bar-label registration-bar-label" :title="p.label">{{ p.label }}</span>
+                <div class="feature-bar-track">
+                  <div
+                    class="feature-bar-fill"
+                    :style="{ width: (p.count / registrationMax * 100) + '%' }"
+                  ></div>
+                </div>
+                <span class="feature-bar-value">
+                  {{ p.count.toLocaleString() }}
+                  <span class="feature-bar-unique">({{ p.percent }}%)</span>
                 </span>
               </div>
             </div>
@@ -1067,6 +1155,20 @@ th {
     grid-column: 1 / -1;
     text-align: left;
     min-width: 0;
+  }
+}
+
+.registration-bar-row {
+  grid-template-columns: 240px 1fr auto;
+}
+
+.registration-bar-label {
+  text-align: left;
+}
+
+@media (max-width: 700px) {
+  .registration-bar-row {
+    grid-template-columns: 140px 1fr auto;
   }
 }
 </style>
