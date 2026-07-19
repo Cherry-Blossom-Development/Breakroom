@@ -4,6 +4,7 @@ import { chat } from '@/stores/chat.js'
 import { user } from '@/stores/user.js'
 import { moderationStore } from '@/stores/moderation.js'
 import FlagDialog from '@/components/FlagDialog.vue'
+import ImageLightbox from '@/components/ImageLightbox.vue'
 import { renderMessage } from '@/utilities/linkify.js'
 
 const messageInput = ref('')
@@ -281,6 +282,12 @@ const getImageUrl = (imagePath) => {
   return `/api/uploads/${imagePath}`
 }
 
+// Lightbox for viewing shared images full-size, in place
+const lightboxSrc = ref(null)
+const openLightbox = (src) => {
+  lightboxSrc.value = src
+}
+
 // Get video URL
 const getVideoUrl = (videoPath) => {
   if (!videoPath) return null
@@ -457,9 +464,7 @@ onUnmounted(() => {
               <button @click="deletingMessageId = null" class="delete-confirm-no">Cancel</button>
             </div>
             <div v-if="msg.image_path" class="message-image">
-              <a :href="getImageUrl(msg.image_path)" target="_blank">
-                <img :src="getImageUrl(msg.image_path)" alt="Shared image" />
-              </a>
+              <img :src="getImageUrl(msg.image_path)" alt="Shared image" @click="openLightbox(getImageUrl(msg.image_path))" />
             </div>
             <div v-if="msg.video_path" class="message-video">
               <video controls :src="getVideoUrl(msg.video_path)">
@@ -585,6 +590,8 @@ onUnmounted(() => {
         </div>
       </template>
     </div>
+
+    <ImageLightbox :visible="!!lightboxSrc" :src="lightboxSrc" alt="Shared image" @close="lightboxSrc = null" />
   </main>
 </template>
 
@@ -912,10 +919,6 @@ onUnmounted(() => {
   max-height: 300px;
   border-radius: 8px;
   cursor: pointer;
-}
-
-.message-image a {
-  display: block;
 }
 
 .message-video {
