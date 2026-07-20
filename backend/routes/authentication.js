@@ -25,6 +25,51 @@ function extractToken(req) {
   return req.cookies.jwtToken;
 }
 
+// General Chatter room rotation. "General Chatter 1" is created once by seed
+// data; every 50 real users after real_user_number 40 opens the next one
+// (2 at 40, 3 at 90, 4 at 140, ...) so no single room grows unbounded.
+const GENERAL_CHATTER_FIRST_THRESHOLD = 40;
+const GENERAL_CHATTER_INTERVAL = 50;
+const GENERAL_CHATTER_OVERLAP = 10;
+
+// Which General Chatter generation a given real_user_number belongs to.
+function generalChatterGeneration(realUserNumber) {
+  if (realUserNumber < GENERAL_CHATTER_FIRST_THRESHOLD) return 1;
+  return 2 + Math.floor((realUserNumber - GENERAL_CHATTER_FIRST_THRESHOLD) / GENERAL_CHATTER_INTERVAL);
+}
+
+// real_user_number at which generation `gen` (>= 2) first opens.
+function generalChatterThreshold(gen) {
+  return GENERAL_CHATTER_FIRST_THRESHOLD + GENERAL_CHATTER_INTERVAL * (gen - 2);
+}
+
+// Lazily creates the next General Chatter room the moment the threshold is
+// crossed, and keeps is_default in sync: during the GENERAL_CHATTER_OVERLAP
+// window right after a new room opens, both the outgoing and incoming rooms
+// are is_default (so new signups land in both, never alone in an empty
+// room); once the window closes, only the current room stays is_default.
+async function ensureGeneralChatterRooms(client, realUserNumber) {
+  const gen = generalChatterGeneration(realUserNumber);
+  if (gen === 1) return;
+
+  const roomName = `General Chatter ${gen}`;
+  await client.query(
+    `INSERT INTO chat_rooms (name, description, is_active, is_default, discoverable)
+     VALUES ($1, $2, true, true, true)
+     ON DUPLICATE KEY UPDATE id = id`,
+    [roomName, `Continues the conversation from General Chatter ${gen - 1} as the community grows. Jump in and say hello!`]
+  );
+
+  const threshold = generalChatterThreshold(gen);
+  const inOverlap = realUserNumber <= threshold + GENERAL_CHATTER_OVERLAP;
+  if (!inOverlap) {
+    await client.query(
+      `UPDATE chat_rooms SET is_default = false WHERE name = $1 AND is_default = true`,
+      [`General Chatter ${gen - 1}`]
+    );
+  }
+}
+
 // Define authentication-related routes
 router.post('/signup', async (req, res) => {
   const client = await getClient();
@@ -60,6 +105,7 @@ router.post('/signup', async (req, res) => {
     const maxNumberResult = await client.query('SELECT MAX(real_user_number) AS max_number FROM users');
     const nextRealUserNumber = (maxNumberResult.rows[0].max_number || 0) + 1;
     await client.query('UPDATE users SET real_user_number = $1 WHERE id = $2', [nextRealUserNumber, newUserId]);
+    await ensureGeneralChatterRooms(client, nextRealUserNumber);
 
     // Assign new user to Standard group
     const standardGroup = await client.query('SELECT id FROM "groups" WHERE name = $1', ['Standard']);
