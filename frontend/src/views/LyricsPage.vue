@@ -10,6 +10,7 @@ const showLyricEditor = ref(false)
 const showSongModal = ref(false)
 const editingLyric = ref(null)
 const editingSong = ref(null)
+const promotingLyric = ref(null)
 const selectedSong = ref(null)
 const activeTab = ref('songs') // 'songs' or 'ideas'
 
@@ -27,11 +28,19 @@ const collaboratingSongs = computed(() => lyrics.songs.filter(s => s.role !== 'o
 // Song functions
 const createNewSong = () => {
   editingSong.value = null
+  promotingLyric.value = null
   showSongModal.value = true
 }
 
 const editSong = (song) => {
   editingSong.value = song
+  promotingLyric.value = null
+  showSongModal.value = true
+}
+
+const promoteIdea = (lyric) => {
+  editingSong.value = null
+  promotingLyric.value = lyric
   showSongModal.value = true
 }
 
@@ -62,6 +71,29 @@ const onSongSavedAndAddLyric = async (song) => {
   editingSong.value = null
   await lyrics.fetchSongs()
   createNewLyric(song.id)
+}
+
+const onSongSavedAndPromote = async (song) => {
+  showSongModal.value = false
+  const idea = promotingLyric.value
+  promotingLyric.value = null
+
+  // Re-send the idea's existing fields -- PUT /lyrics/:id isn't a partial
+  // patch, so anything omitted would be reset rather than left alone.
+  await lyrics.updateLyric(idea.id, {
+    song_id: song.id,
+    title: idea.title,
+    content: idea.content,
+    section_type: idea.section_type,
+    section_order: idea.section_order,
+    mood: idea.mood,
+    notes: idea.notes,
+    status: idea.status,
+    lyric_date: idea.lyric_date
+  })
+
+  await lyrics.fetchSongs()
+  await openSong(song)
 }
 
 // Lyric functions
@@ -154,9 +186,11 @@ const getSectionLabel = (type) => {
     <SongModal
       v-if="showSongModal"
       :song="editingSong"
-      @close="showSongModal = false"
+      :promoting-lyric="promotingLyric"
+      @close="showSongModal = false; promotingLyric = null"
       @saved="onSongSaved"
       @saved-add-lyric="onSongSavedAndAddLyric"
+      @saved-promote="onSongSavedAndPromote"
     />
 
     <!-- Song Detail View -->
@@ -341,6 +375,7 @@ const getSectionLabel = (type) => {
               <span class="idea-date">{{ formatDate(lyric.lyric_date || lyric.updated_at) }}</span>
             </div>
             <div class="idea-actions" @click.stop>
+              <button class="btn-icon btn-promote" @click="promoteIdea(lyric)">Promote to Song</button>
               <button class="btn-icon" @click="editLyric(lyric)">Edit</button>
               <button class="btn-icon btn-danger" @click="deleteLyric(lyric)">Delete</button>
             </div>
@@ -451,6 +486,15 @@ const getSectionLabel = (type) => {
 
 .btn-danger:hover {
   background: var(--color-error-bg);
+}
+
+.btn-promote {
+  color: var(--color-accent);
+}
+
+.btn-promote:hover {
+  background: var(--color-accent);
+  color: white;
 }
 
 /* Tabs */

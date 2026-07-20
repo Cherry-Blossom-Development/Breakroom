@@ -4,10 +4,11 @@ import { lyrics } from '@/stores/lyrics.js'
 import { friends } from '@/stores/friends.js'
 
 const props = defineProps({
-  song: Object
+  song: Object,
+  promotingLyric: { type: Object, default: null }
 })
 
-const emit = defineEmits(['close', 'saved', 'saved-add-lyric'])
+const emit = defineEmits(['close', 'saved', 'saved-add-lyric', 'saved-promote'])
 
 const title = ref('')
 const description = ref('')
@@ -72,6 +73,15 @@ const genreSuggestions = [
 
 const todayStr = () => new Date().toISOString().split('T')[0]
 
+// Suggests a starting title from the idea being promoted: its own title if
+// it has one, otherwise the first line of its content, trimmed to a
+// reasonable length.
+function titleFromLyric(lyric) {
+  if (lyric.title) return lyric.title
+  const firstLine = (lyric.content || '').split('\n')[0].trim()
+  return firstLine.length > 60 ? firstLine.slice(0, 60) + '…' : firstLine
+}
+
 onMounted(async () => {
   if (props.song) {
     title.value = props.song.title || ''
@@ -85,6 +95,10 @@ onMounted(async () => {
     if (props.song.role === 'owner') {
       await friends.fetchFriends()
     }
+  } else if (props.promotingLyric) {
+    title.value = titleFromLyric(props.promotingLyric)
+    status.value = 'writing'
+    songDate.value = todayStr()
   } else {
     songDate.value = todayStr()
   }
@@ -161,6 +175,11 @@ async function handleSaveAndAddLyric() {
   if (song) emit('saved-add-lyric', song)
 }
 
+async function handleSavePromote() {
+  const song = await save()
+  if (song) emit('saved-promote', song)
+}
+
 function selectFriend(friend) {
   collaboratorSearch.value = friend.handle
   newCollaborator.value = friend.handle
@@ -198,12 +217,13 @@ function selectGenre(g) {
   <div class="modal-overlay">
     <div class="modal-content">
       <div class="modal-header">
-        <h2>{{ isEditing ? 'Edit Song' : 'New Song' }}</h2>
+        <h2>{{ promotingLyric ? 'Promote to Song' : (isEditing ? 'Edit Song' : 'New Song') }}</h2>
         <button class="close-btn" @click="requestClose">&times;</button>
       </div>
 
       <div class="modal-body">
         <div v-if="error" class="error-message">{{ error }}</div>
+        <p v-if="promotingLyric" class="promote-note">This idea will become the first lyric in a brand new song.</p>
 
         <!-- Title -->
         <div class="form-group">
@@ -327,14 +347,17 @@ function selectGenre(g) {
       <div class="modal-footer">
         <button class="btn-secondary" @click="requestClose">Cancel</button>
         <button
-          v-if="!isEditing"
+          v-if="!isEditing && !promotingLyric"
           class="btn-secondary"
           @click="handleSaveAndAddLyric"
           :disabled="saving"
         >
           {{ saving ? 'Saving...' : 'Create & Add Lyric' }}
         </button>
-        <button class="btn-primary" @click="handleSave" :disabled="saving">
+        <button v-if="promotingLyric" class="btn-primary" @click="handleSavePromote" :disabled="saving">
+          {{ saving ? 'Promoting...' : 'Promote to Song' }}
+        </button>
+        <button v-else class="btn-primary" @click="handleSave" :disabled="saving">
           {{ saving ? 'Saving...' : (isEditing ? 'Update' : 'Create') }}
         </button>
       </div>
@@ -427,6 +450,15 @@ function selectGenre(g) {
   padding: 12px;
   border-radius: 6px;
   margin-bottom: 20px;
+}
+
+.promote-note {
+  background: var(--color-background-soft);
+  color: var(--color-text-secondary);
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin: 0 0 20px;
+  font-size: 0.88rem;
 }
 
 .form-group {
