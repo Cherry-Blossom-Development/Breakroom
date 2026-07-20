@@ -51,8 +51,17 @@ router.post('/signup', async (req, res) => {
         req.body.visitorId || null
       ]);
 
-    // Assign new user to Standard group
     const newUserId = result.insertId;
+
+    // Assign the next real_user_number. Numbers are never reused -- if this
+    // account later turns out to be fake and gets flagged is_internal, its
+    // number is cleared (see PUT /api/user/:id) but not reassigned to anyone
+    // else, so the sequence is a permanent record rather than a live rank.
+    const maxNumberResult = await client.query('SELECT MAX(real_user_number) AS max_number FROM users');
+    const nextRealUserNumber = (maxNumberResult.rows[0].max_number || 0) + 1;
+    await client.query('UPDATE users SET real_user_number = $1 WHERE id = $2', [nextRealUserNumber, newUserId]);
+
+    // Assign new user to Standard group
     const standardGroup = await client.query('SELECT id FROM "groups" WHERE name = $1', ['Standard']);
     if (standardGroup.rowCount > 0) {
       await client.query('INSERT INTO user_groups (user_id, group_id) VALUES ($1, $2)', [newUserId, standardGroup.rows[0].id]);

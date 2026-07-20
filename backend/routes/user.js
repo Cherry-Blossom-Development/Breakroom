@@ -111,7 +111,7 @@ router.post('/invite', async (req, res) => {
   res.status(201).json({ message: 'Invitation sent to user.' });
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', authenticate, checkPermission('admin_access'), async (req, res) => {
   const { id } = req.params;
   const { user, permissions, groups } = req.body;
 
@@ -137,13 +137,16 @@ router.put('/:id', async (req, res) => {
     // Begin the transactional part of the process
     await client.beginTransaction();
 
+    // Flagging a user internal also retires their real_user_number -- the
+    // number is never reassigned to anyone else (see 041-real-user-number.sql).
     const searchResult = await client.query(
       `UPDATE users SET
         handle = $1,
         first_name = $2,
         last_name = $3,
         email = $4,
-        is_internal = $5
+        is_internal = $5,
+        real_user_number = CASE WHEN $5 = true THEN NULL ELSE real_user_number END
       WHERE id = $6`,
       [user.handle, user.first_name, user.last_name, user.email, user.is_internal ?? false, id]
     );
@@ -211,7 +214,7 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authenticate, checkPermission('admin_access'), async (req, res) => {
   const { id } = req.params;
   const client = await getClient();
 
@@ -234,7 +237,7 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-router.get('/permissionMatrix/:id', async (req, res) => {
+router.get('/permissionMatrix/:id', authenticate, checkPermission('admin_access'), async (req, res) => {
   const { id } = req.params;
   const client = await getClient();
 
