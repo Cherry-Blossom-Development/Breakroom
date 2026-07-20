@@ -6,6 +6,7 @@ const path = require('path');
 const { getClient } = require('../utilities/db');
 const { sendMail } = require('../utilities/aws-ses-email');
 const { getPlatform } = require('../utilities/platform');
+const { getIO } = require('../utilities/socket');
 
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
@@ -31,6 +32,11 @@ function extractToken(req) {
 const GENERAL_CHATTER_FIRST_THRESHOLD = 40;
 const GENERAL_CHATTER_INTERVAL = 50;
 const GENERAL_CHATTER_OVERLAP = 10;
+
+// System account that posts automated messages (e.g. new-member welcomes).
+// Has no password (hash/salt are NULL, so login is impossible) and is
+// flagged is_internal so it never counts as a real user.
+const CHAT_BOT_HANDLE = 'Prosaurus';
 
 // Which General Chatter generation a given real_user_number belongs to.
 function generalChatterGeneration(realUserNumber) {
@@ -122,6 +128,36 @@ router.post('/signup', async (req, res) => {
         'INSERT INTO users_rooms (user_id, room_id, accepted) VALUES ($1, $2, true)',
         [newUserId, room.id]
       );
+    }
+
+    // Welcome the new member into whichever General Chatter room(s) they
+    // just landed in -- one normally, or two during a rotation's overlap
+    // window (see ensureGeneralChatterRooms above).
+    const botUser = await client.query('SELECT id FROM users WHERE handle = $1', [CHAT_BOT_HANDLE]);
+    if (botUser.rowCount > 0) {
+      const botUserId = botUser.rows[0].id;
+      const generalChatterRooms = defaultRooms.rows.filter(r => r.name.startsWith('General Chatter'));
+      const io = getIO();
+      for (const room of generalChatterRooms) {
+        const welcomeResult = await client.query(
+          'INSERT INTO chat_messages (room_id, user_id, message) VALUES ($1, $2, $3)',
+          [room.id, botUserId, `Welcome ${req.body.handle} to the chat!`]
+        );
+        const welcomeMessage = await client.query(
+          `SELECT m.id, m.message, m.image_path, m.video_path, m.created_at, m.is_scheduled,
+                  u.id as user_id, u.handle
+           FROM chat_messages m
+           JOIN users u ON m.user_id = u.id
+           WHERE m.id = $1`,
+          [welcomeResult.insertId]
+        );
+        if (io) {
+          io.to(`room_${room.id}`).emit('new_message', {
+            roomId: room.id,
+            message: welcomeMessage.rows[0]
+          });
+        }
+      }
     }
 
     // Create default breakroom blocks for new user
