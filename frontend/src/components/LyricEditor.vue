@@ -115,7 +115,7 @@ function selectMood(m) {
     <div class="modal-content">
       <div class="modal-header">
         <h2>{{ isEditing ? 'Edit Lyric' : 'New Lyric' }}</h2>
-        <button class="close-btn" @click="emit('close')">&times;</button>
+        <button class="close-btn" aria-label="Close" @click="emit('close')">&times;</button>
       </div>
 
       <div class="modal-body">
@@ -182,6 +182,7 @@ function selectMood(m) {
               :key="m"
               type="button"
               :class="['mood-chip', { active: mood === m }]"
+              :aria-pressed="mood === m"
               @click="selectMood(m)"
             >
               {{ m }}

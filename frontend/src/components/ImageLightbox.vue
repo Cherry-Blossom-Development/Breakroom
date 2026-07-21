@@ -1,8 +1,15 @@
 <template>
   <Teleport to="body">
-    <div v-if="visible" class="lightbox-overlay" @click.self="$emit('close')">
+    <div
+      v-if="visible"
+      class="lightbox-overlay"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="alt || 'Image viewer'"
+      @click.self="$emit('close')"
+    >
       <div class="lightbox-frame" :class="{ zoomed }">
-        <button type="button" class="lightbox-close" aria-label="Close" @click="$emit('close')">&times;</button>
+        <button ref="closeBtn" type="button" class="lightbox-close" aria-label="Close" @click="$emit('close')">&times;</button>
         <div class="lightbox-viewport" :class="{ zoomed }">
           <img
             :src="src"
@@ -19,7 +26,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onUnmounted } from 'vue'
+import { ref, watch, nextTick, onUnmounted } from 'vue'
 
 const props = defineProps({
   visible: Boolean,
@@ -29,6 +36,7 @@ const props = defineProps({
 const emit = defineEmits(['close'])
 
 const zoomed = ref(false)
+const closeBtn = ref(null)
 
 function handleKeydown(e) {
   if (e.key === 'Escape') emit('close')
@@ -39,6 +47,7 @@ watch(() => props.visible, (isVisible) => {
   document.body.style.overflow = isVisible ? 'hidden' : ''
   if (isVisible) {
     document.addEventListener('keydown', handleKeydown)
+    nextTick(() => closeBtn.value?.focus())
   } else {
     document.removeEventListener('keydown', handleKeydown)
   }

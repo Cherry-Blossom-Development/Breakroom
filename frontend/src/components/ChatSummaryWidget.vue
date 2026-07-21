@@ -280,19 +280,24 @@ async function onImageSelected(event) {
   const file = event.target.files[0]
   if (!file) return
   uploadingImage.value = true
+  liveAnnouncement.value = 'Uploading image'
   const formData = new FormData()
   formData.append('image', file)
   try {
     const res = await fetch(`/api/chat/rooms/${currentRoomId.value}/image`, {
       method: 'POST', credentials: 'include', body: formData
     })
-    if (res.ok && (!socket?.connected)) {
+    if (!res.ok) throw new Error('Upload failed')
+    liveAnnouncement.value = 'Image sent'
+    if (!socket?.connected) {
       const data = await res.json()
       if (!messages.value.some(m => m.id === data.message.id)) {
         messages.value.push(data.message)
         scrollToBottom()
       }
     }
+  } catch {
+    liveAnnouncement.value = 'Upload failed'
   } finally { uploadingImage.value = false; event.target.value = '' }
 }
 
@@ -300,19 +305,24 @@ async function onVideoSelected(event) {
   const file = event.target.files[0]
   if (!file) return
   uploadingVideo.value = true
+  liveAnnouncement.value = 'Uploading video'
   const formData = new FormData()
   formData.append('video', file)
   try {
     const res = await fetch(`/api/chat/rooms/${currentRoomId.value}/video`, {
       method: 'POST', credentials: 'include', body: formData
     })
-    if (res.ok && (!socket?.connected)) {
+    if (!res.ok) throw new Error('Upload failed')
+    liveAnnouncement.value = 'Video sent'
+    if (!socket?.connected) {
       const data = await res.json()
       if (!messages.value.some(m => m.id === data.message.id)) {
         messages.value.push(data.message)
         scrollToBottom()
       }
     }
+  } catch {
+    liveAnnouncement.value = 'Upload failed'
   } finally { uploadingVideo.value = false; event.target.value = '' }
 }
 
@@ -422,6 +432,7 @@ function setupSocket() {
           setTimeout(() => {
             flashingMessageIds.value = new Set([...flashingMessageIds.value].filter(id => id !== data.message.id))
           }, 2000)
+          liveAnnouncement.value = `New message from ${data.message.handle}: ${describeMessage(data.message)}`
         }
       }
     }
@@ -476,6 +487,18 @@ const lightboxSrc = ref(null)
 const openLightbox = (src) => {
   lightboxSrc.value = src
 }
+
+// Screen-reader-only live region text
+const liveAnnouncement = ref('')
+
+function describeMessage(msg) {
+  if (msg.message) {
+    return msg.message.length > 50 ? msg.message.slice(0, 50) + '…' : msg.message
+  }
+  if (msg.image_path) return 'sent an image'
+  if (msg.video_path) return 'sent a video'
+  return 'sent a message'
+}
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 onMounted(async () => {
@@ -516,8 +539,8 @@ onUnmounted(() => {
           class="ccw-arrow"
           :disabled="!canLeft"
           @click="goLeft"
-          title="Previous room (older)"
-        >‹</button>
+          aria-label="Previous room (older)"
+        ><span aria-hidden="true">‹</span></button>
         <span class="ccw-room-name"># {{ currentRoom?.room_name ?? '…' }}</span>
         <span class="ccw-pos">{{ posLabel }}</span>
         <button
@@ -525,8 +548,8 @@ onUnmounted(() => {
           :class="{ 'ccw-arrow--glow': rightGlowing }"
           :disabled="!canRight"
           @click="goRight"
-          title="Next room (newer)"
-        >›</button>
+          aria-label="Next room (newer)"
+        ><span aria-hidden="true">›</span></button>
       </div>
 
       <!-- Messages -->
@@ -558,8 +581,14 @@ onUnmounted(() => {
               <div class="msg-header-right">
                 <span class="time">{{ formatTime(msg.created_at) }}</span>
                 <div class="msg-menu-wrapper" @click.stop>
-                  <button class="msg-menu-btn" @click="toggleMsgMenu(msg.id)" title="Message options">
-                    <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+                  <button
+                    class="msg-menu-btn"
+                    @click="toggleMsgMenu(msg.id)"
+                    aria-label="Message options"
+                    aria-haspopup="true"
+                    :aria-expanded="openMenuId === msg.id"
+                  >
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
                   </button>
                   <div v-if="openMenuId === msg.id" class="msg-dropdown">
                     <template v-if="isOwnMessage(msg.handle)">
@@ -580,7 +609,11 @@ onUnmounted(() => {
               <button @click="deletingMessageId = null" class="delete-confirm-no">Cancel</button>
             </div>
             <div v-if="msg.image_path" class="message-image">
-              <img :src="getImageUrl(msg.image_path)" alt="Shared image" @click="openLightbox(getImageUrl(msg.image_path))" />
+              <img
+                :src="getImageUrl(msg.image_path)"
+                :alt="isOwnMessage(msg.handle) ? 'Image you sent, tap to view full size' : `Image from ${msg.handle}, tap to view full size`"
+                @click="openLightbox(getImageUrl(msg.image_path))"
+              />
             </div>
             <div v-if="msg.video_path" class="message-video">
               <video controls :src="getVideoUrl(msg.video_path)">Your browser does not support video.</video>
@@ -612,18 +645,27 @@ onUnmounted(() => {
         <div class="input-wrapper">
           <div v-if="showAttachMenu" class="attach-menu" :style="attachMenuStyle">
             <button type="button" class="attach-option" @click="imageInput.click(); showAttachMenu = false" :disabled="uploadingImage">
-              <span class="attach-icon">🖼️</span><span>Image</span>
+              <span class="attach-icon" aria-hidden="true">🖼️</span><span>Image</span>
             </button>
             <button type="button" class="attach-option" @click="videoInput.click(); showAttachMenu = false" :disabled="uploadingVideo">
-              <span class="attach-icon">🎬</span><span>Video</span>
+              <span class="attach-icon" aria-hidden="true">🎬</span><span>Video</span>
             </button>
           </div>
           <form class="input-area" @submit.prevent="sendMessage">
             <input ref="imageInput" type="file" accept="image/*" class="hidden-input" @change="onImageSelected" />
             <input ref="videoInput" type="file" accept="video/*" class="hidden-input" @change="onVideoSelected" />
-            <button ref="attachBtnRef" type="button" class="attach-btn" @click="toggleAttachMenu" :class="{ active: showAttachMenu }" title="Add attachment">
-              <span v-if="uploadingImage || uploadingVideo" class="uploading">…</span>
-              <span v-else class="plus-icon">+</span>
+            <button
+              ref="attachBtnRef"
+              type="button"
+              class="attach-btn"
+              @click="toggleAttachMenu"
+              :class="{ active: showAttachMenu }"
+              :aria-label="uploadingImage || uploadingVideo ? 'Uploading attachment' : 'Add attachment'"
+              aria-haspopup="true"
+              :aria-expanded="showAttachMenu"
+            >
+              <span v-if="uploadingImage || uploadingVideo" class="uploading" aria-hidden="true">…</span>
+              <span v-else class="plus-icon" aria-hidden="true">+</span>
             </button>
             <div class="mention-dropdown" v-if="mentionActive && mentionResults.length > 0">
               <div
@@ -647,8 +689,15 @@ onUnmounted(() => {
               @blur="closeMention"
             />
             <button type="submit" class="send-btn" :disabled="!newMessage.trim()">Send</button>
-            <button type="button" class="mute-btn" :class="{ muted: isMuted }" @click="toggleMute" :title="isMuted ? 'Unmute this room' : 'Mute this room'">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <button
+              type="button"
+              class="mute-btn"
+              :class="{ muted: isMuted }"
+              @click="toggleMute"
+              :aria-label="isMuted ? 'Unmute this room' : 'Mute this room'"
+              :aria-pressed="isMuted"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <template v-if="isMuted">
                   <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
                   <path d="M18.63 13A17.9 17.9 0 0 1 18 8"/>
@@ -668,10 +717,24 @@ onUnmounted(() => {
     </template>
 
     <ImageLightbox :visible="!!lightboxSrc" :src="lightboxSrc" alt="Shared image" @close="lightboxSrc = null" />
+
+    <div class="sr-only" aria-live="polite" role="status">{{ liveAnnouncement }}</div>
   </div>
 </template>
 
 <style scoped>
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ── Base (same as ChatWidget) ── */
 .chat-widget {
   height: 100%;

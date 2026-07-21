@@ -66,10 +66,37 @@ const scrollToBottom = () => {
   })
 }
 
+// Screen-reader-only live region text. Assigning it re-announces even if the
+// text is identical to last time, since aria-live watches for DOM mutation.
+const liveAnnouncement = ref('')
+
+function describeMessage(msg) {
+  if (msg.message) {
+    return msg.message.length > 50 ? msg.message.slice(0, 50) + '…' : msg.message
+  }
+  if (msg.image_path) return 'sent an image'
+  if (msg.video_path) return 'sent a video'
+  return 'sent a message'
+}
+
+// Tracks which room we last checked, so a room switch (which also changes
+// chat.messages.length) isn't mistaken for a new incoming message.
+let lastAnnouncedRoom = chat.currentRoom
+
 // Watch for new messages — skip scroll when we're prepending older messages
-watch(() => chat.messages.length, () => {
+watch(() => chat.messages.length, (newLen, oldLen) => {
   if (!isPrepending.value) {
     scrollToBottom()
+  }
+
+  const roomChanged = chat.currentRoom !== lastAnnouncedRoom
+  lastAnnouncedRoom = chat.currentRoom
+
+  if (!isPrepending.value && !roomChanged && newLen > oldLen) {
+    const last = chat.messages[chat.messages.length - 1]
+    if (last && last.handle !== user.username) {
+      liveAnnouncement.value = `New message from ${last.handle}: ${describeMessage(last)}`
+    }
   }
 }, { flush: 'post' })
 
@@ -310,6 +337,7 @@ const onImageSelected = async (event) => {
   }
 
   uploadingImage.value = true
+  liveAnnouncement.value = 'Uploading image'
 
   const formData = new FormData()
   formData.append('image', file)
@@ -327,9 +355,11 @@ const onImageSelected = async (event) => {
     }
 
     // Message will be received via socket
+    liveAnnouncement.value = 'Image sent'
   } catch (err) {
     console.error('Error uploading image:', err)
     chat.error = err.message
+    liveAnnouncement.value = 'Upload failed'
   } finally {
     uploadingImage.value = false
     event.target.value = ''
@@ -352,6 +382,7 @@ const onVideoSelected = async (event) => {
   }
 
   uploadingVideo.value = true
+  liveAnnouncement.value = 'Uploading video'
 
   const formData = new FormData()
   formData.append('video', file)
@@ -369,9 +400,11 @@ const onVideoSelected = async (event) => {
     }
 
     // Message will be received via socket
+    liveAnnouncement.value = 'Video sent'
   } catch (err) {
     console.error('Error uploading video:', err)
     chat.error = err.message
+    liveAnnouncement.value = 'Upload failed'
   } finally {
     uploadingVideo.value = false
     event.target.value = ''
@@ -442,8 +475,14 @@ onUnmounted(() => {
               <div class="msg-header-right">
                 <span class="message-time">{{ formatTime(msg.created_at) }}</span>
                 <div class="msg-menu-wrapper" @click.stop>
-                  <button class="msg-menu-btn" @click="toggleMsgMenu(msg.id)" title="Message options">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+                  <button
+                    class="msg-menu-btn"
+                    @click="toggleMsgMenu(msg.id)"
+                    aria-label="Message options"
+                    aria-haspopup="true"
+                    :aria-expanded="openMenuId === msg.id"
+                  >
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
                   </button>
                   <div v-if="openMenuId === msg.id" class="msg-dropdown">
                     <template v-if="isOwnMessage(msg.handle)">
@@ -464,7 +503,11 @@ onUnmounted(() => {
               <button @click="deletingMessageId = null" class="delete-confirm-no">Cancel</button>
             </div>
             <div v-if="msg.image_path" class="message-image">
-              <img :src="getImageUrl(msg.image_path)" alt="Shared image" @click="openLightbox(getImageUrl(msg.image_path))" />
+              <img
+                :src="getImageUrl(msg.image_path)"
+                :alt="isOwnMessage(msg.handle) ? 'Image you sent, tap to view full size' : `Image from ${msg.handle}, tap to view full size`"
+                @click="openLightbox(getImageUrl(msg.image_path))"
+              />
             </div>
             <div v-if="msg.video_path" class="message-video">
               <video controls :src="getVideoUrl(msg.video_path)">
@@ -513,7 +556,7 @@ onUnmounted(() => {
               @click="triggerImageUpload(); closeAttachMenu()"
               :disabled="!chat.connected || uploadingImage"
             >
-              <span class="attach-icon">🖼️</span>
+              <span class="attach-icon" aria-hidden="true">🖼️</span>
               <span>Image</span>
             </button>
             <button
@@ -522,7 +565,7 @@ onUnmounted(() => {
               @click="triggerVideoUpload(); closeAttachMenu()"
               :disabled="!chat.connected || uploadingVideo"
             >
-              <span class="attach-icon">🎬</span>
+              <span class="attach-icon" aria-hidden="true">🎬</span>
               <span>Video</span>
             </button>
           </div>
@@ -548,10 +591,12 @@ onUnmounted(() => {
               @click="toggleAttachMenu"
               :disabled="!chat.connected"
               :class="{ active: showAttachMenu }"
-              title="Add attachment"
+              :aria-label="uploadingImage || uploadingVideo ? 'Uploading attachment' : 'Add attachment'"
+              aria-haspopup="true"
+              :aria-expanded="showAttachMenu"
             >
-              <span v-if="uploadingImage || uploadingVideo" class="uploading">...</span>
-              <span v-else class="plus-icon">+</span>
+              <span v-if="uploadingImage || uploadingVideo" class="uploading" aria-hidden="true">...</span>
+              <span v-else class="plus-icon" aria-hidden="true">+</span>
             </button>
             <div class="mention-dropdown" v-if="mentionActive && mentionResults.length > 0">
               <div
@@ -592,10 +637,24 @@ onUnmounted(() => {
     </div>
 
     <ImageLightbox :visible="!!lightboxSrc" :src="lightboxSrc" alt="Shared image" @close="lightboxSrc = null" />
+
+    <div class="sr-only" aria-live="polite" role="status">{{ liveAnnouncement }}</div>
   </main>
 </template>
 
 <style scoped>
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .chat-page {
   height: calc(100vh - 20px);
   padding: 10px;

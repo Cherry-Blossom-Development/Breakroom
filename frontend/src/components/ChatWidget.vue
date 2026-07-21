@@ -381,6 +381,18 @@ const openLightbox = (src) => {
   lightboxSrc.value = src
 }
 
+// Screen-reader-only live region text
+const liveAnnouncement = ref('')
+
+function describeMessage(msg) {
+  if (msg.message) {
+    return msg.message.length > 50 ? msg.message.slice(0, 50) + '…' : msg.message
+  }
+  if (msg.image_path) return 'sent an image'
+  if (msg.video_path) return 'sent a video'
+  return 'sent a message'
+}
+
 // Get video URL
 const getVideoUrl = (videoPath) => {
   if (!videoPath) return null
@@ -399,6 +411,7 @@ const onImageSelected = async (event) => {
 
   uploadingImage.value = true
   error.value = null
+  liveAnnouncement.value = 'Uploading image'
 
   const formData = new FormData()
   formData.append('image', file)
@@ -416,6 +429,7 @@ const onImageSelected = async (event) => {
     }
 
     const data = await res.json()
+    liveAnnouncement.value = 'Image sent'
     // Add message locally if socket not connected
     if (!socket || !socket.connected) {
       const exists = messages.value.some(m => m.id === data.message.id)
@@ -427,6 +441,7 @@ const onImageSelected = async (event) => {
   } catch (err) {
     console.error('ChatWidget: Error uploading image:', err)
     error.value = err.message
+    liveAnnouncement.value = 'Upload failed'
   } finally {
     uploadingImage.value = false
     event.target.value = ''
@@ -445,6 +460,7 @@ const onVideoSelected = async (event) => {
 
   uploadingVideo.value = true
   error.value = null
+  liveAnnouncement.value = 'Uploading video'
 
   const formData = new FormData()
   formData.append('video', file)
@@ -462,6 +478,7 @@ const onVideoSelected = async (event) => {
     }
 
     const data = await res.json()
+    liveAnnouncement.value = 'Video sent'
     // Add message locally if socket not connected
     if (!socket || !socket.connected) {
       const exists = messages.value.some(m => m.id === data.message.id)
@@ -473,6 +490,7 @@ const onVideoSelected = async (event) => {
   } catch (err) {
     console.error('ChatWidget: Error uploading video:', err)
     error.value = err.message
+    liveAnnouncement.value = 'Upload failed'
   } finally {
     uploadingVideo.value = false
     event.target.value = ''
@@ -506,6 +524,7 @@ const setupSocket = () => {
               [...flashingMessageIds.value].filter(id => id !== data.message.id)
             )
           }, 2000)
+          liveAnnouncement.value = `New message from ${data.message.handle}: ${describeMessage(data.message)}`
           // Notify parent (BreakroomBlock) so it can flash the widget header
           emit('new-message', { roomId: props.roomId })
         }
@@ -653,8 +672,14 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
             <div class="msg-header-right">
               <span class="time">{{ formatTime(msg.created_at) }}</span>
               <div class="msg-menu-wrapper" @click.stop>
-                <button class="msg-menu-btn" @click="toggleMsgMenu(msg.id)" title="Message options">
-                  <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+                <button
+                  class="msg-menu-btn"
+                  @click="toggleMsgMenu(msg.id)"
+                  aria-label="Message options"
+                  aria-haspopup="true"
+                  :aria-expanded="openMenuId === msg.id"
+                >
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
                 </button>
                 <div v-if="openMenuId === msg.id" class="msg-dropdown">
                   <template v-if="isOwnMessage(msg.handle)">
@@ -675,7 +700,11 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
             <button @click="deletingMessageId = null" class="delete-confirm-no">Cancel</button>
           </div>
           <div v-if="msg.image_path" class="message-image">
-            <img :src="getImageUrl(msg.image_path)" alt="Shared image" @click="openLightbox(getImageUrl(msg.image_path))" />
+            <img
+              :src="getImageUrl(msg.image_path)"
+              :alt="isOwnMessage(msg.handle) ? 'Image you sent, tap to view full size' : `Image from ${msg.handle}, tap to view full size`"
+              @click="openLightbox(getImageUrl(msg.image_path))"
+            />
           </div>
           <div v-if="msg.video_path" class="message-video">
             <video controls :src="getVideoUrl(msg.video_path)">
@@ -724,7 +753,7 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
             @click="triggerImageUpload(); closeAttachMenu()"
             :disabled="uploadingImage"
           >
-            <span class="attach-icon">🖼️</span>
+            <span class="attach-icon" aria-hidden="true">🖼️</span>
             <span>Image</span>
           </button>
           <button
@@ -733,7 +762,7 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
             @click="triggerVideoUpload(); closeAttachMenu()"
             :disabled="uploadingVideo"
           >
-            <span class="attach-icon">🎬</span>
+            <span class="attach-icon" aria-hidden="true">🎬</span>
             <span>Video</span>
           </button>
         </div>
@@ -759,10 +788,12 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
             class="attach-btn"
             @click="toggleAttachMenu"
             :class="{ active: showAttachMenu }"
-            title="Add attachment"
+            :aria-label="uploadingImage || uploadingVideo ? 'Uploading attachment' : 'Add attachment'"
+            aria-haspopup="true"
+            :aria-expanded="showAttachMenu"
           >
-            <span v-if="uploadingImage || uploadingVideo" class="uploading">...</span>
-            <span v-else class="plus-icon">+</span>
+            <span v-if="uploadingImage || uploadingVideo" class="uploading" aria-hidden="true">...</span>
+            <span v-else class="plus-icon" aria-hidden="true">+</span>
           </button>
           <div class="mention-dropdown" v-if="mentionActive && mentionResults.length > 0">
             <div
@@ -796,9 +827,10 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
             class="mute-btn"
             :class="{ muted: isMuted }"
             @click="toggleMute"
-            :title="isMuted ? 'Unmute notifications for this room' : 'Mute notifications for this room'"
+            :aria-label="isMuted ? 'Unmute notifications for this room' : 'Mute notifications for this room'"
+            :aria-pressed="isMuted"
           >
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <template v-if="isMuted">
                 <!-- Bell-off icon -->
                 <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
@@ -819,10 +851,24 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
     </template>
 
     <ImageLightbox :visible="!!lightboxSrc" :src="lightboxSrc" alt="Shared image" @close="lightboxSrc = null" />
+
+    <div class="sr-only" aria-live="polite" role="status">{{ liveAnnouncement }}</div>
   </div>
 </template>
 
 <style scoped>
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .chat-widget {
   height: 100%;
   display: flex;

@@ -14,6 +14,9 @@ const promotingLyric = ref(null)
 const selectedSong = ref(null)
 const activeTab = ref('songs') // 'songs' or 'ideas'
 
+// Screen-reader-only live region for action results (delete, promote, etc.)
+const liveAnnouncement = ref('')
+
 onMounted(async () => {
   await Promise.all([
     lyrics.fetchSongs(),
@@ -57,6 +60,7 @@ const closeSongDetail = () => {
 const deleteSong = async (song) => {
   if (confirm(`Are you sure you want to delete "${song.title}"? All lyrics in this song will become standalone ideas.`)) {
     await lyrics.deleteSong(song.id)
+    liveAnnouncement.value = 'Song deleted'
   }
 }
 
@@ -94,6 +98,7 @@ const onSongSavedAndPromote = async (song) => {
 
   await lyrics.fetchSongs()
   await openSong(song)
+  liveAnnouncement.value = `Idea promoted to song: ${song.title}`
 }
 
 // Lyric functions
@@ -111,6 +116,7 @@ const deleteLyric = async (lyric) => {
   const preview = lyric.content.substring(0, 50) + (lyric.content.length > 50 ? '...' : '')
   if (confirm(`Delete this lyric?\n\n"${preview}"`)) {
     await lyrics.deleteLyric(lyric.id)
+    liveAnnouncement.value = lyric.song_id ? 'Lyric deleted' : 'Idea deleted'
   }
 }
 
@@ -154,6 +160,30 @@ const statusColor = {
 
 const getStatusBadgeColor = (status) => statusColor[status] || 'blue'
 
+// Combined labels for screen readers, since each card is announced as one
+// element -- mirrors what's visually scattered across the card into a
+// single readable summary.
+const songAccessibilityLabel = (song) => {
+  const parts = [song.title, `Status: ${song.status}`]
+  if (song.genre) parts.push(`Genre: ${song.genre}`)
+  if (song.role) parts.push(`Role: ${song.role}`)
+  const count = song.lyric_count || 0
+  if (count > 0) parts.push(`${count} lyric${count === 1 ? '' : 's'}`)
+  if (song.description) {
+    parts.push(song.description.length > 80 ? song.description.slice(0, 80) + '...' : song.description)
+  }
+  return parts.join('. ')
+}
+
+const ideaAccessibilityLabel = (lyric) => {
+  const parts = [lyric.content]
+  if (lyric.mood) parts.push(`Mood: ${lyric.mood}`)
+  parts.push(`Status: ${lyric.status}`)
+  const date = lyric.lyric_date || lyric.updated_at
+  if (date) parts.push(formatDate(date))
+  return parts.join('. ')
+}
+
 const getSectionLabel = (type) => {
   const labels = {
     idea: 'Idea',
@@ -167,6 +197,16 @@ const getSectionLabel = (type) => {
     other: 'Other'
   }
   return labels[type] || type
+}
+
+const lyricAccessibilityLabel = (lyric) => {
+  const parts = [getSectionLabel(lyric.section_type)]
+  if (lyric.section_order) parts.push(`Number ${lyric.section_order}`)
+  if (lyric.mood) parts.push(`Mood: ${lyric.mood}`)
+  parts.push(lyric.content)
+  const date = lyric.lyric_date || lyric.updated_at
+  if (date) parts.push(formatDate(date))
+  return parts.join('. ')
 }
 </script>
 
@@ -237,16 +277,21 @@ const getSectionLabel = (type) => {
           v-for="lyric in lyrics.currentLyrics"
           :key="lyric.id"
           class="lyric-card"
+          tabindex="0"
+          role="button"
+          :aria-label="lyricAccessibilityLabel(lyric)"
           @click="editLyric(lyric)"
+          @keydown.enter="editLyric(lyric)"
+          @keydown.space.prevent="editLyric(lyric)"
         >
-          <div class="lyric-header">
+          <div class="lyric-header" aria-hidden="true">
             <span class="section-type">{{ getSectionLabel(lyric.section_type) }}</span>
             <span v-if="lyric.section_order" class="section-order">#{{ lyric.section_order }}</span>
             <span v-if="lyric.mood" class="mood-tag">{{ lyric.mood }}</span>
           </div>
-          <div class="lyric-content">{{ lyric.content }}</div>
+          <div class="lyric-content" aria-hidden="true">{{ lyric.content }}</div>
           <div class="lyric-footer">
-            <span class="lyric-date">{{ formatDate(lyric.lyric_date || lyric.updated_at) }}</span>
+            <span class="lyric-date" aria-hidden="true">{{ formatDate(lyric.lyric_date || lyric.updated_at) }}</span>
             <div class="lyric-actions" @click.stop>
               <button class="btn-icon" @click="editLyric(lyric)">Edit</button>
               <button class="btn-icon btn-danger" @click="deleteLyric(lyric)">Delete</button>
@@ -305,16 +350,21 @@ const getSectionLabel = (type) => {
                 v-for="song in ownedSongs"
                 :key="song.id"
                 class="song-card"
+                tabindex="0"
+                role="button"
+                :aria-label="songAccessibilityLabel(song)"
                 @click="openSong(song)"
+                @keydown.enter="openSong(song)"
+                @keydown.space.prevent="openSong(song)"
               >
-                <div class="song-card-header">
+                <div class="song-card-header" aria-hidden="true">
                   <h4>{{ song.title }}</h4>
                   <StatusBadge :color="getStatusBadgeColor(song.status)" soft>
                     {{ song.status }}
                   </StatusBadge>
                 </div>
-                <div v-if="song.genre" class="song-genre">{{ song.genre }}</div>
-                <div class="song-meta">
+                <div v-if="song.genre" class="song-genre" aria-hidden="true">{{ song.genre }}</div>
+                <div class="song-meta" aria-hidden="true">
                   <span>{{ song.lyric_count || 0 }} lyrics</span>
                   <span>{{ formatDate(song.song_date || song.updated_at) }}</span>
                 </div>
@@ -334,17 +384,22 @@ const getSectionLabel = (type) => {
                 v-for="song in collaboratingSongs"
                 :key="song.id"
                 class="song-card collab"
+                tabindex="0"
+                role="button"
+                :aria-label="songAccessibilityLabel(song)"
                 @click="openSong(song)"
+                @keydown.enter="openSong(song)"
+                @keydown.space.prevent="openSong(song)"
               >
-                <div class="song-card-header">
+                <div class="song-card-header" aria-hidden="true">
                   <h4>{{ song.title }}</h4>
                   <StatusBadge :color="getStatusBadgeColor(song.status)" soft>
                     {{ song.status }}
                   </StatusBadge>
                 </div>
-                <div class="song-owner">by {{ song.owner_first_name || song.owner_handle }}</div>
-                <div v-if="song.genre" class="song-genre">{{ song.genre }}</div>
-                <div class="song-meta">
+                <div class="song-owner" aria-hidden="true">by {{ song.owner_first_name || song.owner_handle }}</div>
+                <div v-if="song.genre" class="song-genre" aria-hidden="true">{{ song.genre }}</div>
+                <div class="song-meta" aria-hidden="true">
                   <span>{{ song.lyric_count || 0 }} lyrics</span>
                   <StatusBadge color="gray" soft>{{ song.role }}</StatusBadge>
                 </div>
@@ -366,10 +421,15 @@ const getSectionLabel = (type) => {
             v-for="lyric in lyrics.standaloneLyrics"
             :key="lyric.id"
             class="idea-card"
+            tabindex="0"
+            role="button"
+            :aria-label="ideaAccessibilityLabel(lyric)"
             @click="editLyric(lyric)"
+            @keydown.enter="editLyric(lyric)"
+            @keydown.space.prevent="editLyric(lyric)"
           >
-            <div class="idea-content">{{ lyric.content }}</div>
-            <div class="idea-meta">
+            <div class="idea-content" aria-hidden="true">{{ lyric.content }}</div>
+            <div class="idea-meta" aria-hidden="true">
               <StatusBadge v-if="lyric.mood" color="gray" soft>{{ lyric.mood }}</StatusBadge>
               <StatusBadge :color="getStatusBadgeColor(lyric.status)" soft>{{ lyric.status }}</StatusBadge>
               <span class="idea-date">{{ formatDate(lyric.lyric_date || lyric.updated_at) }}</span>
@@ -383,10 +443,24 @@ const getSectionLabel = (type) => {
         </div>
       </div>
     </div>
+
+    <div class="sr-only" aria-live="polite" role="status">{{ liveAnnouncement }}</div>
   </main>
 </template>
 
 <style scoped>
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .lyrics-page {
   max-width: 1000px;
   margin: 20px auto;
@@ -580,6 +654,13 @@ const getSectionLabel = (type) => {
   padding: 18px;
   cursor: pointer;
   transition: background 0.2s, box-shadow 0.2s;
+}
+
+.song-card:focus-visible,
+.idea-card:focus-visible,
+.lyric-card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .song-card:hover {

@@ -218,7 +218,7 @@ function selectGenre(g) {
     <div class="modal-content">
       <div class="modal-header">
         <h2>{{ promotingLyric ? 'Promote to Song' : (isEditing ? 'Edit Song' : 'New Song') }}</h2>
-        <button class="close-btn" @click="requestClose">&times;</button>
+        <button class="close-btn" aria-label="Close" @click="requestClose">&times;</button>
       </div>
 
       <div class="modal-body">
@@ -272,6 +272,7 @@ function selectGenre(g) {
               :key="g"
               type="button"
               :class="['genre-chip', { active: genre === g }]"
+              :aria-pressed="genre === g"
               @click="selectGenre(g)"
             >
               {{ g }}
