@@ -9,6 +9,8 @@ const { extractToken } = require('../utilities/auth');
 const { isSubscribed } = require('../utilities/subscription');
 const { sendMail } = require('../utilities/aws-ses-email');
 const { uploadToS3, deleteFromS3, getS3Url } = require('../utilities/aws-s3');
+const { emitToUser } = require('../utilities/socket');
+const { sendToUsers } = require('../utilities/fcm');
 
 const imageUpload = multer({
   storage: multer.memoryStorage(),
@@ -292,6 +294,93 @@ router.delete('/:id', authenticate, async (req, res) => {
   }
 });
 
+// Invites an EXISTING Prosaurus user (resolved by handle, or by email that
+// matched an account) to a band. Shared by both /invites and /email-invites
+// so the two entry points converge to identical behavior once there's a
+// real user to invite: band_members row + email + in-app notification +
+// push. Returns { error: { status, message } } or { ok: true }.
+async function inviteExistingUserToBand(client, { bandId, targetUser, inviterId }) {
+  if (targetUser.id === inviterId) {
+    return { error: { status: 400, message: 'You are already in your own band' } };
+  }
+
+  const existing = await client.query(
+    'SELECT status FROM band_members WHERE band_id = $1 AND user_id = $2',
+    [bandId, targetUser.id]
+  );
+  if (existing.rowCount > 0) {
+    const status = existing.rows[0].status;
+    if (status === 'active') return { error: { status: 409, message: 'User is already a member' } };
+    if (status === 'invited') return { error: { status: 409, message: 'User already has a pending invite' } };
+    // declined — re-invite
+    await client.query(
+      `UPDATE band_members SET status = 'invited', invited_by = $3, joined_at = NULL WHERE band_id = $1 AND user_id = $2`,
+      [bandId, targetUser.id, inviterId]
+    );
+  } else {
+    await client.query(
+      `INSERT INTO band_members (band_id, user_id, role, status, invited_by) VALUES ($1, $2, 'member', 'invited', $3)`,
+      [bandId, targetUser.id, inviterId]
+    );
+  }
+
+  const [bandRow, inviterRow] = await Promise.all([
+    client.query('SELECT name FROM bands WHERE id = $1', [bandId]),
+    client.query('SELECT handle, first_name FROM users WHERE id = $1', [inviterId]),
+  ]);
+  const bandName = bandRow.rows[0].name;
+  const inviterName = inviterRow.rows[0].first_name || `@${inviterRow.rows[0].handle}`;
+  const appUrl = process.env.APP_URL || process.env.CORS_ORIGIN || 'https://www.prosaurus.com';
+
+  // Email
+  const fromRow = await client.query(`SELECT from_address FROM system_emails WHERE is_active = true LIMIT 1`);
+  const fromAddress = fromRow.rowCount > 0 ? fromRow.rows[0].from_address : 'noreply@prosaurus.com';
+  const html = `
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#333">
+      <h2>You've been invited to join a band!</h2>
+      <p>${inviterName} has invited you to join <strong>${bandName}</strong> on Prosaurus.</p>
+      <p style="margin:30px 0">
+        <a href="${appUrl}/sessions" style="background:#007bff;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block">
+          View Invite
+        </a>
+      </p>
+      <p style="color:#666;font-size:0.9em">Log in to Prosaurus and open Band Practice to accept or decline.</p>
+    </div>
+  `;
+  await sendMail(targetUser.email, fromAddress, `${inviterName} invited you to join ${bandName} on Prosaurus`, html);
+
+  // In-app notification
+  const notifTypeResult = await client.query(
+    `SELECT nt.id, nt.name, nt.description, nt.display_type
+     FROM notification_types nt
+     JOIN event_types et ON nt.event_id = et.id
+     WHERE et.type = 'band_invite' AND nt.is_active = TRUE LIMIT 1`
+  );
+  if (notifTypeResult.rowCount > 0) {
+    const notifType = notifTypeResult.rows[0];
+    const ins = await client.query(
+      'INSERT INTO notifications (notif_id, user_id, status) VALUES ($1, $2, $3)',
+      [notifType.id, targetUser.id, 'unviewed']
+    );
+    emitToUser(targetUser.id, 'new_notification', {
+      id: ins.insertId,
+      name: notifType.name,
+      description: notifType.description,
+      display_type: notifType.display_type,
+      status: 'unviewed'
+    });
+  }
+
+  // Push (FCM) — for when they're not actively in the app
+  sendToUsers([targetUser.id], {
+    type: 'band_invite',
+    bandName,
+    inviterName
+  }).catch(err => console.error('Error sending band invite push:', err));
+
+  return { ok: true };
+}
+
 // POST /api/bands/:id/invites — invite a user by handle (owner only)
 router.post('/:id/invites', authenticate, async (req, res) => {
   const client = await getClient();
@@ -306,31 +395,18 @@ router.post('/:id/invites', authenticate, async (req, res) => {
     const { handle } = req.body;
     if (!handle) return res.status(400).json({ message: 'User handle is required' });
 
-    const target = await client.query('SELECT id, handle, first_name, last_name FROM users WHERE handle = $1', [handle.trim()]);
-    if (target.rowCount === 0) return res.status(404).json({ message: 'User not found' });
+    const target = await client.query('SELECT id, handle, email, first_name, last_name FROM users WHERE handle = $1', [handle.trim()]);
+    if (target.rowCount === 0) {
+      return res.status(404).json({ message: 'That user does not exist. Please invite them by email instead.' });
+    }
     const targetUser = target.rows[0];
 
-    if (targetUser.id === req.user.id) return res.status(400).json({ message: 'You are already in your own band' });
-
-    const existing = await client.query(
-      'SELECT status FROM band_members WHERE band_id = $1 AND user_id = $2',
-      [req.params.id, targetUser.id]
-    );
-    if (existing.rowCount > 0) {
-      const status = existing.rows[0].status;
-      if (status === 'active') return res.status(409).json({ message: 'User is already a member' });
-      if (status === 'invited') return res.status(409).json({ message: 'User already has a pending invite' });
-      // declined — re-invite
-      await client.query(
-        `UPDATE band_members SET status = 'invited', invited_by = $3, joined_at = NULL WHERE band_id = $1 AND user_id = $2`,
-        [req.params.id, targetUser.id, req.user.id]
-      );
-    } else {
-      await client.query(
-        `INSERT INTO band_members (band_id, user_id, role, status, invited_by) VALUES ($1, $2, 'member', 'invited', $3)`,
-        [req.params.id, targetUser.id, req.user.id]
-      );
-    }
+    const result = await inviteExistingUserToBand(client, {
+      bandId: req.params.id,
+      targetUser,
+      inviterId: req.user.id
+    });
+    if (result.error) return res.status(result.error.status).json({ message: result.error.message });
 
     res.status(201).json({ message: `Invite sent to @${targetUser.handle}` });
   } catch (err) {
@@ -359,12 +435,19 @@ router.post('/:id/email-invites', authenticate, async (req, res) => {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrimmed))
       return res.status(400).json({ message: 'Invalid email address' });
 
-    // If they already have an account, redirect to handle invite
-    const existing = await client.query('SELECT handle FROM users WHERE email = $1', [emailTrimmed]);
-    if (existing.rowCount > 0)
-      return res.status(409).json({
-        message: `That email belongs to @${existing.rows[0].handle} — invite them by handle instead`
+    // If that email already belongs to a Prosaurus account, invite them the
+    // same way a handle-invite would -- band_members row + email + in-app
+    // notification + push, rather than the token-based signup flow below.
+    const existing = await client.query('SELECT id, handle, email, first_name, last_name FROM users WHERE email = $1', [emailTrimmed]);
+    if (existing.rowCount > 0) {
+      const result = await inviteExistingUserToBand(client, {
+        bandId: req.params.id,
+        targetUser: existing.rows[0],
+        inviterId: req.user.id
       });
+      if (result.error) return res.status(result.error.status).json({ message: result.error.message });
+      return res.status(201).json({ message: `Invite sent to @${existing.rows[0].handle}` });
+    }
 
     const band = await client.query('SELECT name FROM bands WHERE id = $1', [req.params.id]);
     if (band.rowCount === 0) return res.status(404).json({ message: 'Band not found' });

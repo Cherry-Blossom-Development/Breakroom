@@ -100,6 +100,9 @@ async function sendToTokens(tokens, payload) {
     } else if (data.type === 'chat_mention') {
       title = `Mentioned in ${data.roomName || 'Chat'}`;
       body = `${data.senderHandle}: ${data.message}`;
+    } else if (data.type === 'band_invite') {
+      title = 'Band Invite';
+      body = `${data.inviterName} invited you to join ${data.bandName}`;
     }
 
     // Include both notification (for iOS background) and data payload
