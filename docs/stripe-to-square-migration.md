@@ -97,26 +97,36 @@ Reference docs (current as of this writing, verify current before implementing):
 
 ---
 
-## Open decisions (resolve before/during implementation — not yet decided)
+## Open decisions
 
-1. **Existing customers cutover strategy.** There are real, currently-paying Stripe
-   subscribers and real Connect sellers with payout accounts right now. Options:
-   - (a) Dual-run: keep Stripe billing alive for existing subscribers until they lapse/renew
-     naturally, only new signups go to Square. Sellers keep existing Stripe payouts until
-     they choose to re-onboard with Square.
-   - (b) Hard cutover: pick a date, force everyone to re-onboard/re-subscribe on Square.
-   - This is the highest-stakes decision in the whole project. Decide explicitly, don't
-     let it happen by default. Whichever is chosen, write the decision and date into this
-     doc before starting Phase 5 below.
+1. **Existing customers cutover strategy — DECIDED 2026-07-25: hard cutover, ASAP.**
+   Confirmed Stripe processing is **fully dead** for this account already — not just new
+   signups blocked, existing subscription renewals and seller payouts are not going
+   through either. That means there is no "existing working Stripe" left to preserve, so
+   dual-run has nothing to dual-run against. Implication: as soon as Phases 1-4 ship,
+   pick a date and migrate everyone at once (existing Pro subscribers re-subscribe via
+   Square, existing Connect sellers re-onboard via Square). No natural-lapse waiting
+   period. **New follow-up need for Phase 5:** since existing subscribers' billing is
+   already silently broken, plan a direct notice (email/in-app) telling them their Pro
+   subscription needs to be re-activated on Square — don't rely on them noticing a failed
+   charge on their own.
 
-2. **DB approach for the transition.** Add Square columns alongside the existing Stripe
-   columns (nullable, used only for square-platform rows) vs. a cleaner generic rename
-   (`payment_processor_account_id` instead of `stripe_account_id`) done as a single
-   migration. Generic naming is nicer long-term (protects against a third processor
-   someday) but touches more call sites. Pick one before writing migration 025+.
+2. **DB approach — DECIDED 2026-07-25: generic processor-agnostic rename**, done as a
+   single migration. Chosen because every call site touching these columns is already
+   being rewritten for Square in Phases 1-3 anyway, so the marginal cost of renaming is
+   low, and it avoids permanent Stripe-named-column debt / protects against ever needing
+   a third processor. Draft column plan for migration 025:
+   - `user_stripe_connect` → `user_payment_connect` — add `processor` ENUM('stripe','square'),
+     rename `stripe_account_id` → `processor_account_id`
+   - `user_stripe_customers` → `user_payment_customers` — add `processor` ENUM('stripe','square'),
+     rename `stripe_customer_id` → `processor_customer_id`
+   - `orders.stripe_payment_intent_id` → `orders.payment_intent_id`; add `orders.payment_processor` ENUM('stripe','square')
+   - `orders.stripe_connected_account_id` → `orders.payment_connected_account_id`
+   - `user_subscriptions.platform` — already processor-agnostic (shared with Apple/Google IAP), just add `'square'` to the enum
+   - Existing rows: backfill `processor = 'stripe'` for all pre-migration rows
 
-3. **Square developer account / production application.** Has this been created yet? If
-   not, this blocks everything below — it's Phase 0.
+3. **Square developer account / production application — DONE 2026-07-25.** See Phase 0
+   below; audience selected was "all Square sellers" (marketplace/platform).
 
 ---
 
@@ -126,8 +136,8 @@ Reference docs (current as of this writing, verify current before implementing):
 - [x] Create/confirm Square Developer account and Application (audience: "all Square
       sellers" — marketplace/platform use case, matches the Connect model below)
 - [ ] Decide OAuth scopes needed (at minimum `PAYMENTS_WRITE`, `MERCHANT_PROFILE_READ`)
-- [ ] Decide the two open questions above (cutover strategy, DB approach) and record the
-      decision in this file
+- [x] Decide cutover strategy and DB approach (see "Open decisions" above — both decided
+      2026-07-25)
 - [x] Get Square sandbox credentials into local `.env.local` for dev testing
       (`SQUARE_ENVIRONMENT`, `SQUARE_APPLICATION_ID`, `SQUARE_ACCESS_TOKEN`,
       `SQUARE_APPLICATION_SECRET`, `SQUARE_LOCATION_ID` — webhook signature key still
@@ -140,8 +150,10 @@ Reference docs (current as of this writing, verify current before implementing):
 - [x] Add Square SDK to `backend/package.json` — note: the npm package is now named
       `square` (v45.x), not `squareup` (that name is a deprecated stub). Uses
       `SquareClient` / `SquareEnvironment` from the package.
-- [ ] New migration: Square-equivalent columns for seller payout accounts
-      (`user_square_connect` table or generic rename — per decision above)
+- [ ] New migration 025: generic processor-agnostic rename (see draft column plan in
+      "Open decisions" above) — covers `user_payment_connect`, `user_payment_customers`,
+      `orders.payment_intent_id`/`payment_processor`/`payment_connected_account_id`,
+      `user_subscriptions.platform` enum add `'square'`
 - [ ] Implement OAuth authorize URL generation (replaces `POST /connect/start`)
 - [ ] Implement OAuth callback / token exchange endpoint, store `access_token` +
       `refresh_token` + `merchant_id`
@@ -179,8 +191,13 @@ Reference docs (current as of this writing, verify current before implementing):
       (currently says "Stripe" / mentions Stripe's fee %)
 - [ ] Remove `@stripe/stripe-js` once fully cut over
 
-### Phase 5 — Cutover
-- [ ] Execute whichever cutover strategy was decided in Phase 0
+### Phase 5 — Cutover (hard cutover, ASAP — see decision above)
+- [ ] Send existing Pro subscribers a direct notice (email + in-app) that their
+      subscription needs to be re-activated on Square — their Stripe billing is already
+      dead, don't wait for them to notice a failed charge
+- [ ] Send existing Connect sellers a direct notice that they need to re-onboard via
+      Square before they can receive payouts again
+- [ ] Execute the cutover
 - [ ] Monitor first real Square subscriptions/payments closely (webhooks landing
       correctly, payouts arriving, fees calculated correctly)
 
@@ -207,5 +224,9 @@ reboot — can pick up exactly where things left off.)_
   registered. `square` npm SDK (v45.1) installed in `backend/`. Added
   `backend/scripts/square-list-locations.js` (lists locations for the configured token —
   used to find `SQUARE_LOCATION_ID`; sandbox default test account location is
-  `L2HHW2WEFEX01`, "Default Test Account"). Still open: OAuth scopes decision, cutover
-  strategy decision, DB approach decision — all needed before Phase 1 OAuth code proper.
+  `L2HHW2WEFEX01`, "Default Test Account").
+- 2026-07-25: Cutover strategy and DB approach decided (see "Open decisions" above).
+  Hard cutover ASAP — confirmed Stripe processing is fully dead already for existing
+  subscribers/sellers too, so there's no dual-run window. DB approach: generic
+  processor-agnostic rename (draft column plan in "Open decisions"). Still open: OAuth
+  scopes decision — needed before Phase 1 OAuth code proper.
