@@ -80,7 +80,7 @@ UI copy) and should be done last, in whatever order is convenient, on whatever m
 
 | Stripe feature | Square equivalent | Notes / gotchas |
 |---|---|---|
-| Connect Express accounts (`accounts.create`, `accountLinks`) | **Square OAuth** (`GET /oauth2/authorize` → `ObtainToken`) | Returns `access_token` + `refresh_token` + `merchant_id`. **Square OAuth tokens expire and must be refreshed** — Stripe Connect doesn't require this (the platform secret key + destination account ID work indefinitely). This is genuinely new operational code: a refresh flow/job per connected seller, plus handling refresh failure (seller needs to re-auth). |
+| Connect Express accounts (`accounts.create`, `accountLinks`) | **Square OAuth** (`GET /oauth2/authorize` → `ObtainToken`) | Returns `access_token` + `refresh_token` + `merchant_id`. **Square OAuth tokens expire and must be refreshed** — Stripe Connect doesn't require this (the platform secret key + destination account ID work indefinitely). This is genuinely new operational code: a refresh flow/job per connected seller, plus handling refresh failure (seller needs to re-auth). Scopes needed: `PAYMENTS_WRITE`, `PAYMENTS_WRITE_ADDITIONAL_RECIPIENTS` (easy to miss — required specifically for the app-fee split, `PAYMENTS_WRITE` alone isn't enough), `MERCHANT_PROFILE_READ`. |
 | Destination charges w/ `application_fee_amount` | `CreatePayment` with `app_fee_money` | Clean 1:1 mapping. Same "buyer pays, platform fee skimmed off top, rest to seller" model. |
 | Subscriptions (Checkout Session, mode=subscription) | **Square Subscriptions API + Catalog API** | Must define the plan in Catalog first, then create/manage subscriptions against it. More setup than Stripe's inline `price_data`, but one-time setup cost. |
 | Billing Portal (`billingPortal.sessions.create`) | **No equivalent exists.** | Square's subscription management is merchant-dashboard-facing, not customer-facing. Must build custom "Cancel Subscription" / "Update card" endpoint(s) + UI using the Subscriptions API directly. This is real new work, not a swap — budget real time for it. |
@@ -135,7 +135,12 @@ Reference docs (current as of this writing, verify current before implementing):
 ### Phase 0 — Prerequisites
 - [x] Create/confirm Square Developer account and Application (audience: "all Square
       sellers" — marketplace/platform use case, matches the Connect model below)
-- [ ] Decide OAuth scopes needed (at minimum `PAYMENTS_WRITE`, `MERCHANT_PROFILE_READ`)
+- [x] Decide OAuth scopes needed — DECIDED 2026-07-25: `PAYMENTS_WRITE`,
+      `PAYMENTS_WRITE_ADDITIONAL_RECIPIENTS` (required specifically for the app-fee/
+      commission split on CreatePayment — easy to miss, `PAYMENTS_WRITE` alone isn't
+      enough), `MERCHANT_PROFILE_READ`. This scope set is only for the seller-onboarding
+      OAuth flow; Pro subscription billing uses the platform's own Square account/token
+      directly, no OAuth scopes needed there.
 - [x] Decide cutover strategy and DB approach (see "Open decisions" above — both decided
       2026-07-25)
 - [x] Get Square sandbox credentials into local `.env.local` for dev testing
@@ -228,5 +233,8 @@ reboot — can pick up exactly where things left off.)_
 - 2026-07-25: Cutover strategy and DB approach decided (see "Open decisions" above).
   Hard cutover ASAP — confirmed Stripe processing is fully dead already for existing
   subscribers/sellers too, so there's no dual-run window. DB approach: generic
-  processor-agnostic rename (draft column plan in "Open decisions"). Still open: OAuth
-  scopes decision — needed before Phase 1 OAuth code proper.
+  processor-agnostic rename (draft column plan in "Open decisions"). OAuth scopes decided:
+  `PAYMENTS_WRITE`, `PAYMENTS_WRITE_ADDITIONAL_RECIPIENTS` (required for the app-fee
+  split — missable), `MERCHANT_PROFILE_READ`. All three Phase 0 open decisions are now
+  resolved; Phase 0 complete except production activation (deferred to Phase 5). Next up:
+  migration 025 (generic rename) and Phase 1 OAuth authorize/callback endpoints.
