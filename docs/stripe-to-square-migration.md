@@ -115,7 +115,9 @@ Reference docs (current as of this writing, verify current before implementing):
    single migration. Chosen because every call site touching these columns is already
    being rewritten for Square in Phases 1-3 anyway, so the marginal cost of renaming is
    low, and it avoids permanent Stripe-named-column debt / protects against ever needing
-   a third processor. Draft column plan for migration 025:
+   a third processor. Implemented as `data/migrations/044-square-payment-processor.sql`
+   (next open slot — repo was already up to migration 043, not 025 as originally
+   guessed). Column plan:
    - `user_stripe_connect` → `user_payment_connect` — add `processor` ENUM('stripe','square'),
      rename `stripe_account_id` → `processor_account_id`
    - `user_stripe_customers` → `user_payment_customers` — add `processor` ENUM('stripe','square'),
@@ -155,10 +157,13 @@ Reference docs (current as of this writing, verify current before implementing):
 - [x] Add Square SDK to `backend/package.json` — note: the npm package is now named
       `square` (v45.x), not `squareup` (that name is a deprecated stub). Uses
       `SquareClient` / `SquareEnvironment` from the package.
-- [ ] New migration 025: generic processor-agnostic rename (see draft column plan in
-      "Open decisions" above) — covers `user_payment_connect`, `user_payment_customers`,
+- [x] Migration 044 written (`data/migrations/044-square-payment-processor.sql`) — covers
+      `user_payment_connect`, `user_payment_customers`,
       `orders.payment_intent_id`/`payment_processor`/`payment_connected_account_id`,
-      `user_subscriptions.platform` enum add `'square'`
+      `user_subscriptions.platform` enum add `'square'`. **Not yet run** — running it
+      before updating `billing.js`/`storefront.js` to the new names will break those
+      routes immediately (they still reference the old Stripe column names). Run this
+      migration in the same work session as the route updates below, not before.
 - [ ] Implement OAuth authorize URL generation (replaces `POST /connect/start`)
 - [ ] Implement OAuth callback / token exchange endpoint, store `access_token` +
       `refresh_token` + `merchant_id`
