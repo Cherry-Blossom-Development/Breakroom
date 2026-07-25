@@ -35,9 +35,6 @@ const authenticate = async (req, res, next) => {
   }
 };
 
-const RETURN_URL  = `${process.env.CORS_ORIGIN}/collections/payment-setup?stripe=complete`;
-const REFRESH_URL = `${process.env.CORS_ORIGIN}/collections/payment-setup?stripe=refresh`;
-
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 // Returns 0 (Pro) or 5 (Free) — used here and exported for future checkout route
@@ -205,7 +202,20 @@ router.post('/portal', authenticate, async (req, res) => {
   }
 });
 
-// ─── Stripe Connect routes ───────────────────────────────────────────────────
+// ─── Square Connect (OAuth) routes ───────────────────────────────────────────
+
+const SQUARE_OAUTH_BASE_URL = process.env.SQUARE_ENVIRONMENT === 'production'
+  ? 'https://connect.squareup.com'
+  : 'https://connect.squareupsandbox.com';
+
+// PAYMENTS_WRITE_ADDITIONAL_RECIPIENTS is required specifically for CreatePayment calls
+// that include an app_fee_money split (our platform-commission model) -- PAYMENTS_WRITE
+// alone is not sufficient for that. See docs/stripe-to-square-migration.md.
+const SQUARE_OAUTH_SCOPES = [
+  'PAYMENTS_WRITE',
+  'PAYMENTS_WRITE_ADDITIONAL_RECIPIENTS',
+  'MERCHANT_PROFILE_READ'
+];
 
 // GET /api/billing/connect/status
 router.get('/connect/status', authenticate, async (req, res) => {
@@ -213,42 +223,17 @@ router.get('/connect/status', authenticate, async (req, res) => {
   try {
     client = await getClient();
     const result = await client.query(
-      'SELECT stripe_account_id, onboarding_complete FROM user_stripe_connect WHERE user_id = $1',
-      [req.user.id]
+      'SELECT onboarding_complete FROM user_payment_connect WHERE user_id = $1 AND processor = $2',
+      [req.user.id, 'square']
     );
 
     if (result.rowCount === 0) {
       return res.json({ status: 'not_connected' });
     }
 
-    const { stripe_account_id, onboarding_complete } = result.rows[0];
-
-    if (onboarding_complete) {
-      return res.json({ status: 'active', stripe_account_id });
-    }
-
-    let account;
-    try {
-      account = await getStripe().accounts.retrieve(stripe_account_id);
-    } catch (err) {
-      // Account not accessible (stale ID, deauthorized, or wrong environment) — treat as disconnected
-      await client.query('DELETE FROM user_stripe_connect WHERE user_id = $1', [req.user.id]);
-      return res.json({ status: 'not_connected' });
-    }
-
-    const isComplete = account.details_submitted && account.charges_enabled;
-
-    if (isComplete) {
-      await client.query(
-        'UPDATE user_stripe_connect SET onboarding_complete = 1 WHERE user_id = $1',
-        [req.user.id]
-      );
-    }
-
-    res.json({
-      status: isComplete ? 'active' : 'pending',
-      stripe_account_id
-    });
+    // TODO(next Phase 1 pass): replace with a real Square merchant-status check
+    // (MERCHANT_PROFILE_READ) instead of trusting the locally stored flag.
+    res.json({ status: result.rows[0].onboarding_complete ? 'active' : 'pending' });
   } catch (err) {
     console.error('Failed to get connect status:', err);
     res.status(500).json({ message: 'Server error' });
@@ -258,63 +243,36 @@ router.get('/connect/status', authenticate, async (req, res) => {
 });
 
 // POST /api/billing/connect/start
+// Generates the Square OAuth authorize URL for the frontend to redirect the seller to.
+// The actual account linking happens in the (not yet built) callback endpoint that
+// exchanges the returned `code` for access/refresh tokens.
 router.post('/connect/start', authenticate, async (req, res) => {
   let client;
   try {
     client = await getClient();
     const result = await client.query(
-      'SELECT stripe_account_id, onboarding_complete FROM user_stripe_connect WHERE user_id = $1',
-      [req.user.id]
+      'SELECT onboarding_complete FROM user_payment_connect WHERE user_id = $1 AND processor = $2',
+      [req.user.id, 'square']
     );
 
-    let stripeAccountId;
-
-    if (result.rowCount === 0) {
-      const account = await getStripe().accounts.create({ type: 'express' });
-      stripeAccountId = account.id;
-      await client.query(
-        'INSERT INTO user_stripe_connect (user_id, stripe_account_id) VALUES ($1, $2)',
-        [req.user.id, stripeAccountId]
-      );
-    } else {
-      stripeAccountId = result.rows[0].stripe_account_id;
-      if (result.rows[0].onboarding_complete) {
-        return res.json({ status: 'active' });
-      }
+    if (result.rowCount > 0 && result.rows[0].onboarding_complete) {
+      return res.json({ status: 'active' });
     }
 
-    let accountLink;
-    try {
-      accountLink = await getStripe().accountLinks.create({
-        account: stripeAccountId,
-        refresh_url: REFRESH_URL,
-        return_url:  RETURN_URL,
-        type: 'account_onboarding'
-      });
-    } catch (err) {
-      if (err.code === 'resource_missing') {
-        // Stale account ID — delete it and create a fresh Express account
-        await client.query('DELETE FROM user_stripe_connect WHERE user_id = $1', [req.user.id]);
-        const account = await getStripe().accounts.create({ type: 'express' });
-        stripeAccountId = account.id;
-        await client.query(
-          'INSERT INTO user_stripe_connect (user_id, stripe_account_id) VALUES ($1, $2)',
-          [req.user.id, stripeAccountId]
-        );
-        accountLink = await getStripe().accountLinks.create({
-          account: stripeAccountId,
-          refresh_url: REFRESH_URL,
-          return_url:  RETURN_URL,
-          type: 'account_onboarding'
-        });
-      } else {
-        throw err;
-      }
-    }
+    // Short-lived signed state param: identifies the user on callback and prevents CSRF
+    // (Square's redirect echoes this back verbatim).
+    const state = jwt.sign({ userId: req.user.id }, SECRET_KEY, { expiresIn: '10m' });
 
-    res.json({ url: accountLink.url });
+    const params = new URLSearchParams({
+      client_id: process.env.SQUARE_APPLICATION_ID,
+      scope: SQUARE_OAUTH_SCOPES.join(' '),
+      session: 'false',
+      state
+    });
+
+    res.json({ url: `${SQUARE_OAUTH_BASE_URL}/oauth2/authorize?${params.toString()}` });
   } catch (err) {
-    console.error('Failed to start connect:', err);
+    console.error('Failed to start Square connect:', err);
     res.status(500).json({ message: 'Server error' });
   } finally {
     if (client) client.release();

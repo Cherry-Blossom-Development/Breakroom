@@ -157,19 +157,31 @@ Reference docs (current as of this writing, verify current before implementing):
 - [x] Add Square SDK to `backend/package.json` — note: the npm package is now named
       `square` (v45.x), not `squareup` (that name is a deprecated stub). Uses
       `SquareClient` / `SquareEnvironment` from the package.
-- [x] Migration 044 written (`data/migrations/044-square-payment-processor.sql`) — covers
+- [x] Migration 044 written and **run against breakroom_dev** — covers
       `user_payment_connect`, `user_payment_customers`,
       `orders.payment_intent_id`/`payment_processor`/`payment_connected_account_id`,
-      `user_subscriptions.platform` enum add `'square'`. **Not yet run** — running it
-      before updating `billing.js`/`storefront.js` to the new names will break those
-      routes immediately (they still reference the old Stripe column names). Run this
-      migration in the same work session as the route updates below, not before.
-- [ ] Implement OAuth authorize URL generation (replaces `POST /connect/start`)
+      `user_subscriptions.platform` enum add `'square'`.
+      **Discovery while running this:** `breakroom_dev` was missing migrations 010, 018,
+      019, 022, 024 entirely (commerce/storefront tables were apparently only ever built
+      against production). Backfilled all five before running 044 — dev now has
+      `user_subscriptions`, `collection_items`, and the renamed payment tables/columns.
+      Other unrelated drift (migrations 012, 021, 023, 029, 030 also missing from dev) was
+      left alone — out of scope for this migration.
+      Old Stripe-shaped queries in `billing.js`/`storefront.js` now reference nonexistent
+      columns until updated below (harmless — Stripe is already dead).
+- [x] Implement OAuth authorize URL generation (replaces `POST /connect/start`) —
+      `backend/routes/billing.js`, builds the `GET /oauth2/authorize` URL with
+      `client_id`, scope list, and a signed short-lived JWT `state` param (identifies the
+      user on callback + CSRF protection). `redirect_uri` omitted deliberately — Square
+      falls back to the URL already registered in the dashboard when it's not passed.
 - [ ] Implement OAuth callback / token exchange endpoint, store `access_token` +
-      `refresh_token` + `merchant_id`
+      `refresh_token` + `merchant_id` (next up)
 - [ ] Implement token refresh logic (new — Stripe didn't need this). Decide: refresh
       lazily on each use, or a scheduled job that refreshes before expiry.
-- [ ] Implement connect-status check (replaces `GET /connect/status`)
+- [x] Minimal column-name fix to `GET /connect/status` so it doesn't throw against the
+      renamed table — **not yet the real Square-native status check** (still just trusts
+      the local `onboarding_complete` flag; TODO comment left in code). Real check via
+      `MERCHANT_PROFILE_READ` is a separate remaining item.
 
 ### Phase 2 — Backend: Subscriptions (Pro tier)
 - [ ] Create the $3.99/mo Pro plan in Square Catalog (one-time setup, can be done via
