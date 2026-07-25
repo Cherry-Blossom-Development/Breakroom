@@ -123,14 +123,23 @@ Reference docs (current as of this writing, verify current before implementing):
 ## Task checklist
 
 ### Phase 0 — Prerequisites
-- [ ] Create/confirm Square Developer account and production Application
+- [x] Create/confirm Square Developer account and Application (audience: "all Square
+      sellers" — marketplace/platform use case, matches the Connect model below)
 - [ ] Decide OAuth scopes needed (at minimum `PAYMENTS_WRITE`, `MERCHANT_PROFILE_READ`)
 - [ ] Decide the two open questions above (cutover strategy, DB approach) and record the
       decision in this file
-- [ ] Get Square sandbox credentials into local `.env` for dev testing
+- [x] Get Square sandbox credentials into local `.env.local` for dev testing
+      (`SQUARE_ENVIRONMENT`, `SQUARE_APPLICATION_ID`, `SQUARE_ACCESS_TOKEN`,
+      `SQUARE_APPLICATION_SECRET`, `SQUARE_LOCATION_ID` — webhook signature key still
+      pending, set up in Phase 3)
+- [x] OAuth redirect URL registered in the dashboard
+- [ ] Square production Application activation (`squareup.com/activation`) — not needed
+      until Phase 5 cutover, sandbox is sufficient for Phases 1-4
 
 ### Phase 1 — Backend: Connect/OAuth (seller payouts)
-- [ ] Add Square SDK (`squareup` npm package) to `backend/package.json`
+- [x] Add Square SDK to `backend/package.json` — note: the npm package is now named
+      `square` (v45.x), not `squareup` (that name is a deprecated stub). Uses
+      `SquareClient` / `SquareEnvironment` from the package.
 - [ ] New migration: Square-equivalent columns for seller payout accounts
       (`user_square_connect` table or generic rename — per decision above)
 - [ ] Implement OAuth authorize URL generation (replaces `POST /connect/start`)
@@ -193,3 +202,10 @@ _(Add dated entries here as work happens, so a fresh session — or a fresh mach
 reboot — can pick up exactly where things left off.)_
 
 - 2026-07-24: Doc created. Research/inventory done. No implementation started yet.
+- 2026-07-25: Square Developer account + Application created (audience: all Square
+  sellers). Sandbox credentials retrieved and added to `.env.local`. OAuth redirect URL
+  registered. `square` npm SDK (v45.1) installed in `backend/`. Added
+  `backend/scripts/square-list-locations.js` (lists locations for the configured token —
+  used to find `SQUARE_LOCATION_ID`; sandbox default test account location is
+  `L2HHW2WEFEX01`, "Default Test Account"). Still open: OAuth scopes decision, cutover
+  strategy decision, DB approach decision — all needed before Phase 1 OAuth code proper.
