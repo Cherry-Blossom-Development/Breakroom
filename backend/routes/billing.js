@@ -584,5 +584,83 @@ async function handleStripeWebhook(req, res) {
   }
 }
 
+// ─── Square webhook (mounted in index.js before express.json) ───────────────
+//
+// Scope is narrower than the Stripe webhook was: CreatePayment completes synchronously
+// in the checkout endpoint now (Phase 3), so there's no payment_intent.succeeded/failed
+// equivalent needed here. subscription.updated is the one genuinely necessary gap: Square
+// bills renewals automatically and retries/pauses/cancels on its own schedule, and
+// without this handler a failed renewal would leave the local row at status='active'
+// with expires_at=NULL forever (looking permanently subscribed).
+async function handleSquareWebhook(req, res) {
+  const { WebhooksHelper } = require('square');
+  const rawBody = req.body.toString('utf8');
+  const signature = req.headers['x-square-hmacsha256-signature'];
+
+  let isValid;
+  try {
+    isValid = await WebhooksHelper.verifySignature({
+      requestBody: rawBody,
+      signatureHeader: signature,
+      signatureKey: process.env.SQUARE_WEBHOOK_SIGNATURE_KEY,
+      notificationUrl: process.env.SQUARE_WEBHOOK_NOTIFICATION_URL
+    });
+  } catch (err) {
+    console.error('Square webhook signature verification error:', err.message);
+    return res.status(500).end();
+  }
+
+  if (!isValid) {
+    console.error('Square webhook signature verification failed');
+    return res.status(401).end();
+  }
+
+  // Acknowledge immediately — Square retries on non-2xx
+  res.status(200).end();
+
+  let event;
+  try {
+    event = JSON.parse(rawBody);
+  } catch (err) {
+    console.error('Square webhook: failed to parse body:', err.message);
+    return;
+  }
+
+  let client;
+  try {
+    if (event.type === 'subscription.updated') {
+      const subscription = event.data?.object?.subscription;
+      if (!subscription) return;
+
+      client = await getClient();
+
+      // PAUSED (e.g. card decline mid-retry) loses Pro access immediately but isn't a
+      // full cancellation -- 'grace_period' is the existing status value for this.
+      // ACTIVE clears any previously scheduled expiration (e.g. a dashboard-side resume).
+      // CANCELED/DEACTIVATED/COMPLETED: leave status='active' and set expires_at to the
+      // paid-through date, same as POST /cancel -- covers cancellation initiated outside
+      // our own /cancel endpoint (e.g. directly in the Square merchant dashboard).
+      let status = 'active';
+      let expiresAt = null;
+      if (subscription.status === 'PAUSED') {
+        status = 'grace_period';
+      } else if (['CANCELED', 'DEACTIVATED', 'COMPLETED'].includes(subscription.status)) {
+        expiresAt = subscription.chargedThroughDate || subscription.canceledDate || new Date();
+      }
+
+      await client.query(
+        `UPDATE user_subscriptions SET status = $1, expires_at = $2, updated_at = NOW()
+         WHERE platform_subscription_id = $3 AND platform = 'square'`,
+        [status, expiresAt, subscription.id]
+      );
+    }
+  } catch (err) {
+    console.error('Square webhook processing error:', err);
+  } finally {
+    if (client) client.release();
+  }
+}
+
 module.exports = router;
 module.exports.handleStripeWebhook = handleStripeWebhook;
+module.exports.handleSquareWebhook = handleSquareWebhook;

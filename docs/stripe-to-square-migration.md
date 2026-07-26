@@ -324,14 +324,50 @@ disputes/future async events, not the initial success path.
       back `COMPLETED` with the correct `appFeeMoney` (150¢ = 5% of $30 for a Free-tier
       seller), the order row landed with every field correct, and the item was marked
       unavailable. All test rows cleaned up afterward.
-- [ ] Implement Square webhook endpoint + signature verification
-- [ ] Map every existing Stripe webhook event handled today to its Square equivalent (see
-      table above) — subscription activate/update/expire, payment succeeded/failed. Scope
-      is now smaller than originally planned: payment-succeeded is handled synchronously
-      above, so this is mainly subscription lifecycle events (renewal, cancellation,
-      payment failure from Square's side) and any refund/dispute handling.
-- [ ] Decide what to do about the missing `account.updated` handling gap (currently Connect
-      status is checked lazily anyway, so this may be a non-issue — confirm)
+- [x] Implement Square webhook endpoint + signature verification — `POST
+      /api/billing/webhook/square` in `index.js` (mounted with `express.raw()` before
+      `express.json()`, same requirement as the Stripe webhook), handler
+      `handleSquareWebhook()` in `billing.js`. Verified via the SDK's
+      `WebhooksHelper.verifySignature()` — HMAC-SHA256 of `notificationUrl + rawBody`
+      against `SQUARE_WEBHOOK_SIGNATURE_KEY`, compared to the
+      `x-square-hmacsha256-signature` header. New env vars:
+      `SQUARE_WEBHOOK_NOTIFICATION_URL` (must exactly match the URL registered in the
+      Square dashboard) and `SQUARE_WEBHOOK_SIGNATURE_KEY` (currently a **local placeholder
+      value** — no real webhook subscription has been registered in the Square dashboard
+      yet, so this needs to be swapped for the real key once that's done; same category of
+      remaining manual step as the OAuth redirect URL setup back in Phase 0).
+- [x] Map every existing Stripe webhook event handled today to its Square equivalent —
+      scope came out smaller than originally planned: payment-succeeded/failed has no
+      Square equivalent needed here since `CreatePayment` completes synchronously in the
+      checkout endpoint (Phase 3's first item, above). Implemented `subscription.updated`
+      only — the one genuinely necessary gap, since Square bills renewals automatically
+      and retries/pauses/cancels on its own schedule; without this a failed renewal would
+      leave the local row at `status='active'` with `expires_at=NULL` forever. Mapping:
+      `PAUSED` → local `'grace_period'` (loses Pro access immediately, not a full
+      cancellation); `CANCELED`/`DEACTIVATED`/`COMPLETED` → status stays `'active'` with
+      `expires_at` set to `chargedThroughDate`/`canceledDate` (same as `POST /cancel` —
+      covers cancellation initiated outside our own endpoint, e.g. directly in the Square
+      merchant dashboard); `ACTIVE` → clears any previously scheduled `expires_at` (e.g. a
+      dashboard-side resume). Did **not** add refund/dispute webhook handling — the
+      original Stripe code never had any refund handling either
+      (`stripe.refunds.create` was never called anywhere), so building that now would be
+      new functionality beyond migration parity, not something this migration needs to
+      cover.
+      **Verified with a self-constructed signed request** (computed the same HMAC the SDK
+      would, since no live dashboard webhook subscription exists yet to send a real one):
+      invalid signature correctly rejected (401, no DB change); valid `PAUSED` event →
+      `grace_period`; valid `CANCELED` event → `expires_at` set correctly; valid `ACTIVE`
+      event → `expires_at` cleared. All four scenarios passed.
+- [x] Decide what to do about the missing `account.updated` handling gap — DECIDED
+      2026-07-27: **confirmed non-issue, no webhook needed.** Square's equivalent event
+      would be `oauth.authorization.revoked`, but we already have two independent
+      self-healing lazy checks that cover the same gap: `checkConnectionStatus()` (Phase
+      1) and the checkout endpoint's 401/403 handling (Phase 3, above) both detect a
+      revoked/broken connection and clear the stale `user_payment_connect` row the next
+      time either path runs. Adding the proactive webhook would only improve how quickly
+      staleness is noticed (immediately vs. next status check or purchase attempt), not
+      fix a correctness gap — reasonable future enhancement, not required for migration
+      parity.
 
 ### Phase 4 — Frontend (Vue)
 - [ ] Swap `PublicStorePage.vue` and `PublicCollectionPage.vue` embedded Stripe Elements
