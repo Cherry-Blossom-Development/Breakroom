@@ -194,11 +194,17 @@ Reference docs (current as of this writing, verify current before implementing):
       expose a separate identity-verification step the way Stripe Express does). Same
       caveat as the `/connect/status` TODO above: a real `MERCHANT_PROFILE_READ` check
       would be more authoritative than this assumption.
-- [ ] Implement token refresh logic (new — Stripe didn't need this). Decide: refresh
-      lazily on each use, or a scheduled job that refreshes before expiry. (Note: for the
-      non-PKCE code-flow grant we're using, Square's refresh token is multi-use and never
-      expires — only the access token expires, in 30 days — so this is lower urgency than
-      it might sound.)
+- [x] Implement token refresh logic — `backend/utilities/squareConnect.js`,
+      `getValidAccessToken(userId)`. Chose **lazy refresh-on-use** over a scheduled job:
+      Connect payments only happen at checkout time, so a polling sweep across all
+      connected sellers would mostly do nothing. Refreshes 1 day before the stored
+      `token_expires_at` (`REFRESH_BUFFER_MS`). Also consolidated the Square client setup
+      (previously inline in `billing.js`) into `backend/utilities/square.js` so
+      `storefront.js` can reuse it in Phase 3 instead of a third copy-pasted lazy-init.
+      Tested against breakroom_dev: fresh-token fast path (no refresh call) and the
+      no-connected-account error path both verified; the actual `refresh_token` grant
+      call wasn't exercised end-to-end (no real connected seller account exists yet to
+      test against — that requires an actual OAuth approval in the browser).
 - [x] Minimal column-name fix to `GET /connect/status` so it doesn't throw against the
       renamed table — **not yet the real Square-native status check** (still just trusts
       the local `onboarding_complete` flag; TODO comment left in code). Real check via

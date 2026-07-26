@@ -5,6 +5,7 @@ const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { sendMail } = require('../utilities/aws-ses-email');
 const tokenCrypto = require('../utilities/token-crypto');
+const { getSquare } = require('../utilities/square');
 
 require('dotenv').config();
 
@@ -18,22 +19,6 @@ function getStripe() {
     _stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
   }
   return _stripe;
-}
-
-// Lazy Square init — avoids crashing the server at startup if the key is missing
-let _square = null;
-function getSquare() {
-  if (!_square) {
-    if (!process.env.SQUARE_ACCESS_TOKEN) throw new Error('SQUARE_ACCESS_TOKEN is not set');
-    const { SquareClient, SquareEnvironment } = require('square');
-    _square = new SquareClient({
-      token: process.env.SQUARE_ACCESS_TOKEN,
-      environment: process.env.SQUARE_ENVIRONMENT === 'production'
-        ? SquareEnvironment.Production
-        : SquareEnvironment.Sandbox
-    });
-  }
-  return _square;
 }
 
 const authenticate = async (req, res, next) => {
