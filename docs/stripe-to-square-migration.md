@@ -281,11 +281,55 @@ must be built to match this, not the old redirect-based flow.
       migration 044 back in Phase 0/1, no separate migration needed here
 
 ### Phase 3 — Backend: Storefront checkout + webhooks
-- [ ] Implement `CreatePayment` with `app_fee_money` for one-off art/product purchases
-      (replaces the `paymentIntents.create` + `transfer_data` flow)
+
+**Architecture note:** `CreatePayment` with `app_fee_money` must be called using the
+**seller's own OAuth access token** (via `getValidAccessToken()` from Phase 1), not the
+platform's token — Square identifies which merchant account receives the funds from
+whichever token makes the call. `location_id` is the **seller's own** location too
+(fetched via their Merchant profile's `mainLocationId`), not `SQUARE_LOCATION_ID`.
+Confirmed via Square's docs before implementing, since this is a real mechanical
+difference from Stripe's destination-charge model (there, the *platform's* secret key +
+`transfer_data.destination` did everything in one call from the platform's side).
+
+Also: since `CreatePayment` completes **synchronously** (unlike Stripe's
+PaymentIntent-then-webhook-confirms flow), the "mark order paid, mark item unavailable,
+send buyer/seller emails" logic that used to live in the `payment_intent.succeeded`
+webhook handler now happens directly in the checkout endpoint. This meaningfully shrinks
+what the webhook rewrite (still pending) actually needs to cover — mainly refunds/
+disputes/future async events, not the initial success path.
+
+- [x] Implement `CreatePayment` with `app_fee_money` for one-off art/product purchases
+      (replaces the `paymentIntents.create` + `transfer_data` flow) —
+      `backend/routes/storefront.js`, endpoint renamed from
+      `POST .../checkout/intent` to `POST .../checkout` (no more separate "intent" step;
+      accepts `{ source_id, ... }`, a client-tokenized card, same pattern as `/subscribe`).
+      Seller must have `onboarding_complete = 1` in `user_payment_connect`; a 401/403 from
+      Square during the payment call (revoked connection) clears that row, same
+      self-healing pattern as `checkConnectionStatus()`. Email sends are wrapped in their
+      own try/catch — a transient email failure must never surface as a checkout failure
+      to a buyer who was already actually charged.
+      **Bug caught during testing:** an off-by-one in the `orders` INSERT's
+      placeholder/column alignment (missing a placeholder for `total_cents` shifted
+      `payment_connected_account_id`'s value). MySQL's column-count check caught it
+      immediately as a hard error rather than silently miswriting data, but worth noting
+      since it would've been a real bug without the end-to-end test catching it.
+      **Also discovered:** `breakroom_dev`'s `collection_items`/`user_collections`/
+      `user_storefront` tables were still missing migrations 020, 025, 026, 027
+      (price/availability/shipping columns, gallery flag, display order, external URL) —
+      backfilled all four, same schema-drift pattern as Phase 0/1.
+      **Verified end-to-end against real Square sandbox**: set up a full fake storefront
+      (store, collection, $25 item + $5 shipping), used our own sandbox default-account
+      token as a stand-in seller connection (a genuine second connected merchant would
+      need a live browser OAuth flow), and ran the actual checkout logic. Payment came
+      back `COMPLETED` with the correct `appFeeMoney` (150¢ = 5% of $30 for a Free-tier
+      seller), the order row landed with every field correct, and the item was marked
+      unavailable. All test rows cleaned up afterward.
 - [ ] Implement Square webhook endpoint + signature verification
 - [ ] Map every existing Stripe webhook event handled today to its Square equivalent (see
-      table above) — subscription activate/update/expire, payment succeeded/failed
+      table above) — subscription activate/update/expire, payment succeeded/failed. Scope
+      is now smaller than originally planned: payment-succeeded is handled synchronously
+      above, so this is mainly subscription lifecycle events (renewal, cancellation,
+      payment failure from Square's side) and any refund/dispute handling.
 - [ ] Decide what to do about the missing `account.updated` handling gap (currently Connect
       status is checked lazily anyway, so this may be a non-issue — confirm)
 

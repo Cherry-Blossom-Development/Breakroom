@@ -1,22 +1,17 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const { SquareError } = require('square');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { sendMail } = require('../utilities/aws-ses-email');
+const { getSquareClientForToken } = require('../utilities/square');
+const { getValidAccessToken } = require('../utilities/squareConnect');
 
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
-
-let _stripe = null;
-function getStripe() {
-  if (!_stripe) {
-    if (!process.env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY is not set');
-    _stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-  }
-  return _stripe;
-}
 
 async function getSellerFeePercent(userId, client) {
   const result = await client.query(
@@ -284,12 +279,17 @@ router.post('/public/:storeUrl/contact', async (req, res) => {
 
 // ─── Checkout ────────────────────────────────────────────────────────────────
 
-// POST /api/storefront/public/:storeUrl/items/:itemId/checkout/intent  (no auth)
-router.post('/public/:storeUrl/items/:itemId/checkout/intent', async (req, res) => {
-  const { buyer_name, buyer_email, ship_to_name, ship_to_address1, ship_to_address2,
+// POST /api/storefront/public/:storeUrl/items/:itemId/checkout  (no auth)
+// Square's CreatePayment completes synchronously -- unlike Stripe's PaymentIntent +
+// async webhook-confirmation flow, there's no separate "intent" step (hence the renamed
+// path, dropping "/intent"). The frontend must tokenize the buyer's card first (Web
+// Payments SDK, Phase 4) and send the resulting source_id here; this one request creates
+// the order AND completes the charge.
+router.post('/public/:storeUrl/items/:itemId/checkout', async (req, res) => {
+  const { source_id, buyer_name, buyer_email, ship_to_name, ship_to_address1, ship_to_address2,
           ship_to_city, ship_to_state, ship_to_zip, ship_to_country } = req.body;
 
-  if (!buyer_name || !buyer_email || !ship_to_name || !ship_to_address1 ||
+  if (!source_id || !buyer_name || !buyer_email || !ship_to_name || !ship_to_address1 ||
       !ship_to_city || !ship_to_state || !ship_to_zip) {
     return res.status(400).json({ message: 'All required fields must be filled in.' });
   }
@@ -320,7 +320,9 @@ router.post('/public/:storeUrl/items/:itemId/checkout/intent', async (req, res) 
 
     if (!item.price_cents) return res.status(400).json({ message: 'Item has no price set' });
 
-    // Prevent duplicate checkouts (30-min lock)
+    // Prevent duplicate checkouts (30-min lock). Window is now mostly a formality since
+    // CreatePayment completes within the same request, but still guards the brief window
+    // between two near-simultaneous requests for the same item.
     const lockCheck = await client.query(
       `SELECT id FROM orders
        WHERE collection_item_id = $1 AND status = 'pending_payment'
@@ -331,15 +333,15 @@ router.post('/public/:storeUrl/items/:itemId/checkout/intent', async (req, res) 
       return res.status(409).json({ message: 'This item is currently being purchased. Please try again in a few minutes.' });
     }
 
-    // Seller must have Stripe Connect
+    // Seller must have completed Square Connect
     const connectResult = await client.query(
-      'SELECT stripe_account_id FROM user_stripe_connect WHERE user_id = $1 AND onboarding_complete = 1',
-      [sellerUserId]
+      'SELECT processor_account_id FROM user_payment_connect WHERE user_id = $1 AND processor = $2 AND onboarding_complete = 1',
+      [sellerUserId, 'square']
     );
     if (connectResult.rowCount === 0) {
       return res.status(400).json({ message: 'Seller has not completed payment setup' });
     }
-    const stripeAccountId = connectResult.rows[0].stripe_account_id;
+    const merchantId = connectResult.rows[0].processor_account_id;
 
     const itemPriceCents = item.price_cents;
     const shippingCostCents = item.shipping_cost_cents || 0;
@@ -348,53 +350,117 @@ router.post('/public/:storeUrl/items/:itemId/checkout/intent', async (req, res) 
     const feePercent = await getSellerFeePercent(sellerUserId, client);
     const platformFeeCents = Math.round(totalCents * feePercent / 100);
 
-    let paymentIntent;
-    try {
-      paymentIntent = await getStripe().paymentIntents.create({
-        amount: totalCents,
-        currency: 'usd',
-        application_fee_amount: platformFeeCents,
-        transfer_data: { destination: stripeAccountId },
-        metadata: { item_id: String(item.id), seller_user_id: String(sellerUserId), buyer_email, buyer_name }
-      });
-    } catch (stripeErr) {
-      if (stripeErr.code === 'resource_missing') {
-        // Seller's Connect account ID is stale — clear it so they re-onboard
-        await client.query('DELETE FROM user_stripe_connect WHERE user_id = $1', [sellerUserId]);
-        return res.status(400).json({ message: 'Seller has not completed payment setup' });
-      }
-      throw stripeErr;
-    }
-
+    // Reserve the item with a pending order row before charging -- same duplicate-
+    // prevention lock the Stripe flow used, just a much shorter real-world window now.
     const orderResult = await client.query(
       `INSERT INTO orders
          (collection_item_id, seller_user_id, buyer_name, buyer_email,
           ship_to_name, ship_to_address1, ship_to_address2, ship_to_city,
           ship_to_state, ship_to_zip, ship_to_country,
           item_price_cents, shipping_cost_cents, platform_fee_cents, total_cents,
-          stripe_payment_intent_id, stripe_connected_account_id, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'pending_payment')`,
+          payment_processor, payment_connected_account_id, status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'square',$16,'pending_payment')`,
       [item.id, sellerUserId, buyer_name, buyer_email,
        ship_to_name, ship_to_address1, ship_to_address2 || null, ship_to_city,
        ship_to_state, ship_to_zip, country,
        itemPriceCents, shippingCostCents, platformFeeCents, totalCents,
-       paymentIntent.id, stripeAccountId]
+       merchantId]
     );
+    const orderId = orderResult.insertId;
 
-    // Store order_id back in PI metadata for webhook lookup
-    await getStripe().paymentIntents.update(paymentIntent.id, {
-      metadata: { ...paymentIntent.metadata, order_id: String(orderResult.insertId) }
-    });
+    // CreatePayment must run with the SELLER's own OAuth token, not the platform's --
+    // Square identifies which merchant account receives the funds (minus app_fee_money)
+    // from whichever access token makes the call. location_id is the seller's own
+    // location too, fetched via their Merchant profile's mainLocationId.
+    let payment;
+    try {
+      const { accessToken } = await getValidAccessToken(sellerUserId);
+      const sellerClient = getSquareClientForToken(accessToken);
+
+      const { merchant } = await sellerClient.merchants.get({ merchantId });
+      const sellerLocationId = merchant.mainLocationId;
+
+      const paymentResult = await sellerClient.payments.create({
+        sourceId: source_id,
+        idempotencyKey: crypto.randomUUID(),
+        amountMoney: { amount: BigInt(totalCents), currency: 'USD' },
+        appFeeMoney: { amount: BigInt(platformFeeCents), currency: 'USD' },
+        locationId: sellerLocationId,
+        autocomplete: true,
+        referenceId: String(orderId)
+      });
+      payment = paymentResult.payment;
+    } catch (paymentErr) {
+      await client.query(`UPDATE orders SET status = 'cancelled', updated_at = NOW() WHERE id = $1`, [orderId]);
+      if (paymentErr instanceof SquareError && (paymentErr.statusCode === 401 || paymentErr.statusCode === 403)) {
+        // Seller's connection was revoked since we checked onboarding_complete above --
+        // clear the stale row so they're prompted to reconnect rather than silently
+        // failing again on the next attempt.
+        await client.query('DELETE FROM user_payment_connect WHERE user_id = $1 AND processor = $2', [sellerUserId, 'square']);
+        return res.status(400).json({ message: 'Seller has not completed payment setup' });
+      }
+      throw paymentErr;
+    }
+
+    await client.query(
+      `UPDATE orders SET status = 'paid', payment_intent_id = $1, updated_at = NOW() WHERE id = $2`,
+      [payment.id, orderId]
+    );
+    await client.query(`UPDATE collection_items SET is_available = 0 WHERE id = $1`, [item.id]);
+
+    // Best-effort confirmation emails -- must NOT surface as a checkout failure to the
+    // buyer, since the charge already succeeded by this point.
+    try {
+      const fmt = cents => `$${(cents / 100).toFixed(2)}`;
+      const addr = `${ship_to_address1}${ship_to_address2 ? ', ' + ship_to_address2 : ''}, ${ship_to_city}, ${ship_to_state} ${ship_to_zip}, ${country}`;
+      const sellerResult = await client.query('SELECT email, first_name FROM users WHERE id = $1', [sellerUserId]);
+      const seller = sellerResult.rows[0];
+
+      await sendMail(
+        seller.email,
+        'noreply@prosaurus.com',
+        `New order: ${item.name}`,
+        `<p>Hi ${seller.first_name || 'there'},</p>
+         <p>You have a new order on Prosaurus!</p>
+         <table style="border-collapse:collapse;width:100%;max-width:480px">
+           <tr><td style="padding:6px 0;color:#666">Item</td><td><strong>${item.name}</strong></td></tr>
+           <tr><td style="padding:6px 0;color:#666">Amount</td><td>${fmt(itemPriceCents)} + ${fmt(shippingCostCents)} shipping</td></tr>
+           <tr><td style="padding:6px 0;color:#666">Buyer</td><td>${buyer_name} &lt;${buyer_email}&gt;</td></tr>
+           <tr><td style="padding:6px 0;color:#666">Ship to</td><td>${ship_to_name}<br>${addr}</td></tr>
+         </table>
+         <p>Log in to <a href="https://www.prosaurus.com/collections/orders">Prosaurus</a> to manage this order.</p>
+         <p>— Prosaurus</p>`
+      );
+
+      await sendMail(
+        buyer_email,
+        'noreply@prosaurus.com',
+        `Order confirmed: ${item.name}`,
+        `<p>Hi ${buyer_name},</p>
+         <p>Your order has been confirmed. Here's a summary:</p>
+         <table style="border-collapse:collapse;width:100%;max-width:480px">
+           <tr><td style="padding:6px 0;color:#666">Item</td><td><strong>${item.name}</strong></td></tr>
+           <tr><td style="padding:6px 0;color:#666">Item price</td><td>${fmt(itemPriceCents)}</td></tr>
+           <tr><td style="padding:6px 0;color:#666">Shipping</td><td>${fmt(shippingCostCents)}</td></tr>
+           <tr><td style="padding:6px 0;color:#666;font-weight:bold">Total</td><td><strong>${fmt(totalCents)}</strong></td></tr>
+           <tr><td style="padding:6px 0;color:#666">Ship to</td><td>${ship_to_name}<br>${addr}</td></tr>
+         </table>
+         <p>The seller will ship your item and you'll receive a tracking number by email.</p>
+         <p>— Prosaurus</p>`
+      );
+    } catch (emailErr) {
+      console.error('Order confirmation email failed (order still succeeded):', emailErr);
+    }
 
     res.json({
-      client_secret: paymentIntent.client_secret,
-      order_id: orderResult.insertId,
+      order_id: orderId,
       item_price_cents: itemPriceCents,
       shipping_cost_cents: shippingCostCents,
       total_cents: totalCents,
+      status: 'paid'
     });
   } catch (err) {
-    console.error('Failed to create checkout intent:', err);
+    console.error('Failed to complete checkout:', err);
     res.status(500).json({ message: 'Server error' });
   } finally {
     if (client) client.release();
