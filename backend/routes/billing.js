@@ -187,27 +187,97 @@ router.post('/subscribe', authenticate, async (req, res) => {
   }
 });
 
-// POST /api/billing/portal — Stripe Customer Portal (manage/cancel web subscription)
-router.post('/portal', authenticate, async (req, res) => {
+// Square has no hosted Customer Portal equivalent to Stripe's billingPortal, so "manage
+// subscription" becomes two custom endpoints instead of one portal redirect.
+
+// POST /api/billing/cancel — cancel the user's Square subscription
+router.post('/cancel', authenticate, async (req, res) => {
   let client;
   try {
     client = await getClient();
-    const existing = await client.query(
-      'SELECT stripe_customer_id FROM user_stripe_customers WHERE user_id = $1',
+    const result = await client.query(
+      `SELECT platform_subscription_id FROM user_subscriptions WHERE user_id = $1 AND platform = 'square'`,
       [req.user.id]
     );
-    if (existing.rowCount === 0) {
-      return res.status(404).json({ message: 'No billing account found' });
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'No active Square subscription found' });
     }
 
-    const session = await getStripe().billingPortal.sessions.create({
-      customer: existing.rows[0].stripe_customer_id,
-      return_url: `${process.env.CORS_ORIGIN}/collections/payment-setup`
+    const { subscription } = await getSquare().subscriptions.cancel({
+      subscriptionId: result.rows[0].platform_subscription_id
     });
 
-    res.json({ url: session.url });
+    // Square schedules cancellation for the end of the current billing period rather than
+    // terminating immediately -- keep status as-is and just set expires_at to the paid-
+    // through date, matching how Apple/Google subscriptions already represent this in
+    // this same table (GET /plan's active check is status==='active' AND expires_at in
+    // the future, so this naturally flips to inactive once that date passes).
+    const expiresAt = subscription.chargedThroughDate || subscription.canceledDate || null;
+
+    await client.query(
+      `UPDATE user_subscriptions SET expires_at = $1 WHERE user_id = $2 AND platform = 'square'`,
+      [expiresAt, req.user.id]
+    );
+
+    res.json({ cancelled: true, expires_at: expiresAt });
   } catch (err) {
-    console.error('Failed to create portal session:', err);
+    console.error('Failed to cancel Square subscription:', err);
+    res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// POST /api/billing/update-payment-method — swap the card charged for the subscription.
+// Accepts { sourceId } (a freshly tokenized card from the frontend), same as /subscribe.
+router.post('/update-payment-method', authenticate, async (req, res) => {
+  let client;
+  try {
+    const { sourceId } = req.body;
+    if (!sourceId) {
+      return res.status(400).json({ message: 'Missing sourceId (tokenized card)' });
+    }
+
+    client = await getClient();
+    const subResult = await client.query(
+      `SELECT platform_subscription_id FROM user_subscriptions WHERE user_id = $1 AND platform = 'square'`,
+      [req.user.id]
+    );
+    const custResult = await client.query(
+      `SELECT processor_customer_id FROM user_payment_customers WHERE user_id = $1 AND processor = 'square'`,
+      [req.user.id]
+    );
+
+    if (subResult.rowCount === 0 || custResult.rowCount === 0) {
+      return res.status(404).json({ message: 'No active Square subscription found' });
+    }
+
+    const subscriptionId = subResult.rows[0].platform_subscription_id;
+    const customerId = custResult.rows[0].processor_customer_id;
+
+    const { subscription: currentSub } = await getSquare().subscriptions.get({ subscriptionId });
+    const oldCardId = currentSub.cardId;
+
+    const { card: newCard } = await getSquare().cards.create({
+      idempotencyKey: crypto.randomUUID(),
+      sourceId,
+      card: { customerId }
+    });
+
+    await getSquare().subscriptions.update({
+      subscriptionId,
+      subscription: { cardId: newCard.id }
+    });
+
+    // Best-effort cleanup -- don't fail the request over a stale card that couldn't be
+    // disabled (e.g. already removed).
+    if (oldCardId && oldCardId !== newCard.id) {
+      await getSquare().cards.disable({ cardId: oldCardId }).catch(() => {});
+    }
+
+    res.json({ updated: true });
+  } catch (err) {
+    console.error('Failed to update Square payment method:', err);
     res.status(500).json({ message: 'Server error' });
   } finally {
     if (client) client.release();

@@ -260,9 +260,23 @@ must be built to match this, not the old redirect-based flow.
       created a real subscription (came back `ACTIVE`), confirmed the DB row matched, then
       fully cleaned up (cancelled the subscription, disabled the card, deleted the
       customer, removed the test DB rows).
-- [ ] Build custom "Cancel Subscription" endpoint (portal replacement — Square has no
-      hosted portal)
-- [ ] Build custom "Update payment method" endpoint (portal replacement)
+- [x] Build custom "Cancel Subscription" endpoint (portal replacement — Square has no
+      hosted portal) — `POST /cancel` in `billing.js`, replaces `POST /portal`. Square
+      schedules cancellation for the end of the current billing period rather than
+      terminating instantly, so this sets `expires_at` to the returned
+      `chargedThroughDate` and deliberately leaves `status` as `'active'` — matches how
+      Apple/Google subscriptions already represent "access until a future date" in this
+      same table, and `GET /plan`'s active check (`status==='active' AND expires_at in
+      the future`) naturally flips to inactive once that date passes, no extra status
+      value needed. **Verified against real sandbox**: cancelling returned
+      `status: ACTIVE` with `chargedThroughDate`/`canceledDate` both set to the correct
+      future date.
+- [x] Build custom "Update payment method" endpoint (portal replacement) —
+      `POST /update-payment-method`, accepts `{ sourceId }` (same tokenization contract as
+      `/subscribe`), tokenizes the new card via `cards.create()`, points the subscription
+      at it via `subscriptions.update()`, then best-effort disables the old card.
+      **Verified against real sandbox**: confirmed the subscription's `cardId` actually
+      changed to the new card after the call.
 - [x] Migration: add `'square'` to `user_subscriptions.platform` enum — done as part of
       migration 044 back in Phase 0/1, no separate migration needed here
 
