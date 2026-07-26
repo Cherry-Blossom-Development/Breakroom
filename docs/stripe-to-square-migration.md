@@ -244,10 +244,22 @@ must be built to match this, not the old redirect-based flow.
       `response.objects.find(o => o.type === 'SUBSCRIPTION_PLAN').subscriptionPlanData.subscriptionPlanVariations[0].id`
       — NOT as a separate top-level `SUBSCRIPTION_PLAN_VARIATION` entry in
       `response.objects`, which is what the SDK's own example code implies.
-- [ ] Implement subscribe endpoint using Square Subscriptions API (replaces
-      `POST /subscribe`) — see contract-change note above
-- [ ] Implement Square-equivalent customer creation/lookup (replaces
-      `getOrCreateStripeCustomer()`)
+- [x] Implement subscribe endpoint using Square Subscriptions API (replaces
+      `POST /subscribe`) — now accepts `{ sourceId }` (tokenized card from the frontend)
+      instead of returning a redirect `url`; responds with `{ subscribed, status }`
+      directly. Flow: `cards.create()` attaches the tokenized card to the Square customer,
+      then `subscriptions.create()` against `SQUARE_PRO_PLAN_VARIATION_ID` +
+      `SQUARE_LOCATION_ID`, then upserts `user_subscriptions` (`platform = 'square'`).
+- [x] Implement Square-equivalent customer creation/lookup (replaces
+      `getOrCreateStripeCustomer()`) — `getOrCreateSquareCustomer()` in `billing.js`.
+      `user_payment_customers` has one row per `user_id` (not per `user_id`+`processor`),
+      matching the hard-cutover decision: a stale Stripe-processor row for a user gets
+      overwritten by the upsert rather than causing a duplicate-key conflict.
+      **Verified end-to-end against real Square sandbox** (not mocked): created a real
+      customer, tokenized a card via Square's sandbox test nonce (`cnon:card-nonce-ok`),
+      created a real subscription (came back `ACTIVE`), confirmed the DB row matched, then
+      fully cleaned up (cancelled the subscription, disabled the card, deleted the
+      customer, removed the test DB rows).
 - [ ] Build custom "Cancel Subscription" endpoint (portal replacement — Square has no
       hosted portal)
 - [ ] Build custom "Update payment method" endpoint (portal replacement)

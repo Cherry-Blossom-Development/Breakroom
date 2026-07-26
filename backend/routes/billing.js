@@ -1,6 +1,8 @@
 const express = require('express');
 const router = express.Router();
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const { SquareError } = require('square');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { sendMail } = require('../utilities/aws-ses-email');
@@ -53,41 +55,44 @@ async function getFeePercent(userId, client) {
   return active ? 0 : 5;
 }
 
-// Get or create a Stripe customer ID for this user
-async function getOrCreateStripeCustomer(userId, handle, client) {
+// Get or create a Square customer ID for this user. Note: user_payment_customers has a
+// single row per user_id (not per user_id+processor) -- consistent with the hard-cutover
+// decision, a stale Stripe-processor row for this user (if any) gets overwritten by the
+// upsert below rather than causing a duplicate-key conflict.
+async function getOrCreateSquareCustomer(userId, handle, client) {
   const existing = await client.query(
-    'SELECT stripe_customer_id FROM user_stripe_customers WHERE user_id = $1',
-    [userId]
+    'SELECT processor_customer_id FROM user_payment_customers WHERE user_id = $1 AND processor = $2',
+    [userId, 'square']
   );
 
   if (existing.rowCount > 0) {
-    const customerId = existing.rows[0].stripe_customer_id;
+    const customerId = existing.rows[0].processor_customer_id;
     try {
-      await getStripe().customers.retrieve(customerId);
+      await getSquare().customers.get({ customerId });
       return customerId;
     } catch (err) {
-      if (err.code === 'resource_missing') {
-        // Stale ID from a different Stripe environment (e.g. test→live switch) — discard it
-        await client.query('DELETE FROM user_stripe_customers WHERE user_id = $1', [userId]);
+      if (err instanceof SquareError && err.statusCode === 404) {
+        // Stale ID (e.g. sandbox→production switch) — discard it and fall through to create
+        await client.query('DELETE FROM user_payment_customers WHERE user_id = $1 AND processor = $2', [userId, 'square']);
       } else {
         throw err;
       }
     }
   }
 
-  const userResult = await client.query(
-    'SELECT email FROM users WHERE id = $1',
-    [userId]
-  );
+  const userResult = await client.query('SELECT email FROM users WHERE id = $1', [userId]);
   const email = userResult.rows[0]?.email;
 
-  const customer = await getStripe().customers.create({
-    email,
-    metadata: { user_id: String(userId), handle }
+  const { customer } = await getSquare().customers.create({
+    emailAddress: email,
+    nickname: handle,
+    referenceId: String(userId)
   });
 
   await client.query(
-    'INSERT INTO user_stripe_customers (user_id, stripe_customer_id) VALUES ($1, $2)',
+    `INSERT INTO user_payment_customers (user_id, processor, processor_customer_id)
+     VALUES ($1, 'square', $2)
+     ON DUPLICATE KEY UPDATE processor = 'square', processor_customer_id = VALUES(processor_customer_id)`,
     [userId, customer.id]
   );
 
@@ -126,52 +131,56 @@ router.get('/plan', authenticate, async (req, res) => {
   }
 });
 
-// POST /api/billing/subscribe — create a Stripe Checkout session for the web Pro subscription
+// POST /api/billing/subscribe — create the Square Pro subscription for this user.
+// Unlike Stripe Checkout Sessions, Square has no hosted checkout page: the frontend must
+// tokenize the card first (Web Payments SDK, Phase 4) and pass the resulting `sourceId`
+// here. Response is the resulting subscription status directly, not a redirect `url`.
 router.post('/subscribe', authenticate, async (req, res) => {
   let client;
   try {
     client = await getClient();
 
-    // Don't let already-active subscribers start a new checkout
+    // Don't let already-active subscribers start a new subscription
     const feePercent = await getFeePercent(req.user.id, client);
     if (feePercent === 0) {
       return res.json({ already_subscribed: true });
     }
 
-    const customerId = await getOrCreateStripeCustomer(req.user.id, req.user.handle, client);
-    const baseUrl = process.env.CORS_ORIGIN;
+    const { sourceId } = req.body;
+    if (!sourceId) {
+      return res.status(400).json({ message: 'Missing sourceId (tokenized card)' });
+    }
 
-    // Defaults to the Collections payment-setup page (where this originally only
-    // lived); any page that gates a feature behind Pro (e.g. Sessions) can pass
-    // returnTo to land the user back where they started after checkout.
-    const returnPath = typeof req.body?.returnTo === 'string' && req.body.returnTo.startsWith('/')
-      ? req.body.returnTo
-      : '/collections/payment-setup';
-    const from = req.body?.from ? `&from=${encodeURIComponent(req.body.from)}` : '';
-    const successSep = returnPath.includes('?') ? '&' : '?';
+    const customerId = await getOrCreateSquareCustomer(req.user.id, req.user.handle, client);
 
-    const session = await getStripe().checkout.sessions.create({
-      customer: customerId,
-      mode: 'subscription',
-      line_items: [{
-        price_data: {
-          currency: 'usd',
-          product_data: {
-            name: 'Prosaurus Pro',
-            description: 'Waives the 5% platform fee on art sales and unlocks unlimited Sessions'
-          },
-          unit_amount: 399,
-          recurring: { interval: 'month' }
-        },
-        quantity: 1
-      }],
-      success_url: `${baseUrl}${returnPath}${successSep}stripe=subscribed${from}`,
-      cancel_url:  `${baseUrl}${returnPath}${from ? (returnPath.includes('?') ? '&' : '?') + from.slice(1) : ''}`
+    const { card } = await getSquare().cards.create({
+      idempotencyKey: crypto.randomUUID(),
+      sourceId,
+      card: { customerId }
     });
 
-    res.json({ url: session.url });
+    const { subscription } = await getSquare().subscriptions.create({
+      idempotencyKey: crypto.randomUUID(),
+      locationId: process.env.SQUARE_LOCATION_ID,
+      planVariationId: process.env.SQUARE_PRO_PLAN_VARIATION_ID,
+      customerId,
+      cardId: card.id
+    });
+
+    await client.query(
+      `INSERT INTO user_subscriptions (user_id, platform, platform_subscription_id, status, expires_at)
+       VALUES ($1, 'square', $2, 'active', NULL)
+       ON DUPLICATE KEY UPDATE
+         platform = 'square',
+         platform_subscription_id = VALUES(platform_subscription_id),
+         status = 'active',
+         expires_at = NULL`,
+      [req.user.id, subscription.id]
+    );
+
+    res.json({ subscribed: true, status: subscription.status });
   } catch (err) {
-    console.error('Failed to create subscribe session:', err);
+    console.error('Failed to create Square subscription:', err);
     res.status(500).json({ message: 'Server error' });
   } finally {
     if (client) client.release();
