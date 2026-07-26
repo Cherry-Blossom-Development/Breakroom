@@ -17,4 +17,17 @@ function getSquare() {
   return _square;
 }
 
-module.exports = { getSquare };
+// A fresh (uncached) client scoped to a single connected seller's own access token --
+// needed for calls that must reflect what that specific seller can see/do (e.g.
+// checking their own merchant status), as opposed to getSquare()'s platform-level token.
+function getSquareClientForToken(accessToken) {
+  const { SquareClient, SquareEnvironment } = require('square');
+  return new SquareClient({
+    token: accessToken,
+    environment: process.env.SQUARE_ENVIRONMENT === 'production'
+      ? SquareEnvironment.Production
+      : SquareEnvironment.Sandbox
+  });
+}
+
+module.exports = { getSquare, getSquareClientForToken };

@@ -205,10 +205,20 @@ Reference docs (current as of this writing, verify current before implementing):
       no-connected-account error path both verified; the actual `refresh_token` grant
       call wasn't exercised end-to-end (no real connected seller account exists yet to
       test against — that requires an actual OAuth approval in the browser).
-- [x] Minimal column-name fix to `GET /connect/status` so it doesn't throw against the
-      renamed table — **not yet the real Square-native status check** (still just trusts
-      the local `onboarding_complete` flag; TODO comment left in code). Real check via
-      `MERCHANT_PROFILE_READ` is a separate remaining item.
+- [x] Real Square-native status check for `GET /connect/status` —
+      `checkConnectionStatus(userId)` in `backend/utilities/squareConnect.js`. Uses the
+      seller's own (freshly refreshed if needed) access token to call
+      `merchants.get({ merchantId })` via a new `getSquareClientForToken()` helper in
+      `square.js` (a per-seller client, distinct from the platform-level `getSquare()`
+      singleton). Mirrors the self-healing behavior the old Stripe code had: if Square
+      rejects the token with 401/403 (seller revoked access from their own Square
+      Dashboard, or Square restricted the account), the stale `user_payment_connect` row
+      is deleted so the seller is offered a fresh `/connect/start` instead of a falsely
+      "connected" UI. A transient/network error does **not** delete the row — reported as
+      `pending` instead, so a momentary blip doesn't force an unnecessary reconnect.
+      Tested against breakroom_dev with a genuinely bogus access token: confirmed Square's
+      real sandbox API rejects it with an auth error, which correctly triggered the
+      self-heal (row deleted, `not_connected` returned). No-connection case also verified.
 
 ### Phase 2 — Backend: Subscriptions (Pro tier)
 - [ ] Create the $3.99/mo Pro plan in Square Catalog (one-time setup, can be done via

@@ -6,6 +6,7 @@ const { extractToken } = require('../utilities/auth');
 const { sendMail } = require('../utilities/aws-ses-email');
 const tokenCrypto = require('../utilities/token-crypto');
 const { getSquare } = require('../utilities/square');
+const { checkConnectionStatus } = require('../utilities/squareConnect');
 
 require('dotenv').config();
 
@@ -221,26 +222,12 @@ const SQUARE_OAUTH_SCOPES = [
 
 // GET /api/billing/connect/status
 router.get('/connect/status', authenticate, async (req, res) => {
-  let client;
   try {
-    client = await getClient();
-    const result = await client.query(
-      'SELECT onboarding_complete FROM user_payment_connect WHERE user_id = $1 AND processor = $2',
-      [req.user.id, 'square']
-    );
-
-    if (result.rowCount === 0) {
-      return res.json({ status: 'not_connected' });
-    }
-
-    // TODO(next Phase 1 pass): replace with a real Square merchant-status check
-    // (MERCHANT_PROFILE_READ) instead of trusting the locally stored flag.
-    res.json({ status: result.rows[0].onboarding_complete ? 'active' : 'pending' });
+    const status = await checkConnectionStatus(req.user.id);
+    res.json({ status });
   } catch (err) {
     console.error('Failed to get connect status:', err);
     res.status(500).json({ message: 'Server error' });
-  } finally {
-    if (client) client.release();
   }
 });
 

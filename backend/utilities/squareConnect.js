@@ -6,8 +6,9 @@
 // behalf (e.g. CreatePayment at checkout) -- not on a schedule. Connect payments only
 // happen when someone buys something, so a polling job would mostly do nothing.
 
+const { SquareError } = require('square');
 const { getClient } = require('./db');
-const { getSquare } = require('./square');
+const { getSquare, getSquareClientForToken } = require('./square');
 const tokenCrypto = require('./token-crypto');
 
 const REFRESH_BUFFER_MS = 24 * 60 * 60 * 1000; // refresh a day early rather than cutting it close
@@ -62,4 +63,42 @@ async function getValidAccessToken(userId) {
   }
 }
 
-module.exports = { getValidAccessToken };
+// Verifies a connected seller's account is genuinely active on Square's side, rather
+// than trusting the locally cached `onboarding_complete` flag. If Square reports the
+// connection is no longer authorized (401/403 -- seller revoked access from their own
+// Square Dashboard, or Square itself restricted the account), the local row is deleted
+// so the seller is offered a fresh /connect/start instead of a falsely "connected" UI.
+// A transient/network failure does NOT delete the connection -- that would force a
+// seller to reconnect over a momentary blip, which is worse than briefly showing a
+// stale status.
+async function checkConnectionStatus(userId) {
+  let accessToken, merchantId;
+  try {
+    ({ accessToken, merchantId } = await getValidAccessToken(userId));
+  } catch (err) {
+    return 'not_connected';
+  }
+
+  try {
+    const sellerClient = getSquareClientForToken(accessToken);
+    const { merchant } = await sellerClient.merchants.get({ merchantId });
+    return merchant && merchant.status === 'ACTIVE' ? 'active' : 'pending';
+  } catch (err) {
+    if (err instanceof SquareError && (err.statusCode === 401 || err.statusCode === 403)) {
+      const client = await getClient();
+      try {
+        await client.query(
+          'DELETE FROM user_payment_connect WHERE user_id = $1 AND processor = $2',
+          [userId, 'square']
+        );
+      } finally {
+        client.release();
+      }
+      return 'not_connected';
+    }
+    console.error(`Square merchant status check failed for user ${userId} (non-auth error):`, err.message);
+    return 'pending';
+  }
+}
+
+module.exports = { getValidAccessToken, checkConnectionStatus };
