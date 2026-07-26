@@ -221,16 +221,38 @@ Reference docs (current as of this writing, verify current before implementing):
       self-heal (row deleted, `not_connected` returned). No-connection case also verified.
 
 ### Phase 2 — Backend: Subscriptions (Pro tier)
-- [ ] Create the $3.99/mo Pro plan in Square Catalog (one-time setup, can be done via
-      Square Dashboard or API)
+
+**Architecture note (discovered starting this phase):** unlike Stripe Checkout Sessions,
+Square has **no hosted checkout page for subscriptions**. Stripe's old `POST /subscribe`
+just returned a redirect `url` and Stripe collected the card on its own hosted page.
+Square requires the card to be tokenized **client-side first** (Web Payments SDK, Phase 4
+frontend work) into a `sourceId`, which the backend then attaches to a Customer before
+creating the subscription. This changes `POST /subscribe`'s contract: it now needs to
+**accept** `{ sourceId }` in the request body and returns the resulting subscription
+status directly, instead of returning a `{ url }` to redirect to. Phase 4 frontend work
+must be built to match this, not the old redirect-based flow.
+
+- [x] Create the $3.99/mo Pro plan in Square Catalog — done via a one-time idempotent
+      script, `backend/scripts/square-setup-pro-plan.js` (safe to re-run; checks for an
+      existing plan by name first). Plan variation ID saved as
+      `SQUARE_PRO_PLAN_VARIATION_ID` in `.env.local`.
+      **Gotcha hit while writing this:** the current Square API version
+      (`2026-07-15`) rejects `SubscriptionPhase.recurringPriceMoney` — despite that field
+      existing in the SDK's TypeScript types — and requires pricing to be set via
+      `phase.pricing = { type: 'STATIC', priceMoney: {...} }` instead. Second gotcha: the
+      created variation's ID comes back nested under
+      `response.objects.find(o => o.type === 'SUBSCRIPTION_PLAN').subscriptionPlanData.subscriptionPlanVariations[0].id`
+      — NOT as a separate top-level `SUBSCRIPTION_PLAN_VARIATION` entry in
+      `response.objects`, which is what the SDK's own example code implies.
 - [ ] Implement subscribe endpoint using Square Subscriptions API (replaces
-      `POST /subscribe`)
+      `POST /subscribe`) — see contract-change note above
 - [ ] Implement Square-equivalent customer creation/lookup (replaces
       `getOrCreateStripeCustomer()`)
 - [ ] Build custom "Cancel Subscription" endpoint (portal replacement — Square has no
       hosted portal)
 - [ ] Build custom "Update payment method" endpoint (portal replacement)
-- [ ] Migration: add `'square'` to `user_subscriptions.platform` enum
+- [x] Migration: add `'square'` to `user_subscriptions.platform` enum — done as part of
+      migration 044 back in Phase 0/1, no separate migration needed here
 
 ### Phase 3 — Backend: Storefront checkout + webhooks
 - [ ] Implement `CreatePayment` with `app_fee_money` for one-off art/product purchases
