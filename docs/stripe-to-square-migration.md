@@ -174,10 +174,31 @@ Reference docs (current as of this writing, verify current before implementing):
       `client_id`, scope list, and a signed short-lived JWT `state` param (identifies the
       user on callback + CSRF protection). `redirect_uri` omitted deliberately — Square
       falls back to the URL already registered in the dashboard when it's not passed.
-- [ ] Implement OAuth callback / token exchange endpoint, store `access_token` +
-      `refresh_token` + `merchant_id` (next up)
+- [x] Implement OAuth callback / token exchange endpoint — `GET /connect/callback` in
+      `backend/routes/billing.js`. Verifies the `state` JWT (not the `authenticate`
+      middleware — this is a raw browser redirect from squareup.com, no auth header/cookie
+      to rely on), calls `oAuth.obtainToken()`, upserts `user_payment_connect` via
+      `ON DUPLICATE KEY UPDATE` on the existing `user_id` unique key, then redirects to
+      `/collections/payment-setup?square=complete|denied|error`.
+      **New migration 045** (`data/migrations/045-square-connect-tokens.sql`, run against
+      breakroom_dev) adds `access_token_encrypted`/`refresh_token_encrypted`/
+      `token_expires_at` columns — Square OAuth requires storing these per-seller tokens,
+      which Stripe Connect never needed (destination charges only needed the account id).
+      **New encryption utility** `backend/utilities/token-crypto.js` (AES-256-GCM) encrypts
+      both tokens at rest, keyed by a new `TOKEN_ENCRYPTION_KEY` env var — deliberately
+      separate from `SECRET_KEY` (JWT signing is a different security domain). Verified
+      with a rolled-back transaction against breakroom_dev: upsert + encrypt/decrypt
+      round-trip both confirmed working.
+      Sets `onboarding_complete = 1` immediately on successful token exchange — assumes
+      Square OAuth success implies a working payments-capable account (Square doesn't
+      expose a separate identity-verification step the way Stripe Express does). Same
+      caveat as the `/connect/status` TODO above: a real `MERCHANT_PROFILE_READ` check
+      would be more authoritative than this assumption.
 - [ ] Implement token refresh logic (new — Stripe didn't need this). Decide: refresh
-      lazily on each use, or a scheduled job that refreshes before expiry.
+      lazily on each use, or a scheduled job that refreshes before expiry. (Note: for the
+      non-PKCE code-flow grant we're using, Square's refresh token is multi-use and never
+      expires — only the access token expires, in 30 days — so this is lower urgency than
+      it might sound.)
 - [x] Minimal column-name fix to `GET /connect/status` so it doesn't throw against the
       renamed table — **not yet the real Square-native status check** (still just trusts
       the local `onboarding_complete` flag; TODO comment left in code). Real check via

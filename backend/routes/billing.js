@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { sendMail } = require('../utilities/aws-ses-email');
+const tokenCrypto = require('../utilities/token-crypto');
 
 require('dotenv').config();
 
@@ -17,6 +18,22 @@ function getStripe() {
     _stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
   }
   return _stripe;
+}
+
+// Lazy Square init — avoids crashing the server at startup if the key is missing
+let _square = null;
+function getSquare() {
+  if (!_square) {
+    if (!process.env.SQUARE_ACCESS_TOKEN) throw new Error('SQUARE_ACCESS_TOKEN is not set');
+    const { SquareClient, SquareEnvironment } = require('square');
+    _square = new SquareClient({
+      token: process.env.SQUARE_ACCESS_TOKEN,
+      environment: process.env.SQUARE_ENVIRONMENT === 'production'
+        ? SquareEnvironment.Production
+        : SquareEnvironment.Sandbox
+    });
+  }
+  return _square;
 }
 
 const authenticate = async (req, res, next) => {
@@ -244,7 +261,7 @@ router.get('/connect/status', authenticate, async (req, res) => {
 
 // POST /api/billing/connect/start
 // Generates the Square OAuth authorize URL for the frontend to redirect the seller to.
-// The actual account linking happens in the (not yet built) callback endpoint that
+// The actual account linking happens in the GET /connect/callback endpoint below, which
 // exchanges the returned `code` for access/refresh tokens.
 router.post('/connect/start', authenticate, async (req, res) => {
   let client;
@@ -274,6 +291,72 @@ router.post('/connect/start', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Failed to start Square connect:', err);
     res.status(500).json({ message: 'Server error' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// GET /api/billing/connect/callback
+// Square redirects the seller's browser here after they approve (or deny) access. Not
+// behind `authenticate` — the state param (signed in /connect/start) is what identifies
+// the user, since this is a raw browser redirect from squareup.com, not an API call from
+// our own frontend.
+router.get('/connect/callback', async (req, res) => {
+  const redirectBase = `${process.env.CORS_ORIGIN}/collections/payment-setup`;
+  const { code, state, error } = req.query;
+
+  if (error) {
+    return res.redirect(`${redirectBase}?square=denied`);
+  }
+
+  let userId;
+  try {
+    userId = jwt.verify(state, SECRET_KEY).userId;
+  } catch (err) {
+    return res.redirect(`${redirectBase}?square=error`);
+  }
+
+  let client;
+  try {
+    const tokenResponse = await getSquare().oAuth.obtainToken({
+      clientId: process.env.SQUARE_APPLICATION_ID,
+      clientSecret: process.env.SQUARE_APPLICATION_SECRET,
+      code,
+      grantType: 'authorization_code'
+    });
+
+    const { accessToken, refreshToken, expiresAt, merchantId } = tokenResponse;
+
+    client = await getClient();
+    await client.query(
+      `INSERT INTO user_payment_connect
+         (user_id, processor, processor_account_id, access_token_encrypted, refresh_token_encrypted, token_expires_at, onboarding_complete)
+       VALUES ($1, 'square', $2, $3, $4, $5, 1)
+       ON DUPLICATE KEY UPDATE
+         processor = 'square',
+         processor_account_id = VALUES(processor_account_id),
+         access_token_encrypted = VALUES(access_token_encrypted),
+         refresh_token_encrypted = VALUES(refresh_token_encrypted),
+         token_expires_at = VALUES(token_expires_at),
+         onboarding_complete = 1`,
+      [
+        userId,
+        merchantId,
+        tokenCrypto.encrypt(accessToken),
+        tokenCrypto.encrypt(refreshToken),
+        new Date(expiresAt)
+      ]
+    );
+
+    // Square OAuth success implies the seller already has a working Square account
+    // capable of accepting payments (unlike Stripe Express, there's no separate identity-
+    // verification step exposed here) -- so onboarding_complete = 1 immediately. The
+    // TODO on GET /connect/status still applies: a real MERCHANT_PROFILE_READ check would
+    // be a stronger source of truth than trusting this assumption.
+    res.redirect(`${redirectBase}?square=complete`);
+  } catch (err) {
+    console.error('Square OAuth callback failed:', err);
+    res.redirect(`${redirectBase}?square=error`);
   } finally {
     if (client) client.release();
   }
