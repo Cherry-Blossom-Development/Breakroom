@@ -442,10 +442,51 @@ disputes/future async events, not the initial success path.
       correctly, payouts arriving, fees calculated correctly)
 
 ### Phase 6 — Decommission
-- [ ] Remove Stripe routes/webhook endpoint from backend
-- [ ] Remove `stripe` npm dependency from `backend/package.json`
-- [ ] Drop or archive Stripe-specific DB columns (only after confident no rollback needed)
-- [ ] Update `CLAUDE.md` / `Breakroom/CLAUDE.md` to reflect Square as the payment processor
+- [x] Remove Stripe routes/webhook endpoint from backend — deleted `handleStripeWebhook`
+      and the lazy `getStripe()` init from `backend/routes/billing.js`, and its mount
+      point in `backend/index.js`. Confirmed via `information_schema.COLUMNS` against
+      `breakroom_dev` that this code was already fully dead before removal: it queried
+      `user_stripe_customers`/`stripe_customer_id`/`orders.stripe_payment_intent_id`,
+      all of which migration 044 had already renamed away — any real Stripe webhook
+      hitting it would have crashed on "table/column doesn't exist". Also removed the
+      now-unused `sendMail` import from `billing.js` (only the deleted webhook used it).
+- [x] Remove `stripe` npm dependency from `backend/package.json` — also ran
+      `npm uninstall stripe` in `backend/` to update the lockfile and node_modules.
+- [x] Drop or archive Stripe-specific DB columns — **turned out to be a no-op**: migration
+      044 already renamed every Stripe-specific table/column to a generic
+      processor-agnostic name back in Phase 0 (`user_stripe_customers` →
+      `user_payment_customers`, `stripe_customer_id` → `processor_customer_id`,
+      `orders.stripe_payment_intent_id` → `payment_intent_id`, etc.). Verified nothing
+      Stripe-named remains anywhere in the `breakroom_dev` schema.
+- [x] Update `CLAUDE.md` to reflect Square as the payment processor — added a "Payments"
+      section (repo's `CLAUDE.md` never mentioned Stripe/Square at all before, so this
+      was a pure addition, not a correction) plus two new bullets under "File Structure
+      Notes" pointing at `backend/utilities/square.js` and `backend/routes/billing.js`.
+- [x] **Found and fixed while decommissioning, not originally in this checklist:**
+      `docker-compose.ec2.yml` (the actual production compose file) had the same gap
+      Phase 4 found and fixed in `docker-compose.local.yml` — it only ever passed
+      `STRIPE_*` vars into the backend container, never `SQUARE_*` or
+      `TOKEN_ENCRYPTION_KEY`. Removed the dead `STRIPE_*` lines and added the missing
+      `SQUARE_*`/`TOKEN_ENCRYPTION_KEY` passthrough. **This means production has never
+      been able to make a single real Square API call** — confirmed by checking the
+      local copy of `.env.production` (the file that gets scp'd to EC2 as `~/.env`):
+      it has zero `SQUARE_*` values, only the old live Stripe keys (now removed) and a
+      timestamp predating this migration entirely. Left the `SQUARE_*` keys blank with
+      an explanatory comment rather than inventing values — **Phase 5 cannot proceed
+      until real production Square credentials (a production Square Application, not
+      the sandbox one) are obtained and filled in here**, along with a fresh
+      `TOKEN_ENCRYPTION_KEY` (does not need to match the sandbox one) and
+      `SQUARE_ENVIRONMENT=production`.
+- [x] Fixed a related bug found while touching this code: `backend/routes/analytics.js`'s
+      marketing dashboard (`SUBSCRIPTION_PLATFORMS` in `GET /paying-customers`) only ever
+      mapped `stripe`/`apple`/`google` — every Square subscription created since Phase 4
+      shipped has been silently invisible from that dashboard (missing from both the
+      per-platform breakdown and `totalNewSubscribers`). Added a `square` entry; kept
+      `stripe` too (relabeled "legacy") since historical rows still exist.
+- [x] Verified clean: `node -c` on all three edited backend files, a standalone
+      `require('./routes/billing')` load, and a full restart of the local Docker stack
+      (nodemon picked up all three edits, restarted cleanly each time, `/api/auth/me`
+      responded normally afterward).
 
 ### Phase 7 — Mobile apps (do last, low risk, can happen anytime after Phase 3 ships)
 - [ ] See Android repo: `STRIPE_TO_SQUARE_MIGRATION.md`
@@ -488,3 +529,17 @@ reboot — can pick up exactly where things left off.)_
   end-to-end in an actual browser** the same day: Sessions paywall subscribe, Collections
   payment-setup update/cancel, and a full storefront purchase all passed. Phase 4 is
   fully done.
+- 2026-07-27: Phase 6 (decommission) done, taken before Phase 5 since it's pure code
+  cleanup with no customer-facing action. Removed the Stripe webhook/routes (confirmed
+  already fully dead — it referenced tables/columns migration 044 had already renamed
+  away), the `stripe` npm dependency, and dead `STRIPE_*` env vars from `.env.local` and
+  `.env.production`. DB column drop turned out to be a no-op (044 already handled it).
+  Updated `CLAUDE.md` with a Payments section. **Found production has never had working
+  Square credentials**: `docker-compose.ec2.yml` only ever wired up `STRIPE_*`, never
+  `SQUARE_*`/`TOKEN_ENCRYPTION_KEY` (same gap Phase 4 found and fixed in the local
+  compose file) — fixed the compose file, but `.env.production` itself has no real
+  Square values, only blank placeholders now. **Phase 5 is blocked until a real
+  production Square Application is created and those values filled in.** Also fixed an
+  unrelated bug noticed in passing: `analytics.js`'s marketing dashboard never counted
+  Square subscriptions at all (`SUBSCRIPTION_PLATFORMS` only had stripe/apple/google).
+  Verified via syntax check, module load, and a full local Docker stack restart.

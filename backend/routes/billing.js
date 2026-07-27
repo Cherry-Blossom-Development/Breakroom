@@ -5,7 +5,6 @@ const jwt = require('jsonwebtoken');
 const { SquareError } = require('square');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
-const { sendMail } = require('../utilities/aws-ses-email');
 const tokenCrypto = require('../utilities/token-crypto');
 const { getSquare } = require('../utilities/square');
 const { checkConnectionStatus } = require('../utilities/squareConnect');
@@ -13,16 +12,6 @@ const { checkConnectionStatus } = require('../utilities/squareConnect');
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
-
-// Lazy Stripe init — avoids crashing the server at startup if the key is missing
-let _stripe = null;
-function getStripe() {
-  if (!_stripe) {
-    if (!process.env.STRIPE_SECRET_KEY) throw new Error('STRIPE_SECRET_KEY is not set');
-    _stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-  }
-  return _stripe;
-}
 
 const authenticate = async (req, res, next) => {
   try {
@@ -413,177 +402,6 @@ router.get('/connect/callback', async (req, res) => {
   }
 });
 
-// ─── Stripe webhook (mounted in index.js before express.json) ────────────────
-
-async function handleStripeWebhook(req, res) {
-  const sig = req.headers['stripe-signature'];
-  let event;
-
-  try {
-    event = getStripe().webhooks.constructEvent(
-      req.body,
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET
-    );
-  } catch (err) {
-    console.error('Stripe webhook signature verification failed:', err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  // Acknowledge immediately — Stripe retries on non-2xx
-  res.status(200).end();
-
-  const data = event.data.object;
-  let client;
-
-  try {
-    if (event.type === 'checkout.session.completed' && data.mode === 'subscription') {
-      // New web subscription purchased
-      const customerId   = data.customer;
-      const subscriptionId = data.subscription;
-
-      const subscription = await getStripe().subscriptions.retrieve(subscriptionId);
-      const expiresAt = subscription.current_period_end
-        ? new Date(subscription.current_period_end * 1000)
-        : null;
-
-      client = await getClient();
-      const customerRow = await client.query(
-        'SELECT user_id FROM user_stripe_customers WHERE stripe_customer_id = $1',
-        [customerId]
-      );
-      if (customerRow.rowCount === 0) return;
-
-      const userId = customerRow.rows[0].user_id;
-      await client.query(
-        `INSERT INTO user_subscriptions
-           (user_id, platform, platform_subscription_id, status, expires_at)
-         VALUES ($1, 'stripe', $2, 'active', $3)
-         ON DUPLICATE KEY UPDATE
-           platform = 'stripe',
-           platform_subscription_id = $2,
-           status = 'active',
-           expires_at = $3,
-           updated_at = NOW()`,
-        [userId, subscriptionId, expiresAt]
-      );
-    }
-
-    else if (event.type === 'customer.subscription.updated') {
-      const stripeStatus = data.status;
-      const statusMap = {
-        active:               'active',
-        trialing:             'active',
-        past_due:             'grace_period',
-        canceled:             'cancelled',
-        unpaid:               'cancelled',
-        incomplete:           'cancelled',
-        incomplete_expired:   'expired',
-        paused:               'cancelled'
-      };
-      const newStatus = statusMap[stripeStatus] || 'expired';
-      const expiresAt = data.current_period_end
-        ? new Date(data.current_period_end * 1000)
-        : null;
-
-      client = await getClient();
-      await client.query(
-        `UPDATE user_subscriptions
-         SET status = $1, expires_at = $2, updated_at = NOW()
-         WHERE platform_subscription_id = $3 AND platform = 'stripe'`,
-        [newStatus, expiresAt, data.id]
-      );
-    }
-
-    else if (event.type === 'customer.subscription.deleted') {
-      const expiresAt = data.current_period_end
-        ? new Date(data.current_period_end * 1000)
-        : null;
-
-      client = await getClient();
-      await client.query(
-        `UPDATE user_subscriptions
-         SET status = 'expired', expires_at = $1, updated_at = NOW()
-         WHERE platform_subscription_id = $2 AND platform = 'stripe'`,
-        [expiresAt, data.id]
-      );
-    }
-
-    else if (event.type === 'payment_intent.succeeded') {
-      client = await getClient();
-      const orderResult = await client.query(
-        `SELECT o.*, ci.name AS item_name,
-                u.email AS seller_email, u.first_name AS seller_first
-         FROM orders o
-         JOIN collection_items ci ON o.collection_item_id = ci.id
-         JOIN users u ON o.seller_user_id = u.id
-         WHERE o.stripe_payment_intent_id = $1`,
-        [data.id]
-      );
-      if (orderResult.rowCount === 0) return;
-      const order = orderResult.rows[0];
-
-      await client.query(
-        `UPDATE orders SET status = 'paid', updated_at = NOW() WHERE id = $1`,
-        [order.id]
-      );
-      await client.query(
-        `UPDATE collection_items SET is_available = 0 WHERE id = $1`,
-        [order.collection_item_id]
-      );
-
-      const fmt = cents => `$${(cents / 100).toFixed(2)}`;
-      const addr = `${order.ship_to_address1}${order.ship_to_address2 ? ', ' + order.ship_to_address2 : ''}, ${order.ship_to_city}, ${order.ship_to_state} ${order.ship_to_zip}, ${order.ship_to_country}`;
-
-      await sendMail(
-        order.seller_email,
-        'noreply@prosaurus.com',
-        `New order: ${order.item_name}`,
-        `<p>Hi ${order.seller_first || 'there'},</p>
-         <p>You have a new order on Prosaurus!</p>
-         <table style="border-collapse:collapse;width:100%;max-width:480px">
-           <tr><td style="padding:6px 0;color:#666">Item</td><td><strong>${order.item_name}</strong></td></tr>
-           <tr><td style="padding:6px 0;color:#666">Amount</td><td>${fmt(order.item_price_cents)} + ${fmt(order.shipping_cost_cents)} shipping</td></tr>
-           <tr><td style="padding:6px 0;color:#666">Buyer</td><td>${order.buyer_name} &lt;${order.buyer_email}&gt;</td></tr>
-           <tr><td style="padding:6px 0;color:#666">Ship to</td><td>${order.ship_to_name}<br>${addr}</td></tr>
-         </table>
-         <p>Log in to <a href="https://www.prosaurus.com/collections/orders">Prosaurus</a> to manage this order.</p>
-         <p>— Prosaurus</p>`
-      );
-
-      await sendMail(
-        order.buyer_email,
-        'noreply@prosaurus.com',
-        `Order confirmed: ${order.item_name}`,
-        `<p>Hi ${order.buyer_name},</p>
-         <p>Your order has been confirmed. Here's a summary:</p>
-         <table style="border-collapse:collapse;width:100%;max-width:480px">
-           <tr><td style="padding:6px 0;color:#666">Item</td><td><strong>${order.item_name}</strong></td></tr>
-           <tr><td style="padding:6px 0;color:#666">Item price</td><td>${fmt(order.item_price_cents)}</td></tr>
-           <tr><td style="padding:6px 0;color:#666">Shipping</td><td>${fmt(order.shipping_cost_cents)}</td></tr>
-           <tr><td style="padding:6px 0;color:#666;font-weight:bold">Total</td><td><strong>${fmt(order.total_cents)}</strong></td></tr>
-           <tr><td style="padding:6px 0;color:#666">Ship to</td><td>${order.ship_to_name}<br>${addr}</td></tr>
-         </table>
-         <p>The seller will ship your item and you'll receive a tracking number by email.</p>
-         <p>— Prosaurus</p>`
-      );
-    }
-
-    else if (event.type === 'payment_intent.payment_failed') {
-      client = await getClient();
-      await client.query(
-        `UPDATE orders SET status = 'cancelled', updated_at = NOW()
-         WHERE stripe_payment_intent_id = $1 AND status = 'pending_payment'`,
-        [data.id]
-      );
-    }
-  } catch (err) {
-    console.error('Stripe webhook processing error:', err);
-  } finally {
-    if (client) client.release();
-  }
-}
-
 // ─── Square webhook (mounted in index.js before express.json) ───────────────
 //
 // Scope is narrower than the Stripe webhook was: CreatePayment completes synchronously
@@ -662,5 +480,4 @@ async function handleSquareWebhook(req, res) {
 }
 
 module.exports = router;
-module.exports.handleStripeWebhook = handleStripeWebhook;
 module.exports.handleSquareWebhook = handleSquareWebhook;

@@ -92,9 +92,6 @@ services:
       # S3 configuration
       S3_BUCKET_NAME: ${S3_BUCKET_NAME}
       S3_BUCKET_REGION: ${S3_BUCKET_REGION}
-      # Stripe (backend routes not decommissioned yet -- see docs/stripe-to-square-migration.md Phase 6)
-      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
       # Square
       SQUARE_ENVIRONMENT: ${SQUARE_ENVIRONMENT}
       SQUARE_APPLICATION_ID: ${SQUARE_APPLICATION_ID}

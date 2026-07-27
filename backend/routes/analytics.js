@@ -28,7 +28,7 @@ function resolveRange(key) {
 // Feature-usage registry. Each key is one "major feature" a member can use,
 // fired once per browser session per feature by the frontend router (see
 // frontend/src/router/index.js). `monetized: true` marks features that lead
-// to a payment flow (Stripe Connect marketplace sales, Prosaurus Pro), so
+// to a payment flow (Square Connect marketplace sales, Prosaurus Pro), so
 // they can be reported on separately from free-to-use tools.
 const FEATURES = {
   blog: { label: 'Blog', monetized: false },
@@ -527,7 +527,8 @@ router.get('/marketing-pages', authenticate, checkPermission('marketing_access')
 });
 
 const SUBSCRIPTION_PLATFORMS = {
-  stripe: 'Web (Stripe)',
+  square: 'Web (Square)',
+  stripe: 'Web (Stripe, legacy)',
   apple: 'Apple',
   google: 'Android',
 };
@@ -536,7 +537,7 @@ const SUBSCRIPTION_PLATFORMS = {
  * GET /api/analytics/paying-customers?range=today|7d|30d|year
  * Marketing-only. New paying customers over the given range (defaults to
  * 30d), broken out by monetization path:
- *  - Subscriptions (Stripe web, Apple, Google) -- counted by first-ever
+ *  - Subscriptions (Square web, legacy Stripe web, Apple, Google) -- counted by first-ever
  *    user_subscriptions.created_at falling in range. platform='promo' rows
  *    are comped accounts granted by an admin, not revenue, and excluded.
  *  - Storefront -- orders that reached a paid status in range. Buyers

@@ -309,10 +309,17 @@ scp -i ~/.ssh/Hostgator-Key-1.pem -r frontend/dist/* ec2-user@44.225.148.34:/var
 ## File Structure Notes
 - `backend/utilities/db.js` - Database connection wrapper (MySQL2 with pg-compatible interface)
 - `backend/utilities/redis.js` - Redis connection utility for Socket.IO adapter
+- `backend/utilities/square.js` - Square client (Pro subscriptions + storefront/Connect payments)
+- `backend/routes/billing.js` - Subscriptions, Square Connect OAuth, Square webhook
 - `backend/routes/` - API routes (authentication, user, group, permission)
 - `data/1-user-auth.sql` - MariaDB schema with seed data
 - `nginx-host-local.conf` - Host nginx config template
 - `.env.local` - Local environment variables (gitignored)
+
+## Payments
+Square is the payment processor (subscriptions and storefront/marketplace checkout) —
+migrated off Stripe in 2026-07. See `docs/stripe-to-square-migration.md` for the full
+migration history and current phase status.
 
 ## Known Issues / Notes
 - The db.js wrapper auto-converts PostgreSQL `$1, $2` placeholders to MySQL `?` placeholders

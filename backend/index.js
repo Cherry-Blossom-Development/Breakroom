@@ -100,7 +100,7 @@ const galleryRoutes = require('./routes/gallery');
 const collectionsRoutes = require('./routes/collections');
 const storefrontRoutes = require('./routes/storefront');
 const billingRoutes = require('./routes/billing');
-const { handleStripeWebhook, handleSquareWebhook } = require('./routes/billing');
+const { handleSquareWebhook } = require('./routes/billing');
 const supportRoutes = require('./routes/support');
 const featuresRoutes = require('./routes/features');
 const eulaRoutes = require('./routes/eula');
@@ -119,11 +119,8 @@ const { getS3Url } = require('./utilities/aws-s3');
 
 
 
-// Stripe webhook — must be registered BEFORE express.json() so the raw body
-// is available for signature verification
-app.post('/api/billing/webhook', express.raw({ type: 'application/json' }), handleStripeWebhook);
-
-// Square webhook — same raw-body requirement, for HMAC signature verification
+// Square webhook — must be registered BEFORE express.json() so the raw body
+// is available for HMAC signature verification
 app.post('/api/billing/webhook/square', express.raw({ type: 'application/json' }), handleSquareWebhook);
 
 // Middleware to parse incoming JSON data
