@@ -4,75 +4,64 @@
 `docs/stripe-to-square-migration.md` — this file just tells you where to pick up.
 
 ## Git state
-- Branch: `main`. Uncommitted changes present from this session's Phase 4 work —
-  not yet committed (user hasn't asked for a commit yet).
+- Branch: `main`, up to date with `origin/main`. Both this session's commits are
+  pushed: `3aecd44` (Phase 4 frontend) and `eea0396` (Phase 6 decommission).
+- No uncommitted changes from this session.
 
-## Phase 4 live browser verification — DONE (2026-07-27)
-All three flows click-tested end-to-end in an actual browser against the local dev
-stack, using Square sandbox test card `4111 1111 1111 1111`:
-- **Sessions paywall subscribe** — hit the free-tier limit (uploaded recordings via
-  Chrome automation + BreakTest's `test-recording.wav` fixture), paywall modal
-  triggered correctly, Square Web Payments SDK tokenization + `/subscribe` succeeded,
-  Pro activated immediately and lifted the limit.
-- **Collections payment-setup manage subscription** — update payment method (200) and
-  cancel subscription (200, correct "Pro access continues until end of billing period"
-  messaging) both verified via network tab.
-- **Storefront checkout** — built a real store/collection/$25 item ($5 shipping) on the
-  dev account, connected Square Connect using the platform's own sandbox default-account
-  token as a stand-in seller (same trick as the Phase 3 backend test — a genuine second
-  merchant needs live OAuth), then completed checkout via `POST .../items/:itemId/checkout`
-  through the public storefront UI. Payment succeeded, item flipped to sold, order
-  landed as PAID $30.00 in the seller's Orders page.
-- No console errors or unexpected network failures anywhere in this pass.
-- **All test data cleaned up afterward** (test store, collection, item, order, and the
-  stand-in `user_payment_connect` row) — account is back to its pre-test state. The
-  cancelled-subscription test was NOT reverted (that's real: Pro stays active on this
-  account until 2026-08-26 per Square's own proration, then reverts to free — this is
-  expected behavior being exercised, not leftover test debris).
+## What's done: Phases 0, 1, 2, 3, 4, 6 — all implemented and verified
+- **Phases 0-3**: Connect/OAuth, Subscriptions, Storefront checkout + webhooks — all
+  previously verified against real Square sandbox.
+- **Phase 4 (Frontend/Vue)**: implemented and live-tested end-to-end in an actual
+  browser this session — Sessions paywall subscribe, Collections payment-setup
+  update/cancel, and a full storefront purchase all passed using Square sandbox test
+  card `4111 1111 1111 1111`. Test data cleaned up afterward. Full detail in
+  `docs/stripe-to-square-migration.md`.
+- **Phase 6 (Decommission)**: done ahead of Phase 5 since it's pure code cleanup with
+  no customer-facing action. Removed the (already-dead) Stripe webhook/routes, the
+  `stripe` npm dependency, and dead `STRIPE_*` env vars. DB column drop was a no-op —
+  migration 044 had already renamed everything Stripe-specific to generic names.
+  Updated `CLAUDE.md` with a Payments section.
 
-## What's done: Phases 0, 1, 2, 3, 4 — all implemented
-- **Phases 0-3**: unchanged from before (Connect/OAuth, Subscriptions, Storefront
-  checkout + webhooks — all previously verified against real Square sandbox).
-- **Phase 4 (Frontend/Vue)**: implemented this session.
-  - New `frontend/src/utilities/squarePayments.js` — shared Web Payments SDK loader +
-    card tokenization helper.
-  - `PublicStorePage.vue` / `PublicCollectionPage.vue` — Square card tokenization
-    replaces Stripe Elements; checkout call moved to the renamed
-    `POST .../items/:itemId/checkout` (no more `/intent`), synchronous response goes
-    straight to the confirmation step.
-  - `CollectionsPaymentPage.vue` — Stripe Connect copy/branding replaced with Square;
-    subscribe is now a modal that tokenizes a card and posts `{ sourceId }`; "Manage
-    Subscription" is a new custom modal (Update payment method / Cancel subscription)
-    since Square has no hosted portal equivalent to Stripe's.
-  - `SessionsPaywallModal.vue` — found mid-session, not in the original Phase 4 file
-    list in the migration doc (it has its own independent `/subscribe` call for the
-    Sessions free-tier paywall). Converted the same way as CollectionsPaymentPage.
-  - Copy updated in `ProfileBilling.vue`, `MarketingPage.vue`,
-    `data/exploreFeatures.js`. `@stripe/stripe-js` removed from `package.json`.
-  - **Also fixed, found during local testing**: `docker-compose.local.yml` had never
-    actually been updated across Phases 0-3 to pass `SQUARE_*` / `TOKEN_ENCRYPTION_KEY`
-    backend vars or `VITE_SQUARE_*` frontend vars into the containers. Fixed. Also had
-    to recreate a stale `backend_node_modules` Docker volume that predated `square`
-    being added to `backend/package.json` (was causing a hard crash on container
-    start). `https://local.prosaurus.com` now boots cleanly with the full stack.
+## ⚠️ Phase 5 is blocked — production has never had working Square credentials
+Found while doing Phase 6: `docker-compose.ec2.yml` (the real production compose file)
+only ever wired up `STRIPE_*` env vars into the backend container, never `SQUARE_*` or
+`TOKEN_ENCRYPTION_KEY` — the same gap Phase 4 found and fixed in
+`docker-compose.local.yml`, just never caught on the production side. Fixed the compose
+file itself, but the local copy of `.env.production` (the file that gets scp'd to EC2 as
+`~/.env`) has **zero real Square values** — I left them as blank placeholders with an
+explanatory comment rather than inventing anything. Its old Stripe keys are gone too
+(dead code now, removed).
+
+**Before Phase 5 (cutover) can happen, someone needs to:**
+1. Create a real (non-sandbox) Square Application in the Square Developer Dashboard —
+   the current sandbox one only works in Square's test environment.
+2. Fill in `.env.production` on the dev machine: `SQUARE_ENVIRONMENT=production` plus
+   real `SQUARE_APPLICATION_ID` / `SQUARE_ACCESS_TOKEN` / `SQUARE_APPLICATION_SECRET` /
+   `SQUARE_LOCATION_ID` / `SQUARE_WEBHOOK_SIGNATURE_KEY` / `SQUARE_WEBHOOK_NOTIFICATION_URL`
+   / `SQUARE_PRO_PLAN_VARIATION_ID`, and a fresh `TOKEN_ENCRYPTION_KEY` (does not need to
+   match the sandbox one — generate a new 32-byte hex string).
+3. Re-run the Square Catalog Pro-plan setup script (`backend/scripts/square-setup-pro-plan.js`)
+   against production credentials to get a production `SQUARE_PRO_PLAN_VARIATION_ID`.
+4. Register the production webhook subscription in the Square Dashboard.
+5. Redeploy (scp the updated `docker-compose.ec2.yml` + `.env.production`, restart the
+   container).
+
+Only after that is production actually capable of taking a real Square payment — Phase
+5's subscriber/seller notification emails would otherwise point people at a cutover that
+can't process anything yet.
 
 ## What's NOT done yet
-- **Phase 5** — cutover execution (notify existing subscribers/sellers).
-- **Phase 6** — decommission Stripe code/columns/dependency (backend `stripe` npm
-  package, `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET`, Stripe webhook route, DB
-  columns still around from before the Phase 0 rename).
+- **Phase 5** — cutover execution (notify existing subscribers/sellers). Blocked on the
+  production credentials gap above.
 - **Phase 7** — mobile apps (Android/iPhone docs), low priority, do last.
 
-## Important local-only state (NOT in git — lives in `.env.local`)
-Same as before, plus:
-- `VITE_SQUARE_APPLICATION_ID` / `VITE_SQUARE_LOCATION_ID` added this session (mirror
-  the existing backend `SQUARE_APPLICATION_ID`/`SQUARE_LOCATION_ID` — safe to expose
-  client-side, same trust level as a Stripe publishable key).
-- `VITE_STRIPE_PUBLISHABLE_KEY` removed (dead, no code references it anymore).
-- Webhook signature key is still a placeholder — no real Square dashboard webhook
-  subscription registered yet (same note as before, unchanged this session).
+## Important local-only state (NOT in git — lives in `.env.local` / `.env.production`)
+- `.env.local`: `VITE_SQUARE_APPLICATION_ID` / `VITE_SQUARE_LOCATION_ID` present, old
+  Stripe keys removed. Webhook signature key is still a sandbox placeholder — no real
+  Square dashboard webhook subscription registered yet for local/sandbox either.
+- `.env.production`: old Stripe keys removed; `SQUARE_*` keys present but blank —
+  see the Phase 5 blocker section above.
 
 ## Next action when resuming
-Phase 4 is fully verified now. Decide whether to move into Phase 5 (cutover) or Phase 6
-(decommission) next — or something else. Read `docs/stripe-to-square-migration.md` in
-full for complete context.
+Either work the Phase 5 production-credentials checklist above, or pick something else.
+Read `docs/stripe-to-square-migration.md` in full for complete context.
