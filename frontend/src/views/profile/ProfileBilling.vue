@@ -43,7 +43,7 @@
           <li><span class="check">✓</span> Help desk access</li>
           <li class="divider-item"></li>
           <li><span class="x">✗</span> Art sales incur a 5% Prosaurus fee<br>
-              <span class="sub-note">on top of standard Stripe processing fees</span></li>
+              <span class="sub-note">on top of standard Square processing fees</span></li>
         </ul>
       </div>
 
@@ -79,7 +79,7 @@
       <h3>How art sale fees work</h3>
       <p>
         When a buyer purchases artwork through your storefront, payment is processed by
-        <strong>Stripe</strong>. Stripe always charges their standard processing fee —
+        <strong>Square</strong>. Square always charges their standard processing fee —
         this is not a Prosaurus fee and cannot be waived.
       </p>
 
@@ -87,7 +87,7 @@
         <div class="fee-example">
           <div class="example-label">Free tier — $10 sale</div>
           <div class="fee-row">
-            <span>Stripe processing</span>
+            <span>Square processing</span>
             <span class="fee-amt">−$0.59 <span class="fee-note">(2.9% + $0.30)</span></span>
           </div>
           <div class="fee-row">
@@ -103,7 +103,7 @@
         <div class="fee-example pro-example">
           <div class="example-label">Pro tier — $10 sale</div>
           <div class="fee-row">
-            <span>Stripe processing</span>
+            <span>Square processing</span>
             <span class="fee-amt">−$0.59 <span class="fee-note">(2.9% + $0.30)</span></span>
           </div>
           <div class="fee-row">

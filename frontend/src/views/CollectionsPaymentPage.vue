@@ -6,8 +6,8 @@
         <RouterLink to="/profile/billing" class="back-link">← Billing</RouterLink>
         <h1>Payment Setup</h1>
         <p class="page-desc">
-          Connect a Stripe account to receive payments from your store sales.
-          Stripe handles all payment processing, security, and payouts.
+          Connect a Square account to receive payments from your store sales.
+          Square handles all payment processing, security, and payouts.
         </p>
       </div>
     </div>
@@ -41,28 +41,26 @@
               Complimentary Pro account
             </template>
             <template v-else-if="!plan.subscribed">
-              Upgrade to Pro to keep 100% of your sale price (minus Stripe's processing fee)
+              Upgrade to Pro to keep 100% of your sale price (minus Square's processing fee)
             </template>
           </div>
         </div>
         <div class="plan-right">
-          <!-- Web subscriber: manage via Stripe portal -->
+          <!-- Web subscriber: manage via custom Cancel/Update endpoints -->
           <button
-            v-if="plan.subscribed && plan.platform === 'stripe'"
+            v-if="plan.subscribed && plan.platform === 'square'"
             class="btn-outline"
-            :disabled="portaling"
-            @click="openPortal"
+            @click="openManageModal"
           >
-            {{ portaling ? 'Opening…' : 'Manage Subscription' }}
+            Manage Subscription
           </button>
           <!-- Not subscribed: upgrade via web -->
           <button
             v-else-if="!plan.subscribed"
             class="btn-pro"
-            :disabled="subscribing"
-            @click="startSubscribe"
+            @click="openSubscribeModal"
           >
-            {{ subscribing ? 'Redirecting…' : 'Upgrade to Pro — $3.99/mo' }}
+            Upgrade to Pro — $3.99/mo
           </button>
         </div>
       </section>
@@ -71,7 +69,7 @@
         You're now on Prosaurus Pro. Your 0% fee rate is active.
       </p>
 
-      <!-- ── Stripe Connect ── -->
+      <!-- ── Square Connect ── -->
       <h2 class="section-heading">Payout Account</h2>
 
       <!-- Not connected -->
@@ -85,16 +83,13 @@
         <div class="status-body">
           <div class="status-title">No payout account connected</div>
           <div class="status-desc">
-            Connect a Stripe account to receive payouts. You'll be taken to Stripe
+            Connect a Square account to receive payouts. You'll be taken to Square
             to create or link an account — it only takes a few minutes.
           </div>
           <div v-if="connectError" class="connect-error">{{ connectError }}</div>
         </div>
-        <button class="btn-stripe" :disabled="starting" @click="startConnect">
-          <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18" style="flex-shrink:0">
-            <path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.591-7.305z"/>
-          </svg>
-          {{ starting ? 'Redirecting…' : 'Connect with Stripe' }}
+        <button class="btn-square" :disabled="starting" @click="startConnect">
+          {{ starting ? 'Redirecting…' : 'Connect with Square' }}
         </button>
       </div>
 
@@ -110,13 +105,13 @@
         <div class="status-body">
           <div class="status-title">Setup incomplete</div>
           <div class="status-desc">
-            Your Stripe account has been created but you haven't finished the onboarding steps yet.
+            Your Square account has been created but you haven't finished the onboarding steps yet.
             Complete setup to start accepting payments.
           </div>
           <div v-if="connectError" class="connect-error">{{ connectError }}</div>
         </div>
-        <button class="btn-stripe" :disabled="starting" @click="startConnect">
-          {{ starting ? 'Redirecting…' : 'Continue Stripe Setup' }}
+        <button class="btn-square" :disabled="starting" @click="startConnect">
+          {{ starting ? 'Redirecting…' : 'Continue Square Setup' }}
         </button>
       </div>
 
@@ -128,18 +123,18 @@
           </svg>
         </div>
         <div class="status-body">
-          <div class="status-title">Stripe account connected</div>
+          <div class="status-title">Square account connected</div>
           <div class="status-desc">
             Your account is set up and ready to accept payments. Payouts will go directly
-            to your bank account on Stripe's schedule.
+            to your bank account on Square's schedule.
           </div>
         </div>
         <a
-          href="https://dashboard.stripe.com/express"
+          href="https://squareup.com/dashboard"
           target="_blank"
           rel="noopener"
           class="btn-outline"
-        >Open Stripe Dashboard ↗</a>
+        >Open Square Dashboard ↗</a>
       </div>
 
       <!-- ── How it works ── -->
@@ -149,8 +144,8 @@
           <div class="info-step">
             <div class="step-num">1</div>
             <div class="step-body">
-              <div class="step-title">Connect your Stripe payout account</div>
-              <div class="step-desc">Create a new Stripe account or link an existing one. Stripe collects your business details and bank info for payouts.</div>
+              <div class="step-title">Connect your Square payout account</div>
+              <div class="step-desc">Create a new Square account or link an existing one. Square collects your business details and bank info for payouts.</div>
             </div>
           </div>
           <div class="info-step">
@@ -164,7 +159,7 @@
             <div class="step-num">3</div>
             <div class="step-body">
               <div class="step-title">Customers buy from your store</div>
-              <div class="step-desc">Stripe processes payments securely. Pro members keep 100% of their sale price (minus Stripe's ~2.9% + $0.30 processing fee). Free members also have a 5% platform fee deducted.</div>
+              <div class="step-desc">Square processes payments securely. Pro members keep 100% of their sale price (minus Square's ~2.9% + $0.30 processing fee). Free members also have a 5% platform fee deducted.</div>
             </div>
           </div>
         </div>
@@ -172,13 +167,100 @@
 
     </template>
 
+    <!-- ── Subscribe modal ── -->
+    <Teleport to="body">
+      <div v-if="subscribeModal.open" class="modal-backdrop" @click.self="closeSubscribeModal">
+        <div class="modal">
+          <div class="modal-header">
+            <h2 class="modal-title">Upgrade to Pro</h2>
+            <button class="modal-close" @click="closeSubscribeModal">✕</button>
+          </div>
+          <div class="modal-body">
+            <p class="modal-sub">$3.99/mo, cancel anytime.</p>
+            <div id="subscribe-card-element" class="card-mount"></div>
+            <p v-if="subscribeModal.error" class="form-error">{{ subscribeModal.error }}</p>
+          </div>
+          <div class="modal-footer">
+            <button class="btn-secondary" @click="closeSubscribeModal">Cancel</button>
+            <button class="btn-pro" :disabled="subscribeModal.loading" @click="submitSubscribe">
+              {{ subscribeModal.loading ? 'Subscribing…' : 'Subscribe' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- ── Manage subscription modal ── -->
+    <Teleport to="body">
+      <div v-if="manageModal.open" class="modal-backdrop" @click.self="closeManageModal">
+        <div class="modal">
+          <div class="modal-header">
+            <h2 class="modal-title">Manage Subscription</h2>
+            <button class="modal-close" @click="closeManageModal">✕</button>
+          </div>
+
+          <template v-if="manageModal.mode === 'menu'">
+            <div class="modal-body">
+              <p v-if="manageModal.error" class="form-error">{{ manageModal.error }}</p>
+              <div class="manage-options">
+                <button class="btn-outline" @click="startUpdateMode">Update payment method</button>
+                <button class="btn-danger-outline" @click="manageModal.mode = 'cancel'">Cancel subscription</button>
+              </div>
+            </div>
+          </template>
+
+          <template v-else-if="manageModal.mode === 'update'">
+            <div class="modal-body">
+              <p class="modal-sub">Enter a new card to charge for future renewals.</p>
+              <div id="manage-card-element" class="card-mount"></div>
+              <p v-if="manageModal.error" class="form-error">{{ manageModal.error }}</p>
+            </div>
+            <div class="modal-footer">
+              <button class="btn-secondary" @click="backToMenu">← Back</button>
+              <button class="btn-pro" :disabled="manageModal.loading" @click="submitUpdateCard">
+                {{ manageModal.loading ? 'Saving…' : 'Save Card' }}
+              </button>
+            </div>
+          </template>
+
+          <template v-else-if="manageModal.mode === 'cancel'">
+            <div class="modal-body">
+              <p>Your Pro benefits stay active until the end of the current billing period. You won't be charged again after that.</p>
+              <p v-if="manageModal.error" class="form-error">{{ manageModal.error }}</p>
+            </div>
+            <div class="modal-footer">
+              <button class="btn-secondary" @click="manageModal.mode = 'menu'; manageModal.error = ''">← Back</button>
+              <button class="btn-danger" :disabled="manageModal.loading" @click="submitCancel">
+                {{ manageModal.loading ? 'Cancelling…' : 'Confirm Cancellation' }}
+              </button>
+            </div>
+          </template>
+
+          <template v-else-if="manageModal.mode === 'cancelled'">
+            <div class="modal-body confirmation">
+              <div class="confirm-icon">✓</div>
+              <p v-if="manageModal.expiresAt">
+                Your subscription is cancelled. Pro access continues until
+                <strong>{{ new Date(manageModal.expiresAt).toLocaleDateString() }}</strong>.
+              </p>
+              <p v-else>Your subscription has been cancelled.</p>
+            </div>
+            <div class="modal-footer">
+              <button class="btn-primary" @click="closeManageModal">Done</button>
+            </div>
+          </template>
+        </div>
+      </div>
+    </Teleport>
+
   </main>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, nextTick, onMounted } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { authFetch } from '@/utilities/authFetch'
+import { mountSquareCard, tokenizeCard } from '@/utilities/squarePayments'
 
 const route = useRoute()
 const loading = ref(true)
@@ -186,12 +268,13 @@ const status = ref('not_connected')
 const starting = ref(false)
 
 const plan = ref({ subscribed: false, platform: null, fee_percent: 5 })
-const subscribing = ref(false)
-const portaling = ref(false)
 const subscribeSuccess = ref(false)
 const connectError = ref('')
 
-const navFrom = computed(() => route.query.from || '')
+const subscribeModal = ref({ open: false, loading: false, error: '' })
+const manageModal = ref({ open: false, mode: 'menu', loading: false, error: '', expiresAt: null })
+let subscribeCardHandle = null
+let manageCardHandle = null
 
 async function fetchStatus() {
   try {
@@ -239,47 +322,128 @@ async function startConnect() {
   }
 }
 
-async function startSubscribe() {
-  if (subscribing.value) return
-  subscribing.value = true
+// ── Subscribe modal ──────────────────────────────────────────────────────────
+async function openSubscribeModal() {
+  subscribeModal.value = { open: true, loading: false, error: '' }
+  await nextTick()
   try {
-    const res = await authFetch('/api/billing/subscribe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: navFrom.value || undefined }),
-    })
-    if (res.ok) {
-      const data = await res.json()
-      if (data.already_subscribed) {
-        await fetchPlan()
-      } else if (data.url) {
-        window.location.href = data.url
-        return
-      }
-    }
+    subscribeCardHandle = await mountSquareCard('subscribe-card-element')
   } catch (err) {
-    console.error('Failed to start subscribe:', err)
-  } finally {
-    subscribing.value = false
+    subscribeModal.value.error = err.message || 'Payment is not configured.'
   }
 }
 
-async function openPortal() {
-  if (portaling.value) return
-  portaling.value = true
+function closeSubscribeModal() {
+  subscribeModal.value.open = false
+  if (subscribeCardHandle) {
+    subscribeCardHandle.destroy()
+    subscribeCardHandle = null
+  }
+}
+
+async function submitSubscribe() {
+  if (subscribeModal.value.loading || !subscribeCardHandle) return
+  subscribeModal.value.loading = true
+  subscribeModal.value.error = ''
   try {
-    const res = await authFetch('/api/billing/portal', { method: 'POST' })
+    const sourceId = await tokenizeCard(subscribeCardHandle.card)
+    const res = await authFetch('/api/billing/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceId }),
+    })
     if (res.ok) {
-      const data = await res.json()
-      if (data.url) {
-        window.location.href = data.url
-        return
-      }
+      closeSubscribeModal()
+      subscribeSuccess.value = true
+      await fetchPlan()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      subscribeModal.value.error = data.message || 'Something went wrong. Please try again.'
     }
   } catch (err) {
-    console.error('Failed to open portal:', err)
+    subscribeModal.value.error = err.message || 'Network error. Please try again.'
   } finally {
-    portaling.value = false
+    subscribeModal.value.loading = false
+  }
+}
+
+// ── Manage subscription modal (Square has no hosted portal) ──────────────────
+function openManageModal() {
+  manageModal.value = { open: true, mode: 'menu', loading: false, error: '', expiresAt: null }
+}
+
+function closeManageModal() {
+  manageModal.value.open = false
+  if (manageCardHandle) {
+    manageCardHandle.destroy()
+    manageCardHandle = null
+  }
+}
+
+async function submitCancel() {
+  if (manageModal.value.loading) return
+  manageModal.value.loading = true
+  manageModal.value.error = ''
+  try {
+    const res = await authFetch('/api/billing/cancel', { method: 'POST' })
+    if (res.ok) {
+      const data = await res.json()
+      manageModal.value.expiresAt = data.expires_at
+      manageModal.value.mode = 'cancelled'
+      await fetchPlan()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      manageModal.value.error = data.message || 'Something went wrong. Please try again.'
+    }
+  } catch {
+    manageModal.value.error = 'Network error. Please try again.'
+  } finally {
+    manageModal.value.loading = false
+  }
+}
+
+function backToMenu() {
+  if (manageCardHandle) {
+    manageCardHandle.destroy()
+    manageCardHandle = null
+  }
+  manageModal.value.mode = 'menu'
+  manageModal.value.error = ''
+}
+
+async function startUpdateMode() {
+  manageModal.value.mode = 'update'
+  manageModal.value.error = ''
+  await nextTick()
+  try {
+    manageCardHandle = await mountSquareCard('manage-card-element')
+  } catch (err) {
+    manageModal.value.error = err.message || 'Payment is not configured.'
+  }
+}
+
+async function submitUpdateCard() {
+  if (manageModal.value.loading || !manageCardHandle) return
+
+  manageModal.value.loading = true
+  manageModal.value.error = ''
+  try {
+    const sourceId = await tokenizeCard(manageCardHandle.card)
+    const res = await authFetch('/api/billing/update-payment-method', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceId }),
+    })
+    if (res.ok) {
+      closeManageModal()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      manageModal.value.error = data.message || 'Something went wrong. Please try again.'
+    }
+  } catch (err) {
+    manageModal.value.error = err.message || 'Network error. Please try again.'
+  } finally {
+    manageModal.value.loading = false
   }
 }
 
@@ -287,10 +451,11 @@ onMounted(async () => {
   await Promise.all([fetchStatus(), fetchPlan()])
   loading.value = false
 
-  // Returning from Stripe subscription checkout
-  if (route.query.stripe === 'subscribed') {
-    subscribeSuccess.value = true
-    await fetchPlan()
+  // Returning from the Square OAuth Connect redirect
+  if (route.query.square === 'denied') {
+    connectError.value = 'Connection was cancelled.'
+  } else if (route.query.square === 'error') {
+    connectError.value = 'Something went wrong connecting to Square. Please try again.'
   }
 })
 </script>
@@ -470,11 +635,11 @@ onMounted(async () => {
 }
 
 /* ── Buttons ── */
-.btn-stripe {
+.btn-square {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #635bff;
+  background: #000;
   color: #fff;
   border: none;
   padding: 11px 22px;
@@ -487,8 +652,8 @@ onMounted(async () => {
   flex-shrink: 0;
 }
 
-.btn-stripe:hover:not(:disabled) { opacity: 0.88; }
-.btn-stripe:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-square:hover:not(:disabled) { opacity: 0.88; }
+.btn-square:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .btn-pro {
   background: #6b46c1;
@@ -580,4 +745,161 @@ onMounted(async () => {
 @media (max-width: 600px) {
   .status-card, .plan-card { flex-direction: column; align-items: flex-start; }
 }
+
+/* ── Modals ── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.modal {
+  background: var(--color-background-card, #fff);
+  border-radius: 14px;
+  width: 100%;
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modal-title { font-size: 1.1rem; font-weight: 700; color: var(--color-text); margin: 0; }
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+.modal-close:hover { color: var(--color-text); }
+
+.modal-body { padding: 20px; }
+
+.modal-sub {
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+  margin: 0 0 14px;
+}
+
+.card-mount {
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  padding: 12px;
+  background: var(--color-background);
+  min-height: 40px;
+}
+
+.form-error {
+  color: var(--color-error, #e53935);
+  font-size: 0.85rem;
+  margin: 10px 0 0;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--color-border);
+}
+
+.manage-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.manage-options button { width: 100%; text-align: center; }
+
+.btn-primary {
+  background: var(--color-link);
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  padding: 10px 20px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.btn-primary:hover:not(:disabled) { opacity: 0.88; }
+
+.btn-secondary {
+  background: var(--color-background-soft, rgba(0,0,0,0.04));
+  color: var(--color-text);
+  border: none;
+  border-radius: 7px;
+  padding: 10px 18px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-secondary:hover:not(:disabled) { background: var(--color-background-soft-hover, rgba(0,0,0,0.08)); }
+.btn-secondary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-danger {
+  background: #e53935;
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  padding: 10px 18px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.btn-danger:hover:not(:disabled) { opacity: 0.88; }
+.btn-danger:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.btn-danger-outline {
+  background: transparent;
+  color: #e53935;
+  border: 1px solid #e53935;
+  border-radius: 7px;
+  padding: 10px 18px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-danger-outline:hover { background: rgba(229, 57, 53, 0.08); }
+
+.confirmation {
+  text-align: center;
+  padding: 20px 10px;
+}
+
+.confirm-icon {
+  width: 48px;
+  height: 48px;
+  background: rgba(47, 133, 90, 0.15);
+  color: #2f855a;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  margin: 0 auto 16px;
+}
+
+.confirmation p { color: var(--color-text); line-height: 1.6; margin: 0; font-size: 0.92rem; }
 </style>

@@ -90,10 +90,10 @@ export const exploreFeatures = {
     label: 'Artist Showcase',
     icon: '🛍️',
     tagline: 'Sell your original artwork and prints',
-    description: "Artist Showcase turns your gallery into a real storefront. List original pieces and prints for sale, connect a Stripe account to get paid directly, and Prosaurus Pro subscribers keep 100% of the sale price minus standard payment processing.",
+    description: "Artist Showcase turns your gallery into a real storefront. List original pieces and prints for sale, connect a Square account to get paid directly, and Prosaurus Pro subscribers keep 100% of the sale price minus standard payment processing.",
     highlights: [
       'List and sell original artwork and prints directly through Prosaurus',
-      'Payments handled securely by Stripe, paid straight to your bank account',
+      'Payments handled securely by Square, paid straight to your bank account',
       'Free tier: 5% platform fee per sale — Pro: 0% platform fee',
     ],
     monetized: true,

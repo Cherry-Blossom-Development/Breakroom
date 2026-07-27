@@ -235,14 +235,14 @@
                 <strong>Ships to:</strong> {{ form.ship_to_name }}, {{ form.ship_to_address1 }}{{ form.ship_to_address2 ? ', ' + form.ship_to_address2 : '' }}, {{ form.ship_to_city }}, {{ form.ship_to_state }} {{ form.ship_to_zip }}
               </div>
 
-              <div class="stripe-card-label">Card details</div>
-              <div id="stripe-card-element" class="stripe-card-mount"></div>
-              <div v-if="stripeError" class="form-error">{{ stripeError }}</div>
+              <div class="square-card-label">Card details</div>
+              <div id="square-card-element" class="square-card-mount"></div>
+              <div v-if="squareError" class="form-error">{{ squareError }}</div>
               <p v-if="modal.error" class="form-error">{{ modal.error }}</p>
 
-              <p class="stripe-notice">
+              <p class="square-notice">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></svg>
-                Payments processed securely by Stripe
+                Payments processed securely by Square
               </p>
             </div>
 
@@ -321,6 +321,7 @@
 <script setup>
 import { ref, computed, reactive, nextTick, onMounted } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
+import { mountSquareCard, tokenizeCard } from '@/utilities/squarePayments'
 
 const props = defineProps({
   resolvedStoreUrl: { type: String, default: null },
@@ -444,9 +445,8 @@ const form = reactive({
   ship_to_country: 'US',
 })
 
-const stripeError = ref(null)
-let stripe = null
-let cardElement = null
+const squareError = ref(null)
+let cardHandle = null
 
 function openPurchase(item) {
   modal.item = item
@@ -459,10 +459,10 @@ function openPurchase(item) {
 
 function closeModal() {
   modal.open = false
-  stripeError.value = null
-  if (cardElement) {
-    cardElement.destroy()
-    cardElement = null
+  squareError.value = null
+  if (cardHandle) {
+    cardHandle.destroy()
+    cardHandle = null
   }
 }
 
@@ -470,6 +470,9 @@ function syncShipName() {
   if (!form.ship_to_name) form.ship_to_name = form.buyer_name
 }
 
+// Step 1 just validates shipping info and moves to the payment step -- the checkout
+// endpoint itself isn't called until submitPayment tokenizes the card, since Square's
+// CreatePayment (unlike Stripe's PaymentIntent) completes the charge in one shot.
 async function proceedToPayment() {
   modal.error = null
   if (!form.buyer_name || !form.buyer_email || !form.ship_to_name ||
@@ -478,75 +481,52 @@ async function proceedToPayment() {
     return
   }
 
+  modal.intentData = {
+    item_price_cents: modal.item.price_cents,
+    shipping_cost_cents: modal.item.shipping_cost_cents || 0,
+    total_cents: modal.item.price_cents + (modal.item.shipping_cost_cents || 0),
+  }
+  modal.step = 2
+  await nextTick()
+  try {
+    cardHandle = await mountSquareCard('square-card-element')
+  } catch (err) {
+    modal.error = err.message || 'Payment is not configured.'
+  }
+}
+
+async function submitPayment() {
+  if (!cardHandle) return
+  modal.error = null
+  squareError.value = null
   modal.loading = true
   try {
+    let sourceId
+    try {
+      sourceId = await tokenizeCard(cardHandle.card)
+    } catch (err) {
+      squareError.value = err.message
+      return
+    }
+
     const res = await fetch(
-      `/api/storefront/public/${storeUrl.value}/items/${modal.item.id}/checkout/intent`,
+      `/api/storefront/public/${storeUrl.value}/items/${modal.item.id}/checkout`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form }),
+        body: JSON.stringify({ source_id: sourceId, ...form }),
       }
     )
     const body = await res.json()
     if (!res.ok) {
-      modal.error = body.message || 'Could not start checkout.'
+      modal.error = body.message || 'Payment failed. Please try again.'
       return
     }
-
-    modal.intentData = body
-    modal.step = 2
-    await nextTick()
-    await mountStripeCard(body.client_secret)
-  } catch {
-    modal.error = 'Network error. Please try again.'
-  } finally {
-    modal.loading = false
-  }
-}
-
-async function mountStripeCard() {
-  const key = import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY
-  if (!key) {
-    modal.error = 'Payment is not configured.'
-    return
-  }
-  const { loadStripe } = await import('@stripe/stripe-js')
-  stripe = await loadStripe(key)
-  const elements = stripe.elements()
-  cardElement = elements.create('card', {
-    style: {
-      base: { fontSize: '15px', color: '#222', '::placeholder': { color: '#aaa' } },
-      invalid: { color: '#e53935' },
-    },
-  })
-  cardElement.mount('#stripe-card-element')
-  cardElement.on('change', (e) => {
-    stripeError.value = e.error ? e.error.message : null
-  })
-}
-
-async function submitPayment() {
-  if (!stripe || !cardElement) return
-  modal.error = null
-  stripeError.value = null
-  modal.loading = true
-  try {
-    const { error } = await stripe.confirmCardPayment(modal.intentData.client_secret, {
-      payment_method: {
-        card: cardElement,
-        billing_details: { name: form.buyer_name, email: form.buyer_email },
-      },
-    })
-    if (error) {
-      stripeError.value = error.message
-    } else {
-      cardElement.destroy()
-      cardElement = null
-      modal.step = 3
-      const soldIdx = collectionItems.value.findIndex(i => i.id === modal.item.id)
-      if (soldIdx !== -1) collectionItems.value[soldIdx] = { ...collectionItems.value[soldIdx], is_available: 0 }
-    }
+    cardHandle.destroy()
+    cardHandle = null
+    modal.step = 3
+    const soldIdx = collectionItems.value.findIndex(i => i.id === modal.item.id)
+    if (soldIdx !== -1) collectionItems.value[soldIdx] = { ...collectionItems.value[soldIdx], is_available: 0 }
   } catch {
     modal.error = 'Payment failed. Please try again.'
   } finally {
@@ -1088,21 +1068,21 @@ async function submitContact() {
   line-height: 1.5;
 }
 
-.stripe-card-label {
+.square-card-label {
   font-size: 0.82rem;
   font-weight: 600;
   color: #555;
   margin-bottom: 8px;
 }
 
-.stripe-card-mount {
+.square-card-mount {
   border: 1px solid #ddd;
   border-radius: 7px;
   padding: 12px;
   background: #fff;
 }
 
-.stripe-notice {
+.square-notice {
   display: flex;
   align-items: center;
   gap: 5px;

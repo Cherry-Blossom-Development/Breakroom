@@ -1,71 +1,112 @@
 <template>
   <div v-if="visible" class="modal-overlay" @click.self="$emit('close')">
     <div class="modal">
-      <div class="pro-badge">Pro</div>
-      <h2>Upgrade to Prosaurus Pro</h2>
-      <p class="modal-desc">{{ message || "You've reached the free-tier limit for this session type." }}</p>
+      <template v-if="step === 'offer'">
+        <div class="pro-badge">Pro</div>
+        <h2>Upgrade to Prosaurus Pro</h2>
+        <p class="modal-desc">{{ message || "You've reached the free-tier limit for this session type." }}</p>
 
-      <ul class="feature-list">
-        <li><span class="check">✓</span> Unlimited band &amp; individual sessions</li>
-        <li><span class="check">✓</span> Extra storage on Sessions</li>
-        <li><span class="check">✓</span> No Prosaurus platform fee on art sales</li>
-      </ul>
+        <ul class="feature-list">
+          <li><span class="check">✓</span> Unlimited band &amp; individual sessions</li>
+          <li><span class="check">✓</span> Extra storage on Sessions</li>
+          <li><span class="check">✓</span> No Prosaurus platform fee on art sales</li>
+        </ul>
 
-      <p v-if="error" class="error">{{ error }}</p>
+        <p v-if="error" class="error">{{ error }}</p>
 
-      <div class="modal-actions">
-        <button type="button" class="btn-pro" :disabled="subscribing" @click="subscribe">
-          {{ subscribing ? 'Redirecting…' : 'Upgrade to Pro — $3.99/mo' }}
-        </button>
-        <button type="button" class="btn-secondary" @click="$emit('close')">Not now</button>
-      </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-pro" @click="step = 'card'">
+            Upgrade to Pro — $3.99/mo
+          </button>
+          <button type="button" class="btn-secondary" @click="$emit('close')">Not now</button>
+        </div>
+      </template>
+
+      <template v-else>
+        <h2>Card details</h2>
+        <p class="modal-desc">Prosaurus Pro — $3.99/mo, cancel anytime.</p>
+
+        <div id="paywall-card-element" class="card-mount"></div>
+        <p v-if="error" class="error">{{ error }}</p>
+
+        <div class="modal-actions">
+          <button type="button" class="btn-pro" :disabled="subscribing" @click="subscribe">
+            {{ subscribing ? 'Subscribing…' : 'Subscribe' }}
+          </button>
+          <button type="button" class="btn-secondary" :disabled="subscribing" @click="step = 'offer'">Back</button>
+        </div>
+      </template>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { authFetch } from '@/utilities/authFetch'
+import { mountSquareCard, tokenizeCard } from '@/utilities/squarePayments'
 
 const props = defineProps({
   visible: Boolean,
   message: { type: String, default: '' }
 })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'subscribed'])
 
+const step = ref('offer')
 const subscribing = ref(false)
 const error = ref('')
+let cardHandle = null
 
 watch(() => props.visible, (val) => {
   if (val) {
+    step.value = 'offer'
     error.value = ''
     subscribing.value = false
+  } else {
+    teardownCard()
   }
 })
 
+watch(step, async (val) => {
+  if (val === 'card') {
+    error.value = ''
+    await nextTick()
+    try {
+      cardHandle = await mountSquareCard('paywall-card-element')
+    } catch (err) {
+      error.value = err.message || 'Payment is not configured.'
+    }
+  } else {
+    teardownCard()
+  }
+})
+
+function teardownCard() {
+  if (cardHandle) {
+    cardHandle.destroy()
+    cardHandle = null
+  }
+}
+
 async function subscribe() {
-  if (subscribing.value) return
+  if (subscribing.value || !cardHandle) return
   subscribing.value = true
   error.value = ''
   try {
+    const sourceId = await tokenizeCard(cardHandle.card)
     const res = await authFetch('/api/billing/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ returnTo: '/sessions' })
+      body: JSON.stringify({ sourceId })
     })
     if (res.ok) {
-      const data = await res.json()
-      if (data.url) {
-        window.location.href = data.url
-        return
-      }
-      // Already subscribed (e.g. re-opened after subscribing elsewhere) — just close.
+      emit('subscribed')
       emit('close')
     } else {
-      error.value = 'Something went wrong. Please try again.'
+      const data = await res.json().catch(() => ({}))
+      error.value = data.message || 'Something went wrong. Please try again.'
     }
-  } catch {
-    error.value = 'Network error. Please try again.'
+  } catch (err) {
+    error.value = err.message || 'Network error. Please try again.'
   } finally {
     subscribing.value = false
   }
@@ -128,6 +169,14 @@ async function subscribe() {
 .check {
   color: #4caf50;
   flex-shrink: 0;
+}
+
+.card-mount {
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  padding: 12px;
+  background: var(--color-background);
+  min-height: 40px;
 }
 
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }

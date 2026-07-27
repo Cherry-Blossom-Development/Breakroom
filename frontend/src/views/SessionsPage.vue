@@ -1,13 +1,10 @@
 <script setup>
 import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
-import { useRoute } from 'vue-router'
 import draggable from 'vuedraggable'
 import { sessions } from '@/stores/sessions'
 import { authFetch } from '@/utilities/authFetch'
 import { buildDevicePayload } from '@/utilities/deviceId'
 import SessionsPaywallModal from '@/components/SessionsPaywallModal.vue'
-
-const route = useRoute()
 
 // --- Pro paywall (free-tier session limit) ---
 const paywallVisible = ref(false)
@@ -1332,11 +1329,6 @@ onMounted(async () => {
   document.addEventListener('click', closeRatingPopup)
   await Promise.all([loadBands(), loadInstruments(), loadBandMemberSessions()])
   await refreshMicDevices()
-
-  // Returning from Stripe subscription checkout (see SessionsPaywallModal)
-  if (route.query.stripe === 'subscribed') {
-    subscribedBanner.value = true
-  }
 })
 </script>
 
@@ -2558,6 +2550,7 @@ onMounted(async () => {
       :visible="paywallVisible"
       :message="paywallMessage"
       @close="paywallVisible = false"
+      @subscribed="subscribedBanner = true"
     />
 
   </div>

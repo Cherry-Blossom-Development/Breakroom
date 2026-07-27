@@ -370,13 +370,66 @@ disputes/future async events, not the initial success path.
       parity.
 
 ### Phase 4 — Frontend (Vue)
-- [ ] Swap `PublicStorePage.vue` and `PublicCollectionPage.vue` embedded Stripe Elements
-      card form for Square Web Payments SDK
-- [ ] Update `CollectionsPaymentPage.vue` to call new backend endpoints and repoint
-      redirect URLs (onboarding, subscribe, manage-subscription)
-- [ ] Update copy in `ProfileBilling.vue`, `MarketingPage.vue`, `data/exploreFeatures.js`
-      (currently says "Stripe" / mentions Stripe's fee %)
-- [ ] Remove `@stripe/stripe-js` once fully cut over
+- [x] Swap `PublicStorePage.vue` and `PublicCollectionPage.vue` embedded Stripe Elements
+      card form for Square Web Payments SDK — new shared helper
+      `frontend/src/utilities/squarePayments.js` (loads the SDK script, sandbox vs
+      production picked off the `sandbox-` app-id prefix so no separate env var is
+      needed; `mountSquareCard()` / `tokenizeCard()`). Both pages' checkout endpoint
+      call moved from `.../checkout/intent` to the renamed `.../checkout`, sending
+      `{ source_id, ...shipping fields }`; since `CreatePayment` completes
+      synchronously there's no separate confirm step anymore — a successful response
+      goes straight to the confirmation screen.
+- [x] Update `CollectionsPaymentPage.vue` to call new backend endpoints and repoint
+      redirect URLs — Connect section rebranded Stripe→Square (no logo asset available,
+      dropped the SVG mark, kept a plain black button). Subscribe is now a modal that
+      tokenizes a card client-side and posts `{ sourceId }` to `/subscribe` instead of
+      following a redirect `url`. "Manage Subscription" (`plan.platform === 'square'`
+      now, was `'stripe'`) opens a new custom modal — Square has no hosted portal, so
+      this is genuinely new UI, not a copy-and-rename: a menu offering "Update payment
+      method" (tokenize → `POST /update-payment-method`) or "Cancel subscription"
+      (`POST /cancel`, shows the returned `expires_at` on confirmation). Also handles
+      `?square=denied|error` from the OAuth callback redirect (`?square=complete`
+      needs no special-case UI since `fetchStatus()` already reflects it).
+- [x] Update `SessionsPaywallModal.vue` too — **not originally listed in this
+      checklist, found during implementation.** It has its own independent
+      `POST /subscribe` call (used by the Sessions free-tier paywall), which the
+      original file inventory at the top of this doc missed. Converted the same way:
+      offer step → inline card-tokenization step → `{ sourceId }`. Since subscribe is
+      now synchronous instead of a redirect-then-return flow, `SessionsPage.vue`'s
+      `route.query.stripe === 'subscribed'` banner check was replaced with a
+      `@subscribed` event straight from the modal.
+- [x] Update copy in `ProfileBilling.vue`, `MarketingPage.vue`, `data/exploreFeatures.js`
+      (currently says "Stripe" / mentions Stripe's fee %) — Square's online
+      card-not-present rate is the same 2.9% + $0.30 Stripe used, so the existing fee
+      example math in `ProfileBilling.vue` needed no recalculation, just a wording swap.
+- [x] Remove `@stripe/stripe-js` once fully cut over — removed from
+      `frontend/package.json`, lockfile updated. Also dropped the now-dead
+      `VITE_STRIPE_PUBLISHABLE_KEY` from `.env.local` (kept `STRIPE_SECRET_KEY` /
+      `STRIPE_WEBHOOK_SECRET` for now — those are backend-only and still load until
+      Phase 6 decommissions the backend Stripe routes).
+- [x] **Found and fixed while testing locally, not originally in this checklist:**
+      `docker-compose.local.yml` was never updated across Phases 0-3 to pass any
+      `SQUARE_*` / `TOKEN_ENCRYPTION_KEY` backend vars or `VITE_SQUARE_*` frontend vars
+      into the containers — only `STRIPE_*` ones were wired up. This had been silently
+      masked because earlier phases' "verified against real Square sandbox" testing
+      was done via one-off Node scripts run directly against `breakroom_dev`, not
+      through the actual local Docker stack. Backend also had a stale
+      `backend_node_modules` named volume predating `square` being added to
+      `package.json`, causing a hard crash (`Cannot find module 'square'`) the moment
+      the container was actually started. Fixed both: added the missing env passthrough
+      to `docker-compose.local.yml`, and recreated the stale volume. `https://local.
+      prosaurus.com` now boots cleanly end-to-end with the Square-only stack.
+- [x] **Live-tested through an actual browser (2026-07-27)**, on top of the earlier
+      manual line-by-line request/response contract pass: Sessions paywall subscribe
+      (hit the free-tier limit, tokenized a card, `/subscribe` succeeded and lifted the
+      limit immediately), Collections payment-setup update-payment-method and
+      cancel-subscription (both 200, cancel correctly shows the end-of-billing-period
+      date instead of an abrupt cutoff), and a full storefront purchase (real store/
+      collection/$25 item + $5 shipping, seller connected via the platform's own
+      sandbox token as a stand-in per the Phase 3 pattern, `POST .../checkout` returned
+      200, item marked sold, order landed correctly in the seller's Orders page). All
+      test data cleaned up afterward. Square sandbox test card used:
+      `4111 1111 1111 1111`, any future expiry, any CVV/ZIP.
 
 ### Phase 5 — Cutover (hard cutover, ASAP — see decision above)
 - [ ] Send existing Pro subscribers a direct notice (email + in-app) that their
@@ -420,3 +473,18 @@ reboot — can pick up exactly where things left off.)_
   split — missable), `MERCHANT_PROFILE_READ`. All three Phase 0 open decisions are now
   resolved; Phase 0 complete except production activation (deferred to Phase 5). Next up:
   migration 025 (generic rename) and Phase 1 OAuth authorize/callback endpoints.
+- 2026-07-27: Phase 4 (frontend) implemented in full. New shared
+  `frontend/src/utilities/squarePayments.js` for the Web Payments SDK. Reworked
+  `PublicStorePage.vue`/`PublicCollectionPage.vue` checkout, `CollectionsPaymentPage.vue`
+  (subscribe modal + new custom manage-subscription modal replacing the Stripe portal),
+  and `SessionsPaywallModal.vue` (found mid-session — an independent `/subscribe` caller
+  this doc's original file inventory had missed). Removed `@stripe/stripe-js` and the
+  dead `VITE_STRIPE_PUBLISHABLE_KEY`. Also discovered and fixed a standing gap from
+  Phases 0-3: `docker-compose.local.yml` never actually passed `SQUARE_*` /
+  `TOKEN_ENCRYPTION_KEY` / `VITE_SQUARE_*` into the local containers, and the backend
+  container's node_modules volume predated the `square` package being added — both
+  fixed, `https://local.prosaurus.com` now boots cleanly. Verified via build + lint +
+  a manual line-by-line contract check against the backend routes, then **live-tested
+  end-to-end in an actual browser** the same day: Sessions paywall subscribe, Collections
+  payment-setup update/cancel, and a full storefront purchase all passed. Phase 4 is
+  fully done.

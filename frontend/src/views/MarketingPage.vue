@@ -173,7 +173,7 @@ watch(registrationRange, loadRegistrationPaths)
 const registrationMax = computed(() => Math.max(1, ...registrationPaths.value.map(p => p.count)))
 
 // --- Paying customers ---------------------------------------------------
-// New paying customers by monetization path: subscriptions (Stripe web,
+// New paying customers by monetization path: subscriptions (Square web,
 // Apple, Android) plus storefront sales. See GET /api/analytics/paying-customers
 // -- storefront buyers aren't linked to accounts (guest checkout), so that
 // side is reported as revenue/orders rather than a customer count.

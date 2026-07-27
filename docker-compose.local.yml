@@ -33,7 +33,9 @@ services:
       # backend URL accessible from frontend
       VITE_API_BASE_URL: ${VITE_API_BASE_URL}
       VITE_ALLOWED_HOST: ${VITE_ALLOWED_HOST}
-      VITE_STRIPE_PUBLISHABLE_KEY: ${VITE_STRIPE_PUBLISHABLE_KEY}
+      # Square Web Payments SDK (client-side tokenization only, no secret material)
+      VITE_SQUARE_APPLICATION_ID: ${VITE_SQUARE_APPLICATION_ID}
+      VITE_SQUARE_LOCATION_ID: ${VITE_SQUARE_LOCATION_ID}
 
     # start command for non-prod environment
     command: sh -c "npm install && npm run dev"
@@ -90,9 +92,19 @@ services:
       # S3 configuration
       S3_BUCKET_NAME: ${S3_BUCKET_NAME}
       S3_BUCKET_REGION: ${S3_BUCKET_REGION}
-      # Stripe
+      # Stripe (backend routes not decommissioned yet -- see docs/stripe-to-square-migration.md Phase 6)
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      # Square
+      SQUARE_ENVIRONMENT: ${SQUARE_ENVIRONMENT}
+      SQUARE_APPLICATION_ID: ${SQUARE_APPLICATION_ID}
+      SQUARE_ACCESS_TOKEN: ${SQUARE_ACCESS_TOKEN}
+      SQUARE_APPLICATION_SECRET: ${SQUARE_APPLICATION_SECRET}
+      SQUARE_LOCATION_ID: ${SQUARE_LOCATION_ID}
+      SQUARE_WEBHOOK_SIGNATURE_KEY: ${SQUARE_WEBHOOK_SIGNATURE_KEY}
+      SQUARE_WEBHOOK_NOTIFICATION_URL: ${SQUARE_WEBHOOK_NOTIFICATION_URL}
+      SQUARE_PRO_PLAN_VARIATION_ID: ${SQUARE_PRO_PLAN_VARIATION_ID}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY}
       # Firebase (FCM push notifications)
       FIREBASE_SERVICE_ACCOUNT_PATH: ${FIREBASE_SERVICE_ACCOUNT_PATH}
 
