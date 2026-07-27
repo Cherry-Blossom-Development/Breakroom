@@ -51,41 +51,47 @@ went further and actually populated real production credentials:
   from the same file. Secrets were transferred browser-clipboard → file directly via
   PowerShell, never typed or displayed in chat.
 
-### ⚠️ One blocker remains, and it's not something I can do
-The Credentials page in the Square Dashboard shows: **"You must activate your Square
-account for payments by visiting squareup.com/activate before you can process card
-payments in production."** Read/catalog API calls already work fine (confirmed above),
-but real card charges likely won't until this is done. This step requires the account
-owner's own business/banking details and identity verification — I did not and should
-not attempt it. **You need to complete this at squareup.com/activate before Phase 5
-cutover.**
+### ✅ Account activation confirmed done (2026-07-27)
+The "you must activate your Square account" banner is gone from the Credentials page,
+and `client.merchants.get({ merchantId: 'me' })` against production now returns
+`status: 'ACTIVE'` for "Cherry Blossom Development LLC". Production is capable of
+processing real card payments.
 
-Also noticed: OAuth page shows "Active tokens connected to production merchants: 1" —
-i.e. one real merchant has already gone through Connect OAuth against this production
-app at some point. Not investigated further; worth checking who/what that is before
-cutover if it's unexpected.
+Also noticed, still not investigated: OAuth page shows "Active tokens connected to
+production merchants: 1" — i.e. one real merchant has already gone through Connect
+OAuth against this production app at some point. Worth checking who/what that is
+before cutover if it's unexpected.
+
+### ✅ Deployed to EC2 (2026-07-27)
+`docker-compose.ec2.yml` and `.env.production` were scp'd to `ec2-user@44.225.148.34`,
+and the backend container was recreated (`docker compose -f docker-compose.ec2.yml
+--env-file .env up -d`) so it picks up the real Square env vars. Logs came up clean,
+`GET /api/auth/me` and `GET /api/billing/plan` both responded normally (401 as
+expected, unauthenticated). Square-specific behavior (subscribe, Connect OAuth,
+storefront checkout) has **not** been exercised against production yet — only basic
+reachability is confirmed so far.
 
 ### Remaining steps before Phase 5 cutover
-1. **You**: complete account activation at squareup.com/activate (business/bank/identity
-   verification — real money implications, must be the account owner).
-2. Redeploy: scp the updated `docker-compose.ec2.yml` and `.env.production` to EC2,
-   restart the backend container (see `Breakroom/CLAUDE.md` deploy steps).
-3. Do a real (small, refundable) end-to-end test in production before announcing
-   cutover to real subscribers/sellers.
+1. ~~Complete account activation~~ — done.
+2. ~~Redeploy~~ — done.
+3. **Do a real (small, refundable) end-to-end test in production** — subscribe to Pro
+   with a real card, or a real Connect OAuth + storefront purchase, before announcing
+   cutover to real subscribers/sellers. Not done yet.
 4. Then Phase 5 proper: notify existing subscribers/sellers, execute cutover, monitor
    first real transactions closely.
 
 ## What's NOT done yet
-- **Phase 5** — cutover execution. Blocked only on the squareup.com/activate step above.
+- **A real production payment test** (step 3 above) — the last thing standing between
+  here and Phase 5 proper.
+- **Phase 5** — cutover execution (notify subscribers/sellers).
 - **Phase 7** — mobile apps (Android/iPhone docs), low priority, do last.
 
 ## Important local-only state (NOT in git — lives in `.env.local` / `.env.production`)
 - `.env.local`: sandbox credentials, unchanged this session.
-- `.env.production`: now has real production Square credentials (see above). Not yet
-  deployed to EC2 — still needs the scp + container restart step.
+- `.env.production`: has real production Square credentials, deployed to EC2 (see
+  above). The local copy and the EC2 `~/.env` copy should now match.
 
 ## Next action when resuming
-Check whether squareup.com/activate has been completed. If yes, deploy the updated
-`docker-compose.ec2.yml` + `.env.production` and do a careful real-money test before
-Phase 5 notifications go out. Read `docs/stripe-to-square-migration.md` in full for
-complete context.
+Do a real, small, careful production payment test (Pro subscribe and/or a storefront
+purchase) before Phase 5 notifications go out. Read `docs/stripe-to-square-migration.md`
+in full for complete context.
