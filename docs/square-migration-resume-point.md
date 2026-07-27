@@ -4,64 +4,88 @@
 `docs/stripe-to-square-migration.md` — this file just tells you where to pick up.
 
 ## Git state
-- Branch: `main`, up to date with `origin/main`. Both this session's commits are
-  pushed: `3aecd44` (Phase 4 frontend) and `eea0396` (Phase 6 decommission).
-- No uncommitted changes from this session.
+- Branch: `main`, up to date with `origin/main`. This session's code commits are
+  pushed: `3aecd44` (Phase 4 frontend), `eea0396` (Phase 6 decommission), `3adee64`
+  (resume-point doc). The production-credentials work below lives only in
+  `.env.production` (gitignored) and the Square Developer Dashboard — nothing to
+  commit for it.
 
 ## What's done: Phases 0, 1, 2, 3, 4, 6 — all implemented and verified
 - **Phases 0-3**: Connect/OAuth, Subscriptions, Storefront checkout + webhooks — all
   previously verified against real Square sandbox.
 - **Phase 4 (Frontend/Vue)**: implemented and live-tested end-to-end in an actual
-  browser this session — Sessions paywall subscribe, Collections payment-setup
-  update/cancel, and a full storefront purchase all passed using Square sandbox test
-  card `4111 1111 1111 1111`. Test data cleaned up afterward. Full detail in
-  `docs/stripe-to-square-migration.md`.
+  browser — Sessions paywall subscribe, Collections payment-setup update/cancel, and
+  a full storefront purchase all passed using Square sandbox test card
+  `4111 1111 1111 1111`. Test data cleaned up afterward.
 - **Phase 6 (Decommission)**: done ahead of Phase 5 since it's pure code cleanup with
   no customer-facing action. Removed the (already-dead) Stripe webhook/routes, the
   `stripe` npm dependency, and dead `STRIPE_*` env vars. DB column drop was a no-op —
   migration 044 had already renamed everything Stripe-specific to generic names.
   Updated `CLAUDE.md` with a Payments section.
 
-## ⚠️ Phase 5 is blocked — production has never had working Square credentials
-Found while doing Phase 6: `docker-compose.ec2.yml` (the real production compose file)
-only ever wired up `STRIPE_*` env vars into the backend container, never `SQUARE_*` or
-`TOKEN_ENCRYPTION_KEY` — the same gap Phase 4 found and fixed in
-`docker-compose.local.yml`, just never caught on the production side. Fixed the compose
-file itself, but the local copy of `.env.production` (the file that gets scp'd to EC2 as
-`~/.env`) has **zero real Square values** — I left them as blank placeholders with an
-explanatory comment rather than inventing anything. Its old Stripe keys are gone too
-(dead code now, removed).
+## Production Square credentials — filled in, one manual step remains
+While doing Phase 6, found `docker-compose.ec2.yml` never wired up `SQUARE_*`/
+`TOKEN_ENCRYPTION_KEY` for the backend container (only `STRIPE_*`) — fixed that. Then
+went further and actually populated real production credentials:
 
-**Before Phase 5 (cutover) can happen, someone needs to:**
-1. Create a real (non-sandbox) Square Application in the Square Developer Dashboard —
-   the current sandbox one only works in Square's test environment.
-2. Fill in `.env.production` on the dev machine: `SQUARE_ENVIRONMENT=production` plus
-   real `SQUARE_APPLICATION_ID` / `SQUARE_ACCESS_TOKEN` / `SQUARE_APPLICATION_SECRET` /
-   `SQUARE_LOCATION_ID` / `SQUARE_WEBHOOK_SIGNATURE_KEY` / `SQUARE_WEBHOOK_NOTIFICATION_URL`
-   / `SQUARE_PRO_PLAN_VARIATION_ID`, and a fresh `TOKEN_ENCRYPTION_KEY` (does not need to
-   match the sandbox one — generate a new 32-byte hex string).
-3. Re-run the Square Catalog Pro-plan setup script (`backend/scripts/square-setup-pro-plan.js`)
-   against production credentials to get a production `SQUARE_PRO_PLAN_VARIATION_ID`.
-4. Register the production webhook subscription in the Square Dashboard.
-5. Redeploy (scp the updated `docker-compose.ec2.yml` + `.env.production`, restart the
-   container).
+- The existing "Prosaurus" Square Application already had production credentials
+  generated (App ID, Access Token, Application secret) — didn't need to create a new
+  app, just use the Production tab.
+- Set the Production OAuth Redirect URL to
+  `https://www.prosaurus.com/api/billing/connect/callback` (was blank before).
+- Created a production webhook subscription ("Prosaurus production") for
+  `subscription.updated` pointing at
+  `https://www.prosaurus.com/api/billing/webhook/square` — matches exactly what
+  `handleSquareWebhook` in `backend/routes/billing.js` handles.
+- Confirmed a real production location exists via the API: `LD6S7JK70HN02`,
+  "Cherry Blossom Development LLC", status ACTIVE (the dashboard's Locations page UI
+  didn't show it, but `client.locations.list()` did).
+- Ran the Catalog Pro-plan setup logic against production and got a real
+  `SQUARE_PRO_PLAN_VARIATION_ID`.
+- Generated a fresh `TOKEN_ENCRYPTION_KEY` (32-byte hex, does not match the sandbox
+  one).
+- **All 9 values are now filled into `.env.production`**: `SQUARE_ENVIRONMENT=production`,
+  `SQUARE_APPLICATION_ID`, `SQUARE_ACCESS_TOKEN`, `SQUARE_APPLICATION_SECRET`,
+  `SQUARE_LOCATION_ID`, `SQUARE_WEBHOOK_SIGNATURE_KEY`, `SQUARE_WEBHOOK_NOTIFICATION_URL`,
+  `SQUARE_PRO_PLAN_VARIATION_ID`, `TOKEN_ENCRYPTION_KEY`. Old dead Stripe keys removed
+  from the same file. Secrets were transferred browser-clipboard → file directly via
+  PowerShell, never typed or displayed in chat.
 
-Only after that is production actually capable of taking a real Square payment — Phase
-5's subscriber/seller notification emails would otherwise point people at a cutover that
-can't process anything yet.
+### ⚠️ One blocker remains, and it's not something I can do
+The Credentials page in the Square Dashboard shows: **"You must activate your Square
+account for payments by visiting squareup.com/activate before you can process card
+payments in production."** Read/catalog API calls already work fine (confirmed above),
+but real card charges likely won't until this is done. This step requires the account
+owner's own business/banking details and identity verification — I did not and should
+not attempt it. **You need to complete this at squareup.com/activate before Phase 5
+cutover.**
+
+Also noticed: OAuth page shows "Active tokens connected to production merchants: 1" —
+i.e. one real merchant has already gone through Connect OAuth against this production
+app at some point. Not investigated further; worth checking who/what that is before
+cutover if it's unexpected.
+
+### Remaining steps before Phase 5 cutover
+1. **You**: complete account activation at squareup.com/activate (business/bank/identity
+   verification — real money implications, must be the account owner).
+2. Redeploy: scp the updated `docker-compose.ec2.yml` and `.env.production` to EC2,
+   restart the backend container (see `Breakroom/CLAUDE.md` deploy steps).
+3. Do a real (small, refundable) end-to-end test in production before announcing
+   cutover to real subscribers/sellers.
+4. Then Phase 5 proper: notify existing subscribers/sellers, execute cutover, monitor
+   first real transactions closely.
 
 ## What's NOT done yet
-- **Phase 5** — cutover execution (notify existing subscribers/sellers). Blocked on the
-  production credentials gap above.
+- **Phase 5** — cutover execution. Blocked only on the squareup.com/activate step above.
 - **Phase 7** — mobile apps (Android/iPhone docs), low priority, do last.
 
 ## Important local-only state (NOT in git — lives in `.env.local` / `.env.production`)
-- `.env.local`: `VITE_SQUARE_APPLICATION_ID` / `VITE_SQUARE_LOCATION_ID` present, old
-  Stripe keys removed. Webhook signature key is still a sandbox placeholder — no real
-  Square dashboard webhook subscription registered yet for local/sandbox either.
-- `.env.production`: old Stripe keys removed; `SQUARE_*` keys present but blank —
-  see the Phase 5 blocker section above.
+- `.env.local`: sandbox credentials, unchanged this session.
+- `.env.production`: now has real production Square credentials (see above). Not yet
+  deployed to EC2 — still needs the scp + container restart step.
 
 ## Next action when resuming
-Either work the Phase 5 production-credentials checklist above, or pick something else.
-Read `docs/stripe-to-square-migration.md` in full for complete context.
+Check whether squareup.com/activate has been completed. If yes, deploy the updated
+`docker-compose.ec2.yml` + `.env.production` and do a careful real-money test before
+Phase 5 notifications go out. Read `docs/stripe-to-square-migration.md` in full for
+complete context.
