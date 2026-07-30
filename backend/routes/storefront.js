@@ -1,13 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
-const { SquareError } = require('square');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { sendMail } = require('../utilities/aws-ses-email');
-const { getSquareClientForToken } = require('../utilities/square');
-const { getValidAccessToken } = require('../utilities/squareConnect');
+const { getProcessor } = require('../utilities/payments');
+const { ProcessorAuthError } = require('../utilities/payments/errors');
 
 require('dotenv').config();
 
@@ -287,11 +285,19 @@ router.post('/public/:storeUrl/contact', async (req, res) => {
 // the order AND completes the charge.
 router.post('/public/:storeUrl/items/:itemId/checkout', async (req, res) => {
   const { source_id, buyer_name, buyer_email, ship_to_name, ship_to_address1, ship_to_address2,
-          ship_to_city, ship_to_state, ship_to_zip, ship_to_country } = req.body;
+          ship_to_city, ship_to_state, ship_to_zip, ship_to_country,
+          processor: processorName = 'square' } = req.body;
 
   if (!source_id || !buyer_name || !buyer_email || !ship_to_name || !ship_to_address1 ||
       !ship_to_city || !ship_to_state || !ship_to_zip) {
     return res.status(400).json({ message: 'All required fields must be filled in.' });
+  }
+
+  let processor;
+  try {
+    processor = getProcessor(processorName);
+  } catch (err) {
+    return res.status(400).json({ message: err.message });
   }
 
   const country = ship_to_country || 'US';
@@ -333,15 +339,15 @@ router.post('/public/:storeUrl/items/:itemId/checkout', async (req, res) => {
       return res.status(409).json({ message: 'This item is currently being purchased. Please try again in a few minutes.' });
     }
 
-    // Seller must have completed Square Connect
+    // Seller must have completed Connect for this processor
     const connectResult = await client.query(
       'SELECT processor_account_id FROM user_payment_connect WHERE user_id = $1 AND processor = $2 AND onboarding_complete = 1',
-      [sellerUserId, 'square']
+      [sellerUserId, processorName]
     );
     if (connectResult.rowCount === 0) {
       return res.status(400).json({ message: 'Seller has not completed payment setup' });
     }
-    const merchantId = connectResult.rows[0].processor_account_id;
+    const sellerAccountId = connectResult.rows[0].processor_account_id;
 
     const itemPriceCents = item.price_cents;
     const shippingCostCents = item.shipping_cost_cents || 0;
@@ -359,44 +365,36 @@ router.post('/public/:storeUrl/items/:itemId/checkout', async (req, res) => {
           ship_to_state, ship_to_zip, ship_to_country,
           item_price_cents, shipping_cost_cents, platform_fee_cents, total_cents,
           payment_processor, payment_connected_account_id, status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'square',$16,'pending_payment')`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'pending_payment')`,
       [item.id, sellerUserId, buyer_name, buyer_email,
        ship_to_name, ship_to_address1, ship_to_address2 || null, ship_to_city,
        ship_to_state, ship_to_zip, country,
        itemPriceCents, shippingCostCents, platformFeeCents, totalCents,
-       merchantId]
+       processorName, sellerAccountId]
     );
     const orderId = orderResult.insertId;
 
-    // CreatePayment must run with the SELLER's own OAuth token, not the platform's --
-    // Square identifies which merchant account receives the funds (minus app_fee_money)
-    // from whichever access token makes the call. location_id is the seller's own
-    // location too, fetched via their Merchant profile's mainLocationId.
+    // Payment creation is dispatched through the processor adapter -- see
+    // docs/multi-processor-payments-architecture.md for why the trust model differs
+    // per processor (Square requires the seller's own OAuth token for this call; other
+    // processors may not).
     let payment;
     try {
-      const { accessToken } = await getValidAccessToken(sellerUserId);
-      const sellerClient = getSquareClientForToken(accessToken);
-
-      const { merchant } = await sellerClient.merchants.get({ merchantId });
-      const sellerLocationId = merchant.mainLocationId;
-
-      const paymentResult = await sellerClient.payments.create({
-        sourceId: source_id,
-        idempotencyKey: crypto.randomUUID(),
-        amountMoney: { amount: BigInt(totalCents), currency: 'USD' },
-        appFeeMoney: { amount: BigInt(platformFeeCents), currency: 'USD' },
-        locationId: sellerLocationId,
-        autocomplete: true,
-        referenceId: String(orderId)
+      payment = await processor.createPayment({
+        sellerUserId,
+        sellerAccountId,
+        amountCents: totalCents,
+        feeCents: platformFeeCents,
+        paymentToken: source_id,
+        referenceId: orderId
       });
-      payment = paymentResult.payment;
     } catch (paymentErr) {
       await client.query(`UPDATE orders SET status = 'cancelled', updated_at = NOW() WHERE id = $1`, [orderId]);
-      if (paymentErr instanceof SquareError && (paymentErr.statusCode === 401 || paymentErr.statusCode === 403)) {
+      if (paymentErr instanceof ProcessorAuthError) {
         // Seller's connection was revoked since we checked onboarding_complete above --
         // clear the stale row so they're prompted to reconnect rather than silently
         // failing again on the next attempt.
-        await client.query('DELETE FROM user_payment_connect WHERE user_id = $1 AND processor = $2', [sellerUserId, 'square']);
+        await client.query('DELETE FROM user_payment_connect WHERE user_id = $1 AND processor = $2', [sellerUserId, processorName]);
         return res.status(400).json({ message: 'Seller has not completed payment setup' });
       }
       throw paymentErr;
@@ -404,7 +402,7 @@ router.post('/public/:storeUrl/items/:itemId/checkout', async (req, res) => {
 
     await client.query(
       `UPDATE orders SET status = 'paid', payment_intent_id = $1, updated_at = NOW() WHERE id = $2`,
-      [payment.id, orderId]
+      [payment.paymentId, orderId]
     );
     await client.query(`UPDATE collection_items SET is_available = 0 WHERE id = $1`, [item.id]);
 
