@@ -543,3 +543,13 @@ reboot — can pick up exactly where things left off.)_
   unrelated bug noticed in passing: `analytics.js`'s marketing dashboard never counted
   Square subscriptions at all (`SUBSCRIPTION_PLATFORMS` only had stripe/apple/google).
   Verified via syntax check, module load, and a full local Docker stack restart.
+- 2026-07-30: Found the 2026-07-27 "production deploy" was incomplete — only
+  `.env.production`/`docker-compose.ec2.yml` had been pushed, the backend image was
+  never rebuilt (still running old Stripe-only code with Stripe keys already removed)
+  and production DB never got migrations 044/045. Frontend was also stale (pre-Phase-4).
+  Fixed all three: backed up affected prod tables, ran 044/045 against production,
+  rebuilt+pushed the backend image, rebuilt+deployed the frontend. Verified against
+  live production (merchant/location/catalog checks, signed webhook round-trip,
+  `/plan`/`connect/status`/`connect/start` all correct). See
+  `docs/square-migration-resume-point.md` for full detail. Square is now mechanically
+  sound in production; only a real human payment test remains before Phase 5.
