@@ -62,8 +62,16 @@ vs Phase 5 split.
 
 ## Phase 0 — Prerequisites
 - [ ] PayPal Developer account + sandbox REST app (see blocker above) — self-serve
-- [ ] **Apply for PPCP partner approval** (see blocker above — has an unknown lead
-      time, start it immediately, don't wait for the rest of Phase 0)
+- [x] **Apply for PPCP partner approval** — submitted 2026-07-30 via
+      `https://www.paypal.com/us/enterprise/become-a-partner` ("Become a Partner"
+      form). Note: the link PayPal's own docs point to for this
+      (`developer.paypal.com/platforms/get-started`, "Fill out this form") is
+      currently a broken self-referencing link — confirmed live in-browser, not just a
+      fetch-tool artifact. Used the enterprise partner page instead, which has a real
+      working form (First/Last name, Business name/email/phone/website, Business type,
+      Country, Client annual volume, "Describe your solution", Number of active
+      merchants). Now waiting on PayPal to review and a rep to reach out — no known
+      timeline.
 - [x] Decide products/capabilities needed — confirmed 2026-07-30 against current
       PayPal docs: `products: ["PPCP"]` in the Partner Referrals request, plus the
       `PARTNER_FEE` capability specifically for platform-fee support (requires the PPCP
@@ -73,6 +81,17 @@ vs Phase 5 split.
 - [ ] Sandbox credentials into `.env.local` (`PAYPAL_ENVIRONMENT`, `PAYPAL_CLIENT_ID`,
       `PAYPAL_CLIENT_SECRET`, alongside the existing `SQUARE_*` vars — additive, not a
       replacement)
+
+**Account decision (2026-07-30)**: creating a dedicated PayPal *Business* account for
+the company (not Dallas's personal, years-old, Gmail-tied PayPal account) — same
+separation-of-concerns precedent as Square's production account being under
+"Cherry Blossom Development LLC" rather than personal. Email:
+`payments@cherryblossomdevelopment.com` — routes through the existing
+`@cherryblossomdevelopment.com` catch-all forward to `cherryblossomdev411@gmail.com`
+(confirmed working both directions, including send-as). Chosen over `support@` since
+this is specifically payment-processor account administration, not end-user support —
+worth reusing this same address for other processors' account admin going forward for
+consistency.
 
 ## Phase 1 — Refactor Square behind the new processor interface
 **Done 2026-07-30 (commit `e05fc8c`).** `backend/utilities/payments/index.js` (registry)
