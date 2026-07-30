@@ -78,9 +78,13 @@ vs Phase 5 split.
       partner approval above — `EXPRESS_CHECKOUT` alone does not support platform fees,
       same category of distinction as Square's `PAYMENTS_WRITE` vs
       `PAYMENTS_WRITE_ADDITIONAL_RECIPIENTS`)
-- [ ] Sandbox credentials into `.env.local` (`PAYPAL_ENVIRONMENT`, `PAYPAL_CLIENT_ID`,
-      `PAYPAL_CLIENT_SECRET`, alongside the existing `SQUARE_*` vars — additive, not a
-      replacement)
+- [x] Sandbox credentials into `.env.local` — done 2026-07-30. PayPal auto-provisions a
+      "Default Application" REST API app the moment the developer account is created,
+      no manual "Create App" step was needed. `PAYPAL_ENVIRONMENT=sandbox`,
+      `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` all set (alongside the existing
+      `SQUARE_*` vars, additive). Account is a dedicated PayPal Business account under
+      `payments@cherryblossomdevelopment.com`, confirmed distinct from Dallas's
+      personal PayPal (which has never been logged into from this browser).
 
 **Account decision (2026-07-30)**: creating a dedicated PayPal *Business* account for
 the company (not Dallas's personal, years-old, Gmail-tied PayPal account) — same
