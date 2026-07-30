@@ -4,9 +4,11 @@
 // matching that shape, add it to PROCESSORS below.
 
 const square = require('./square');
+const paypal = require('./paypal');
 
 const PROCESSORS = {
-  square
+  square,
+  paypal
 };
 
 // Throws (400) on an unknown or not-yet-added processor name -- callers can let this

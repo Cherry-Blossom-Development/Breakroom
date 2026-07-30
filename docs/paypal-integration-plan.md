@@ -1,6 +1,8 @@
 # PayPal Integration Plan (second payment processor)
 
-**Status**: NOT STARTED — plan only.
+**Status**: IN PROGRESS — Phase 0 (self-serve half) and Phase 1 done; Phase 3
+(Subscriptions) implemented, route-level verified, pending a real buyer-approval
+sandbox test. Phases 2/4 blocked on PPCP partner approval (submitted, pending).
 **Created**: 2026-07-30
 **Owner**: Dallas
 
@@ -145,26 +147,50 @@ seller-onboarding and Partner Referrals API docs):
       payments-capable
 
 ## Phase 3 — Backend: Subscriptions (Pro tier)
-- [ ] Create the $3.99/mo Pro Product + Billing Plan in PayPal (analogous to
-      `backend/scripts/square-setup-pro-plan.js` — write a similar one-time idempotent
-      setup script). **Confirmed 2026-07-30**: three separate APIs involved — Catalog
-      Products API (defines "Prosaurus Pro" as a product), Billing Plans API (defines
-      the $3.99/mo pricing/frequency against that product), Subscriptions API (creates
-      individual subscription instances against the plan). More setup steps than
-      Square's single Catalog call, but same one-time-script pattern applies.
-- [ ] Implement `createSubscription`/`cancelSubscription`/`updatePaymentMethod` for
-      PayPal. **Confirmed the buyer-facing contract differs from Square's
-      `{ sourceId }` pattern, as suspected**: the PayPal JS SDK's Buttons component
-      takes a `createSubscription` callback (calls `actions.subscription.create({
-      plan_id })`) and an `onApprove` callback that receives `data.subscriptionID`
-      after the buyer approves in a PayPal popup/redirect. The backend's role shifts
-      from "create the subscription" (Square) to "receive an already-approved
-      subscription ID from the frontend and record it" — closer to a confirm/activate
-      step than Square's create step. Design Phase 5's frontend piece and this backend
-      piece together; the `POST /subscribe` contract will need a `subscriptionId` field
-      instead of (or alongside) `sourceId`/`paymentToken`, which the architecture doc's
-      generic interface should accommodate via its `paymentToken` parameter carrying
-      different meaning per processor rather than forcing PayPal into Square's shape.
+- [x] Create the $3.99/mo Pro Product + Billing Plan in PayPal — done 2026-07-30,
+      `backend/scripts/paypal-setup-pro-plan.js`. Confirmed three separate APIs
+      involved (Catalog Products, Billing Plans, Subscriptions), no SDK coverage for
+      the first two (see `backend/utilities/paypal.js` — raw REST via a shared
+      OAuth-token + fetch helper, since `@paypal/paypal-server-sdk` only wraps 5 APIs
+      and neither Products nor Plans is one of them). Ran against real sandbox: created
+      product `PROD-6DW00309LT502133X` and plan `P-970789458A3565444NJV3ZVQ`, verified
+      idempotent (re-run found existing rather than duplicating). Plan ID saved as
+      `PAYPAL_PRO_PLAN_ID` in `.env.local`.
+- [x] Implement `createSubscription`/`cancelSubscription`/`updatePaymentMethod` for
+      PayPal — done 2026-07-30, `backend/utilities/payments/paypal.js`. Confirmed the
+      buyer-facing contract differs from Square's `{ sourceId }` pattern as suspected:
+      the PayPal JS SDK's Buttons component takes a `createSubscription` callback
+      (`actions.subscription.create({ plan_id })`) and an `onApprove` callback with
+      `data.subscriptionID` after buyer approval. The backend's `createSubscription`
+      therefore *confirms* an already-approved subscription (fetches it, checks
+      `plan_id` matches ours and `status === 'ACTIVE'`) rather than creating one —
+      reuses the existing `paymentToken` parameter to carry the PayPal subscription ID,
+      no route contract change needed in `billing.js`.
+      **Confirmed (not guessed) two real behavioral gaps vs. Square**:
+      (1) cancellation is immediate (`POST .../cancel` → `CANCELLED` right away, no
+      `chargedThroughDate`-equivalent grace period) — `cancelSubscription` returns
+      `expiresAt: new Date()` accordingly, still flagged as needing a real sandbox
+      subscription to fully verify since that requires a buyer-approval flow this
+      session couldn't automate;
+      (2) there is no API to swap a subscription's payment method (`revise` only
+      changes `plan_id`) — `updatePaymentMethod` throws a clear error rather than
+      silently no-op'ing; Phase 5 needs its own UX for this (cancel-and-resubscribe),
+      not a reskin of Square's update-payment-method modal.
+      **Bug caught during testing**: the adapter initially only treated a `404` from
+      PayPal's `GET .../subscriptions/{id}` as "not found" — a malformed ID actually
+      comes back `400 INVALID_PARAMETER_SYNTAX`, which fell through to the generic
+      re-throw and leaked PayPal's raw error body (debug_id, internal field names)
+      straight into our own API response. Fixed to normalize any 4xx into a clean
+      "PayPal subscription not found or invalid" message.
+      **Verified via the local sandbox stack** (route-level, through `billing.js`):
+      unknown processor name → clean 400; malformed and well-formed-but-nonexistent
+      PayPal subscription IDs → clean 400 "not found or invalid" (not a leaked raw
+      body); `connect/start`/`checkout` with `processor=paypal` → clean 400 "not yet
+      available" (correctly gated behind pending PPCP approval, not a crash).
+      **Not yet verified**: an actual successful subscribe (needs a real PayPal
+      sandbox buyer-approval flow, which requires browser interaction this session
+      didn't attempt) and the immediate-cancellation behavior against a real
+      subscription. Do this before considering Phase 3 fully done — see Phase 8.
 
 ## Phase 4 — Backend: Storefront checkout
 - [ ] Implement PayPal Orders API v2 checkout with platform fee split. **Confirmed
@@ -269,3 +295,23 @@ _(Add dated entries here as work happens.)_
   `platform_fees`, and webhook signature verification (see Phases 2/4/6 above).
   Recommended starting the PPCP partner application immediately given the unknown
   timeline, in parallel with self-serve sandbox work.
+- 2026-07-30: PPCP partner application submitted. PayPal Business account created
+  (`payments@cherryblossomdevelopment.com`, separate from personal PayPal) and sandbox
+  REST app credentials obtained (PayPal auto-provisions a "Default Application", no
+  manual create-app step needed) — into `.env.local`. Hit and fixed a transcription
+  bug along the way: the Client ID was first copied by reading it off a screenshot
+  rather than the clipboard, and came out 81 characters instead of the real 80 (one
+  character transcribed wrong), causing a `401 invalid_client`; re-copied via
+  clipboard and the length mismatch (81 vs. 80) confirmed and fixed it.
+  Lesson: always clipboard-copy credentials, never transcribe by reading them.
+- 2026-07-30: Phase 3 (Subscriptions) implemented -- see Phase 3 section above for
+  full detail. New files: `backend/utilities/paypal.js` (shared OAuth+REST client,
+  since the official SDK doesn't cover Products/Plans), `backend/scripts/
+  paypal-setup-pro-plan.js` (idempotent, run against real sandbox), `backend/
+  utilities/payments/paypal.js` (processor adapter, registered in `payments/index.js`
+  alongside square). Migration 046 (additive `'paypal'` enum values) written and run
+  against `breakroom_dev`. Also found and fixed the same `docker-compose.local.yml`
+  env-passthrough gap the Square migration hit (`PAYPAL_*` vars weren't wired into the
+  backend container). Route-level verified against the local sandbox stack; a full
+  successful-subscribe test still needs a real buyer-approval browser flow, not done
+  this session.
