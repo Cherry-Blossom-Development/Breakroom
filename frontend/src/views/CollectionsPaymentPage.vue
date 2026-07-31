@@ -3,7 +3,7 @@
 
     <div class="page-header">
       <div class="header-left">
-        <RouterLink to="/profile/billing" class="back-link">← Billing</RouterLink>
+        <RouterLink :to="backLink.to" class="back-link">← {{ backLink.label }}</RouterLink>
         <h1>Payment Setup</h1>
         <p class="page-desc">
           Connect a Square account to receive payments from your store sales.
@@ -257,12 +257,19 @@
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { authFetch } from '@/utilities/authFetch'
 import { mountSquareCard, tokenizeCard } from '@/utilities/squarePayments'
 
+// Referrer map: where "r" query param values point back to
+const REFERRERS = {
+  1: { to: '/collections', label: 'Artist Showcase' },
+  2: { to: '/profile/billing', label: 'Billing' },
+}
+
 const route = useRoute()
+const backLink = computed(() => REFERRERS[route.query.r] || REFERRERS[2])
 const loading = ref(true)
 const status = ref('not_connected')
 const starting = ref(false)

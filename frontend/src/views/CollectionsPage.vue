@@ -10,7 +10,7 @@
     <section class="setup-section">
       <h2 class="section-label">Store Setup</h2>
       <div class="setup-links">
-        <RouterLink to="/collections/payment-setup" class="setup-link">
+        <RouterLink to="/collections/payment-setup?r=1" class="setup-link">
           <div class="setup-link-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22">
               <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>

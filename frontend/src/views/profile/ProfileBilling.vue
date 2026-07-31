@@ -62,12 +62,12 @@
           <li><span class="check pro-check">✓</span> <strong>Extra storage</strong> on Sessions</li>
         </ul>
         <div v-if="!plan || (!plan.subscribed)" class="pro-cta">
-          <router-link to="/collections/payment-setup?from=profile" class="upgrade-btn">
+          <router-link to="/collections/payment-setup?r=2" class="upgrade-btn">
             Upgrade to Pro — $3.99/mo
           </router-link>
         </div>
         <div v-else-if="plan.platform !== 'promo'" class="pro-cta">
-          <router-link to="/collections/payment-setup?from=profile" class="upgrade-btn">
+          <router-link to="/collections/payment-setup?r=2" class="upgrade-btn">
             Manage subscription
           </router-link>
         </div>
