@@ -91,7 +91,7 @@ router.post('/subscribe', authenticate, async (req, res) => {
       return res.json({ already_subscribed: true });
     }
 
-    const { sourceId, processor: processorName = 'square' } = req.body;
+    const { sourceId, processor: processorName = 'square' } = req.body || {};
     if (!sourceId) {
       return res.status(400).json({ message: 'Missing sourceId (tokenized card)' });
     }
@@ -173,7 +173,7 @@ router.post('/cancel', authenticate, async (req, res) => {
 router.post('/update-payment-method', authenticate, async (req, res) => {
   let client;
   try {
-    const { sourceId } = req.body;
+    const { sourceId } = req.body || {};
     if (!sourceId) {
       return res.status(400).json({ message: 'Missing sourceId (tokenized card)' });
     }
@@ -237,7 +237,7 @@ router.get('/connect/status', authenticate, async (req, res) => {
 router.post('/connect/start', authenticate, async (req, res) => {
   let client;
   try {
-    const processorName = req.body.processor || 'square';
+    const processorName = (req.body || {}).processor || 'square';
     const processor = getProcessor(processorName);
 
     client = await getClient();

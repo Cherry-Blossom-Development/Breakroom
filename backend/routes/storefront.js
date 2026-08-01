@@ -187,7 +187,7 @@ router.get('/', authenticate, async (req, res) => {
 
 // PUT /api/storefront — upsert
 router.put('/', authenticate, async (req, res) => {
-  const { store_url, page_title, content, settings, external_url } = req.body;
+  const { store_url, page_title, content, settings, external_url } = req.body || {};
 
   if (store_url && !SLUG_RE.test(store_url)) {
     return res.status(400).json({ message: 'Invalid store URL format.' });
@@ -228,7 +228,7 @@ router.put('/', authenticate, async (req, res) => {
 
 // POST /api/storefront/public/:storeUrl/contact  (no auth)
 router.post('/public/:storeUrl/contact', async (req, res) => {
-  const { buyer_name, buyer_email, message, item_name } = req.body;
+  const { buyer_name, buyer_email, message, item_name } = req.body || {};
 
   if (!buyer_name || !buyer_email || !message) {
     return res.status(400).json({ message: 'Name, email, and message are required.' });
@@ -286,7 +286,7 @@ router.post('/public/:storeUrl/contact', async (req, res) => {
 router.post('/public/:storeUrl/items/:itemId/checkout', async (req, res) => {
   const { source_id, buyer_name, buyer_email, ship_to_name, ship_to_address1, ship_to_address2,
           ship_to_city, ship_to_state, ship_to_zip, ship_to_country,
-          processor: processorName = 'square' } = req.body;
+          processor: processorName = 'square' } = req.body || {};
 
   if (!source_id || !buyer_name || !buyer_email || !ship_to_name || !ship_to_address1 ||
       !ship_to_city || !ship_to_state || !ship_to_zip) {
@@ -497,7 +497,7 @@ router.get('/orders', authenticate, async (req, res) => {
 
 // PUT /api/storefront/orders/:id/ship  (authenticated)
 router.put('/orders/:id/ship', authenticate, async (req, res) => {
-  const { tracking_number, tracking_carrier } = req.body;
+  const { tracking_number, tracking_carrier } = req.body || {};
   let client;
   try {
     client = await getClient();
