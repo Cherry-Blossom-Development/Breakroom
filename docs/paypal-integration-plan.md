@@ -315,3 +315,9 @@ _(Add dated entries here as work happens.)_
   backend container). Route-level verified against the local sandbox stack; a full
   successful-subscribe test still needs a real buyer-approval browser flow, not done
   this session.
+- 2026-08-01: Bug found in the Phase 1 Square refactor while testing the Android app
+  against `breakroom_test` — `POST /connect/start`'s `req.body.processor` read throws on
+  a bodyless request (Android was posting with no body; fixed there, but the backend
+  itself needs a guard before Phase 1 is deployed). See
+  `docs/multi-processor-payments-architecture.md`, "Known bug in the already-merged
+  Phase 1 refactor" for the fix and a note to grep both route files for the same pattern.

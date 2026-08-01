@@ -17,6 +17,33 @@ addition rather than another repo-wide migration.
 This is web-only, same as the Stripe→Square migration — App Store/Play Store in-app
 billing (Apple StoreKit, Google Play Billing) are separate systems, unaffected.
 
+## Known bug in the already-merged Phase 1 refactor (found 2026-08-01)
+
+Found while testing the Android app's payment setup screen against a real backend
+(`breakroom_test`, schema synced from production) — **not yet deployed to production**,
+but will break the instant the Phase 1 refactor (`e05fc8c`) ships.
+
+`backend/routes/billing.js`, `POST /connect/start` (around line 240):
+
+```js
+const processorName = req.body.processor || 'square';
+```
+
+Before the refactor, this handler never read `req.body` at all. Any client that POSTs
+with no body (or no `Content-Type: application/json`) now hits
+`TypeError: Cannot read properties of undefined (reading 'processor')` → a 500, because
+Express leaves `req.body` `undefined` when there's nothing to parse. The web frontend is
+fine (`CollectionsPaymentPage.vue`'s `startConnect()` already sends
+`JSON.stringify({ processor: 'square' })`), but this was a live break for the Android
+app, which was posting with no body — fixed on the Android side (it now sends the same
+`{ processor: 'square' }` body), but the backend itself is still fragile against *any*
+future bodyless caller.
+
+**Fix before deploying Phase 1**: guard the destructure, e.g.
+`const processorName = (req.body || {}).processor || 'square';` — same shape of bug
+could exist anywhere else in `billing.js`/`storefront.js` that reads `req.body` after
+this refactor; worth a quick grep (`req.body\.`) across both files before shipping.
+
 ## What already works in our favor
 
 The Square migration's DB decision (`docs/stripe-to-square-migration.md`, "Open
