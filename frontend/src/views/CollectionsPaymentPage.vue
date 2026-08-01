@@ -6,8 +6,8 @@
         <RouterLink :to="backLink.to" class="back-link">← {{ backLink.label }}</RouterLink>
         <h1>Payment Setup</h1>
         <p class="page-desc">
-          Connect a Square account to receive payments from your store sales.
-          Square handles all payment processing, security, and payouts.
+          Connect a payout account to receive payments from your store sales.
+          Choose a payment processor below to get started.
         </p>
       </div>
     </div>
@@ -69,101 +69,168 @@
         You're now on Prosaurus Pro. Your 0% fee rate is active.
       </p>
 
-      <!-- ── Square Connect ── -->
-      <h2 class="section-heading">Payout Account</h2>
+      <!-- ── Payment method chooser ── -->
+      <template v-if="viewMode === 'chooser'">
+        <h2 class="section-heading">Choose a Payment Method</h2>
+        <p class="chooser-intro">
+          Pick a processor to handle your payouts. You can come back here to switch
+          or add another processor later.
+        </p>
 
-      <!-- Not connected -->
-      <div v-if="status === 'not_connected'" class="status-card">
-        <div class="status-icon status-icon--inactive">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
-            <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
-            <line x1="1" y1="10" x2="23" y2="10"/>
-          </svg>
-        </div>
-        <div class="status-body">
-          <div class="status-title">No payout account connected</div>
-          <div class="status-desc">
-            Connect a Square account to receive payouts. You'll be taken to Square
-            to create or link an account — it only takes a few minutes.
+        <div class="processor-grid">
+          <!-- Square -->
+          <div class="processor-card" :class="{ 'processor-card--connected': squareStatus !== 'not_connected' }">
+            <div class="processor-card-header">
+              <div class="processor-icon processor-icon--square">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22">
+                  <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+                  <line x1="1" y1="10" x2="23" y2="10"/>
+                </svg>
+              </div>
+              <div class="processor-name">Square</div>
+              <span v-if="squareStatus === 'active'" class="processor-badge processor-badge--active">Connected</span>
+              <span v-else-if="squareStatus === 'pending'" class="processor-badge processor-badge--pending">Setup incomplete</span>
+            </div>
+            <p class="processor-desc">
+              Instant self-serve setup — create or link a Square account and start
+              accepting payments within a few minutes.
+            </p>
+            <ul class="processor-points">
+              <li>Payouts go straight to your bank on Square's schedule</li>
+              <li>Square's standard processing fee applies (~2.9% + $0.30)</li>
+              <li>Manage your account anytime from the Square Dashboard</li>
+            </ul>
+            <button class="btn-square" @click="chooseProcessor('square')">
+              {{ squareStatus === 'not_connected' ? 'Choose Square' : 'Manage Square' }}
+            </button>
           </div>
-          <div v-if="connectError" class="connect-error">{{ connectError }}</div>
-        </div>
-        <button class="btn-square" :disabled="starting" @click="startConnect">
-          {{ starting ? 'Redirecting…' : 'Connect with Square' }}
-        </button>
-      </div>
 
-      <!-- Connected but onboarding not complete -->
-      <div v-else-if="status === 'pending'" class="status-card">
-        <div class="status-icon status-icon--pending">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="8" x2="12" y2="12"/>
-            <line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-        </div>
-        <div class="status-body">
-          <div class="status-title">Setup incomplete</div>
-          <div class="status-desc">
-            Your Square account has been created but you haven't finished the onboarding steps yet.
-            Complete setup to start accepting payments.
-          </div>
-          <div v-if="connectError" class="connect-error">{{ connectError }}</div>
-        </div>
-        <button class="btn-square" :disabled="starting" @click="startConnect">
-          {{ starting ? 'Redirecting…' : 'Continue Square Setup' }}
-        </button>
-      </div>
-
-      <!-- Fully connected -->
-      <div v-else-if="status === 'active'" class="status-card status-card--active">
-        <div class="status-icon status-icon--active">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="28" height="28">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-        </div>
-        <div class="status-body">
-          <div class="status-title">Square account connected</div>
-          <div class="status-desc">
-            Your account is set up and ready to accept payments. Payouts will go directly
-            to your bank account on Square's schedule.
+          <!-- PayPal -->
+          <div class="processor-card processor-card--disabled">
+            <div class="processor-card-header">
+              <div class="processor-icon processor-icon--paypal">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22">
+                  <path d="M7 15h4.5c3 0 5.5-2 5.5-5 0-2.5-2-4-4.5-4H8L6 18"/>
+                  <path d="M9.5 15H13c2.5 0 4.5-1.5 4.5-4"/>
+                </svg>
+              </div>
+              <div class="processor-name">PayPal</div>
+              <span class="processor-badge processor-badge--soon">Coming Soon</span>
+            </div>
+            <p class="processor-desc">
+              Connect a PayPal Business account to receive payouts instead of — or
+              alongside — Square.
+            </p>
+            <ul class="processor-points">
+              <li>Payouts go to your PayPal balance, transferable to your bank</li>
+              <li>PayPal's standard processing fee applies</li>
+              <li>We're finalizing PayPal's marketplace approval — check back soon</li>
+            </ul>
+            <button class="btn-outline" disabled>Coming Soon</button>
           </div>
         </div>
-        <a
-          href="https://squareup.com/dashboard"
-          target="_blank"
-          rel="noopener"
-          class="btn-outline"
-        >Open Square Dashboard ↗</a>
-      </div>
+      </template>
 
-      <!-- ── How it works ── -->
-      <div class="info-section">
-        <h2 class="info-heading">How it works</h2>
-        <div class="info-steps">
-          <div class="info-step">
-            <div class="step-num">1</div>
-            <div class="step-body">
-              <div class="step-title">Connect your Square payout account</div>
-              <div class="step-desc">Create a new Square account or link an existing one. Square collects your business details and bank info for payouts.</div>
+      <!-- ── Managing the chosen processor (Square, today's only option) ── -->
+      <template v-else>
+        <div class="manage-header">
+          <h2 class="section-heading">Payout Account — Square</h2>
+          <button class="link-btn" @click="viewMode = 'chooser'">Change payment method</button>
+        </div>
+
+        <!-- Not connected -->
+        <div v-if="squareStatus === 'not_connected'" class="status-card">
+          <div class="status-icon status-icon--inactive">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
+              <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+              <line x1="1" y1="10" x2="23" y2="10"/>
+            </svg>
+          </div>
+          <div class="status-body">
+            <div class="status-title">No payout account connected</div>
+            <div class="status-desc">
+              Connect a Square account to receive payouts. You'll be taken to Square
+              to create or link an account — it only takes a few minutes.
+            </div>
+            <div v-if="connectError" class="connect-error">{{ connectError }}</div>
+          </div>
+          <button class="btn-square" :disabled="starting" @click="startConnect">
+            {{ starting ? 'Redirecting…' : 'Connect with Square' }}
+          </button>
+        </div>
+
+        <!-- Connected but onboarding not complete -->
+        <div v-else-if="squareStatus === 'pending'" class="status-card">
+          <div class="status-icon status-icon--pending">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+          </div>
+          <div class="status-body">
+            <div class="status-title">Setup incomplete</div>
+            <div class="status-desc">
+              Your Square account has been created but you haven't finished the onboarding steps yet.
+              Complete setup to start accepting payments.
+            </div>
+            <div v-if="connectError" class="connect-error">{{ connectError }}</div>
+          </div>
+          <button class="btn-square" :disabled="starting" @click="startConnect">
+            {{ starting ? 'Redirecting…' : 'Continue Square Setup' }}
+          </button>
+        </div>
+
+        <!-- Fully connected -->
+        <div v-else-if="squareStatus === 'active'" class="status-card status-card--active">
+          <div class="status-icon status-icon--active">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="28" height="28">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          </div>
+          <div class="status-body">
+            <div class="status-title">Square account connected</div>
+            <div class="status-desc">
+              Your account is set up and ready to accept payments. Payouts will go directly
+              to your bank account on Square's schedule.
             </div>
           </div>
-          <div class="info-step">
-            <div class="step-num">2</div>
-            <div class="step-body">
-              <div class="step-title">Set prices on your products</div>
-              <div class="step-desc">Add pricing to items in your collections. Each piece can have its own price and shipping cost.</div>
+          <a
+            href="https://squareup.com/dashboard"
+            target="_blank"
+            rel="noopener"
+            class="btn-outline"
+          >Open Square Dashboard ↗</a>
+        </div>
+
+        <!-- ── How it works ── -->
+        <div class="info-section">
+          <h2 class="info-heading">How it works</h2>
+          <div class="info-steps">
+            <div class="info-step">
+              <div class="step-num">1</div>
+              <div class="step-body">
+                <div class="step-title">Connect your Square payout account</div>
+                <div class="step-desc">Create a new Square account or link an existing one. Square collects your business details and bank info for payouts.</div>
+              </div>
             </div>
-          </div>
-          <div class="info-step">
-            <div class="step-num">3</div>
-            <div class="step-body">
-              <div class="step-title">Customers buy from your store</div>
-              <div class="step-desc">Square processes payments securely. Pro members keep 100% of their sale price (minus Square's ~2.9% + $0.30 processing fee). Free members also have a 5% platform fee deducted.</div>
+            <div class="info-step">
+              <div class="step-num">2</div>
+              <div class="step-body">
+                <div class="step-title">Set prices on your products</div>
+                <div class="step-desc">Add pricing to items in your collections. Each piece can have its own price and shipping cost.</div>
+              </div>
+            </div>
+            <div class="info-step">
+              <div class="step-num">3</div>
+              <div class="step-body">
+                <div class="step-title">Customers buy from your store</div>
+                <div class="step-desc">Square processes payments securely. Pro members keep 100% of their sale price (minus Square's ~2.9% + $0.30 processing fee). Free members also have a 5% platform fee deducted.</div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </template>
 
     </template>
 
@@ -271,8 +338,18 @@ const REFERRERS = {
 const route = useRoute()
 const backLink = computed(() => REFERRERS[route.query.r] || REFERRERS[2])
 const loading = ref(true)
-const status = ref('not_connected')
+const squareStatus = ref('not_connected')
 const starting = ref(false)
+
+// 'chooser' shows the pick-a-processor screen; 'manage' shows the status/setup UI
+// for whichever processor is active (Square only, for now — PayPal Connect isn't
+// available yet, see docs/paypal-integration-plan.md).
+const viewMode = ref('chooser')
+
+function chooseProcessor(name) {
+  if (name !== 'square') return // PayPal isn't connectable yet
+  viewMode.value = 'manage'
+}
 
 const plan = ref({ subscribed: false, platform: null, fee_percent: 5 })
 const subscribeSuccess = ref(false)
@@ -285,10 +362,10 @@ let manageCardHandle = null
 
 async function fetchStatus() {
   try {
-    const res = await authFetch('/api/billing/connect/status')
+    const res = await authFetch('/api/billing/connect/status?processor=square')
     if (res.ok) {
       const data = await res.json()
-      status.value = data.status
+      squareStatus.value = data.status
     }
   } catch (err) {
     console.error('Failed to fetch connect status:', err)
@@ -309,11 +386,15 @@ async function startConnect() {
   starting.value = true
   connectError.value = ''
   try {
-    const res = await authFetch('/api/billing/connect/start', { method: 'POST' })
+    const res = await authFetch('/api/billing/connect/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ processor: 'square' }),
+    })
     if (res.ok) {
       const data = await res.json()
       if (data.status === 'active') {
-        status.value = 'active'
+        squareStatus.value = 'active'
       } else if (data.url) {
         window.location.href = data.url
         return
@@ -458,7 +539,12 @@ onMounted(async () => {
   await Promise.all([fetchStatus(), fetchPlan()])
   loading.value = false
 
-  // Returning from the Square OAuth Connect redirect
+  // Land on the manage screen (rather than the chooser) if Square is already set
+  // up, or if we're returning from the Square OAuth Connect redirect.
+  if (squareStatus.value !== 'not_connected' || route.query.square) {
+    viewMode.value = 'manage'
+  }
+
   if (route.query.square === 'denied') {
     connectError.value = 'Connection was cancelled.'
   } else if (route.query.square === 'error') {
@@ -587,6 +673,142 @@ onMounted(async () => {
   color: var(--color-text);
   margin: 0 0 16px;
 }
+
+/* ── Manage header (with "Change payment method" link) ── */
+.manage-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.manage-header .section-heading { margin-bottom: 16px; }
+
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--color-link);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 16px;
+}
+
+.link-btn:hover { text-decoration: underline; }
+
+/* ── Processor chooser ── */
+.chooser-intro {
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+  margin: -8px 0 24px;
+  line-height: 1.5;
+}
+
+.processor-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin-bottom: 40px;
+}
+
+@media (max-width: 640px) {
+  .processor-grid { grid-template-columns: 1fr; }
+}
+
+.processor-card {
+  display: flex;
+  flex-direction: column;
+  padding: 22px 24px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-background-soft, rgba(0,0,0,0.02));
+}
+
+.processor-card--connected {
+  border-color: #2f855a;
+  background: rgba(47, 133, 90, 0.05);
+}
+
+.processor-card--disabled {
+  opacity: 0.72;
+}
+
+.processor-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.processor-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.processor-icon--square { background: #000; color: #fff; }
+.processor-icon--paypal { background: #003087; color: #fff; }
+
+.processor-name {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: var(--color-text);
+}
+
+.processor-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 20px;
+  margin-left: auto;
+}
+
+.processor-badge--active { background: rgba(47, 133, 90, 0.15); color: #2f855a; }
+.processor-badge--pending { background: rgba(214, 158, 46, 0.15); color: #b7791f; }
+.processor-badge--soon { background: rgba(0,0,0,0.08); color: var(--color-text-secondary); }
+
+.processor-desc {
+  font-size: 0.88rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
+
+.processor-points {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.processor-points li {
+  font-size: 0.82rem;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+  padding-left: 16px;
+  position: relative;
+}
+
+.processor-points li::before {
+  content: '•';
+  position: absolute;
+  left: 2px;
+  color: var(--color-text-secondary);
+}
+
+.processor-card button { align-self: flex-start; }
 
 /* ── Status cards ── */
 .status-card {
