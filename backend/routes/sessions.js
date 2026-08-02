@@ -8,6 +8,9 @@ const { uploadToS3, deleteFromS3, getS3Url, streamFromS3 } = require('../utiliti
 const { normalizeToWav } = require('../utilities/audio');
 const { extractToken } = require('../utilities/auth');
 const { isSubscribed } = require('../utilities/subscription');
+const { emitToUser } = require('../utilities/socket');
+const { checkAndFilterContent } = require('../utilities/contentFilter');
+const { sendToUser } = require('../utilities/fcm');
 
 require('dotenv').config();
 
@@ -55,6 +58,27 @@ const authenticateToken = async (req, res, next) => {
   }
 };
 
+// Does `userId` have access to session `sessionId`? Owner, active member of the
+// session's own band_id, or active member of a band that has this session in one of
+// its shortlists (widens visibility only to what's been explicitly shortlisted, not
+// to every recording any bandmate has ever uploaded).
+async function hasSessionAccess(client, sessionId, userId) {
+  const result = await client.query(
+    `SELECT s.id FROM sessions s
+     LEFT JOIN band_members bm ON bm.band_id = s.band_id AND bm.user_id = $2 AND bm.status = 'active'
+     WHERE s.id = $1 AND (
+       s.user_id = $2 OR bm.band_id IS NOT NULL OR EXISTS (
+         SELECT 1 FROM shortlist_sessions ss
+         JOIN shortlists sl ON sl.id = ss.shortlist_id
+         JOIN band_members bm2 ON bm2.band_id = sl.band_id AND bm2.user_id = $2 AND bm2.status = 'active'
+         WHERE ss.session_id = s.id
+       )
+     )`,
+    [sessionId, userId]
+  );
+  return result.rowCount > 0;
+}
+
 // GET /api/sessions — list the current user's sessions with avg rating
 router.get('/', authenticateToken, async (req, res) => {
   const client = await getClient();
@@ -65,7 +89,8 @@ router.get('/', authenticateToken, async (req, res) => {
          s.instrument_id, i.name AS instrument_name,
          ROUND(AVG(sr.rating), 1) AS avg_rating,
          COUNT(sr.rating) AS rating_count,
-         MAX(CASE WHEN sr.user_id = $2 THEN sr.rating END) AS my_rating
+         MAX(CASE WHEN sr.user_id = $2 THEN sr.rating END) AS my_rating,
+         (SELECT COUNT(*) FROM shortlist_sessions ss WHERE ss.session_id = s.id) AS shortlist_count
        FROM sessions s
        LEFT JOIN bands b ON b.id = s.band_id
        LEFT JOIN instruments i ON i.id = s.instrument_id
@@ -95,7 +120,8 @@ router.get('/band-members', authenticateToken, async (req, res) => {
          u.handle AS uploader_handle,
          ROUND(AVG(sr.rating), 1) AS avg_rating,
          COUNT(sr.rating) AS rating_count,
-         MAX(CASE WHEN sr.user_id = $2 THEN sr.rating END) AS my_rating
+         MAX(CASE WHEN sr.user_id = $2 THEN sr.rating END) AS my_rating,
+         (SELECT COUNT(*) FROM shortlist_sessions ss WHERE ss.session_id = s.id) AS shortlist_count
        FROM sessions s
        JOIN band_members bm_me ON bm_me.band_id = s.band_id AND bm_me.user_id = $1 AND bm_me.status = 'active'
        JOIN band_members bm_them ON bm_them.band_id = s.band_id AND bm_them.user_id = s.user_id AND bm_them.status = 'active'
@@ -164,17 +190,15 @@ router.get('/practice-suggestions', authenticateToken, async (req, res) => {
   }
 });
 
-// GET /api/sessions/:id/stream — access-checked proxy from S3 (owner or active band member)
+// GET /api/sessions/:id/stream — access-checked proxy from S3 (owner, active band
+// member, or active member of a band that has this session in one of its shortlists)
 router.get('/:id/stream', authenticateToken, async (req, res) => {
   const client = await getClient();
   try {
-    const result = await client.query(
-      `SELECT s.s3_key FROM sessions s
-       LEFT JOIN band_members bm ON bm.band_id = s.band_id AND bm.user_id = $2 AND bm.status = 'active'
-       WHERE s.id = $1 AND (s.user_id = $2 OR bm.band_id IS NOT NULL)`,
-      [req.params.id, req.user.id]
-    );
-    if (result.rowCount === 0) return res.status(404).json({ message: 'Session not found' });
+    if (!(await hasSessionAccess(client, req.params.id, req.user.id))) {
+      return res.status(404).json({ message: 'Session not found' });
+    }
+    const result = await client.query('SELECT s3_key FROM sessions WHERE id = $1', [req.params.id]);
     await streamFromS3(result.rows[0].s3_key, req, res);
   } catch (err) {
     console.error('Error streaming session:', err);
@@ -263,14 +287,11 @@ router.post('/:id/rate', authenticateToken, async (req, res) => {
   const { rating } = req.body;
   const client = await getClient();
   try {
-    // Allow session owner or active band member to rate
-    const existing = await client.query(
-      `SELECT s.id FROM sessions s
-       LEFT JOIN band_members bm ON bm.band_id = s.band_id AND bm.user_id = $2 AND bm.status = 'active'
-       WHERE s.id = $1 AND (s.user_id = $2 OR bm.band_id IS NOT NULL)`,
-      [req.params.id, req.user.id]
-    );
-    if (existing.rowCount === 0) return res.status(404).json({ message: 'Session not found' });
+    // Allow session owner, active band member, or active member of a band that has
+    // this session in one of its shortlists to rate
+    if (!(await hasSessionAccess(client, req.params.id, req.user.id))) {
+      return res.status(404).json({ message: 'Session not found' });
+    }
 
     if (rating === null || rating === undefined) {
       await client.query(
@@ -296,6 +317,196 @@ router.post('/:id/rate', authenticateToken, async (req, res) => {
   } catch (err) {
     console.error('Error saving rating:', err);
     res.status(500).json({ message: 'Failed to save rating' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/sessions/:id/shortlists — which shortlist IDs (within bands the caller is
+// an active member of) this session already belongs to. Feeds the add-to-shortlist
+// popover's pre-checked boxes.
+router.get('/:id/shortlists', authenticateToken, async (req, res) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      `SELECT ss.shortlist_id
+       FROM shortlist_sessions ss
+       JOIN shortlists sl ON sl.id = ss.shortlist_id
+       JOIN band_members bm ON bm.band_id = sl.band_id AND bm.user_id = $2 AND bm.status = 'active'
+       WHERE ss.session_id = $1`,
+      [req.params.id, req.user.id]
+    );
+    res.json({ shortlistIds: result.rows.map(r => r.shortlist_id) });
+  } catch (err) {
+    console.error('Error fetching session shortlists:', err);
+    res.status(500).json({ message: 'Failed to fetch session shortlists' });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/sessions/:id/comments — threaded (one level deep) discussion attached to
+// this recording. Same access rule as streaming/rating.
+router.get('/:id/comments', authenticateToken, async (req, res) => {
+  const client = await getClient();
+  try {
+    if (!(await hasSessionAccess(client, req.params.id, req.user.id))) {
+      return res.status(404).json({ message: 'Session not found' });
+    }
+
+    const result = await client.query(
+      `SELECT sc.id, sc.session_id, sc.user_id, sc.parent_id, sc.content, sc.created_at,
+         u.handle AS author_handle, u.first_name AS author_first_name,
+         u.last_name AS author_last_name, u.photo_path AS author_photo
+       FROM session_comments sc
+       JOIN users u ON u.id = sc.user_id
+       WHERE sc.session_id = $1 AND sc.is_deleted = 0
+       ORDER BY sc.created_at ASC`,
+      [req.params.id]
+    );
+
+    const commentsMap = new Map();
+    const topLevel = [];
+    result.rows.forEach(row => {
+      commentsMap.set(row.id, {
+        id: row.id,
+        sessionId: row.session_id,
+        userId: row.user_id,
+        parentId: row.parent_id,
+        content: row.content,
+        createdAt: row.created_at,
+        author: {
+          handle: row.author_handle,
+          firstName: row.author_first_name,
+          lastName: row.author_last_name,
+          photo: row.author_photo
+        },
+        replies: []
+      });
+    });
+    commentsMap.forEach(comment => {
+      if (comment.parentId && commentsMap.has(comment.parentId)) {
+        commentsMap.get(comment.parentId).replies.push(comment);
+      } else {
+        topLevel.push(comment);
+      }
+    });
+
+    res.json({ comments: topLevel });
+  } catch (err) {
+    console.error('Error fetching session comments:', err);
+    res.status(500).json({ message: 'Failed to fetch comments' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/sessions/:id/comments — post a comment (or a one-level-deep reply via
+// parent_id). Notifies other active members of any band whose shortlist includes this
+// session.
+router.post('/:id/comments', authenticateToken, async (req, res) => {
+  const { content, parent_id } = req.body || {};
+  if (!content || !content.trim()) return res.status(400).json({ message: 'Comment content is required' });
+  if (content.length > 2000) return res.status(400).json({ message: 'Comment cannot exceed 2000 characters' });
+
+  const client = await getClient();
+  try {
+    if (!(await hasSessionAccess(client, req.params.id, req.user.id))) {
+      return res.status(404).json({ message: 'Session not found' });
+    }
+
+    if (parent_id) {
+      const parentCheck = await client.query(
+        'SELECT id FROM session_comments WHERE id = $1 AND session_id = $2 AND is_deleted = 0',
+        [parent_id, req.params.id]
+      );
+      if (parentCheck.rowCount === 0) return res.status(400).json({ message: 'Parent comment not found' });
+    }
+
+    const insertResult = await client.query(
+      'INSERT INTO session_comments (session_id, user_id, parent_id, content) VALUES ($1, $2, $3, $4)',
+      [req.params.id, req.user.id, parent_id || null, content.trim()]
+    );
+
+    const row = (await client.query(
+      `SELECT sc.id, sc.session_id, sc.user_id, sc.parent_id, sc.content, sc.created_at,
+         u.handle AS author_handle, u.first_name AS author_first_name,
+         u.last_name AS author_last_name, u.photo_path AS author_photo
+       FROM session_comments sc JOIN users u ON u.id = sc.user_id WHERE sc.id = $1`,
+      [insertResult.insertId]
+    )).rows[0];
+
+    const comment = {
+      id: row.id,
+      sessionId: row.session_id,
+      userId: row.user_id,
+      parentId: row.parent_id,
+      content: row.content,
+      createdAt: row.created_at,
+      author: {
+        handle: row.author_handle,
+        firstName: row.author_first_name,
+        lastName: row.author_last_name,
+        photo: row.author_photo
+      },
+      replies: []
+    };
+
+    checkAndFilterContent('comment', comment.id, [content], req.user.id).catch(() => {});
+
+    // Notify other active members of any band that has this session shortlisted
+    const notifyResult = await client.query(
+      `SELECT DISTINCT bm.user_id
+       FROM shortlist_sessions ss
+       JOIN shortlists sl ON sl.id = ss.shortlist_id
+       JOIN band_members bm ON bm.band_id = sl.band_id AND bm.status = 'active'
+       WHERE ss.session_id = $1 AND bm.user_id != $2`,
+      [req.params.id, req.user.id]
+    );
+    for (const { user_id: targetUserId } of notifyResult.rows) {
+      const settingResult = await client.query(
+        'SELECT notifications_enabled FROM user_settings WHERE user_id = $1',
+        [targetUserId]
+      );
+      const s = settingResult.rows[0];
+      if (!s || s.notifications_enabled) {
+        emitToUser(targetUserId, 'shortlist_comment_badge_update', { sessionId: parseInt(req.params.id, 10) });
+        sendToUser(targetUserId, {
+          type: 'shortlist_comment',
+          sessionId: String(req.params.id),
+          commenterHandle: req.user.handle,
+          preview: content.substring(0, 100)
+        }).catch(() => {});
+      }
+    }
+
+    res.status(201).json({ comment });
+  } catch (err) {
+    console.error('Error creating session comment:', err);
+    res.status(500).json({ message: 'Failed to create comment' });
+  } finally {
+    client.release();
+  }
+});
+
+// DELETE /api/sessions/comments/:commentId — soft delete, author only
+router.delete('/comments/:commentId', authenticateToken, async (req, res) => {
+  const client = await getClient();
+  try {
+    const existing = await client.query(
+      'SELECT user_id FROM session_comments WHERE id = $1 AND is_deleted = 0',
+      [req.params.commentId]
+    );
+    if (existing.rowCount === 0) return res.status(404).json({ message: 'Comment not found' });
+    if (existing.rows[0].user_id !== req.user.id) {
+      return res.status(403).json({ message: 'You can only delete your own comments' });
+    }
+
+    await client.query('UPDATE session_comments SET is_deleted = 1 WHERE id = $1', [req.params.commentId]);
+    res.json({ message: 'Comment deleted' });
+  } catch (err) {
+    console.error('Error deleting session comment:', err);
+    res.status(500).json({ message: 'Failed to delete comment' });
   } finally {
     client.release();
   }

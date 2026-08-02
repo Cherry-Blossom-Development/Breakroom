@@ -2,9 +2,12 @@
 import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import draggable from 'vuedraggable'
 import { sessions } from '@/stores/sessions'
+import { shortlists } from '@/stores/shortlists'
 import { authFetch } from '@/utilities/authFetch'
 import { buildDevicePayload } from '@/utilities/deviceId'
 import SessionsPaywallModal from '@/components/SessionsPaywallModal.vue'
+import ShortlistButton from '@/components/ShortlistButton.vue'
+import SessionComments from '@/components/SessionComments.vue'
 
 // --- Pro paywall (free-tier session limit) ---
 const paywallVisible = ref(false)
@@ -1043,6 +1046,99 @@ async function saveInstrument(session, value) {
 
 const activeBands = computed(() => bands.value.filter(b => b.status === 'active'))
 
+// --- Shortlists ---
+const shortlistsBandFilter = ref('')
+const expandedShortlistId = ref(null)
+const shortlistDetail = ref(null) // { shortlist, sessions } for the expanded shortlist
+const shortlistDetailLoading = ref(false)
+const newShortlistName = ref('')
+const newShortlistBandId = ref('')
+const renamingShortlistId = ref(null)
+const renameShortlistValue = ref('')
+const commentsOpenSessionId = ref(null)
+
+const filteredShortlists = computed(() => {
+  return shortlistsBandFilter.value
+    ? shortlists.list.filter(sl => String(sl.band_id) === String(shortlistsBandFilter.value))
+    : shortlists.list
+})
+
+async function createShortlistFromCard() {
+  const bandId = newShortlistBandId.value || (activeBands.value[0] && activeBands.value[0].id)
+  if (!newShortlistName.value.trim() || !bandId) return
+  try {
+    await shortlists.create(parseInt(bandId, 10), newShortlistName.value.trim())
+    newShortlistName.value = ''
+  } catch (err) {
+    console.error('Failed to create shortlist:', err)
+  }
+}
+
+async function toggleExpandShortlist(shortlistId) {
+  if (expandedShortlistId.value === shortlistId) {
+    expandedShortlistId.value = null
+    shortlistDetail.value = null
+    commentsOpenSessionId.value = null
+    return
+  }
+  expandedShortlistId.value = shortlistId
+  commentsOpenSessionId.value = null
+  shortlistDetailLoading.value = true
+  try {
+    shortlistDetail.value = await shortlists.loadDetail(shortlistId)
+  } catch (err) {
+    console.error('Failed to load shortlist:', err)
+  } finally {
+    shortlistDetailLoading.value = false
+  }
+}
+
+async function removeFromShortlist(sessionId) {
+  if (!expandedShortlistId.value) return
+  try {
+    await shortlists.removeSession(expandedShortlistId.value, sessionId)
+    shortlistDetail.value.sessions = shortlistDetail.value.sessions.filter(s => s.id !== sessionId)
+  } catch (err) {
+    console.error('Failed to remove from shortlist:', err)
+  }
+}
+
+function startRenameShortlist(shortlist) {
+  renamingShortlistId.value = shortlist.id
+  renameShortlistValue.value = shortlist.name
+}
+
+async function saveRenameShortlist(shortlist) {
+  const name = renameShortlistValue.value.trim()
+  renamingShortlistId.value = null
+  if (!name || name === shortlist.name) return
+  try {
+    await shortlists.rename(shortlist.id, name)
+    if (shortlistDetail.value && shortlistDetail.value.shortlist.id === shortlist.id) {
+      shortlistDetail.value.shortlist.name = name
+    }
+  } catch (err) {
+    console.error('Failed to rename shortlist:', err)
+  }
+}
+
+async function deleteShortlist(shortlist) {
+  if (!confirm(`Delete "${shortlist.name}"? Recordings in it won't be deleted, just unlisted.`)) return
+  try {
+    await shortlists.remove(shortlist.id)
+    if (expandedShortlistId.value === shortlist.id) {
+      expandedShortlistId.value = null
+      shortlistDetail.value = null
+    }
+  } catch (err) {
+    console.error('Failed to delete shortlist:', err)
+  }
+}
+
+function toggleSessionComments(sessionId) {
+  commentsOpenSessionId.value = commentsOpenSessionId.value === sessionId ? null : sessionId
+}
+
 // --- Rating popup ---
 function openRatingPopup(sessionId, event) {
   event.stopPropagation()
@@ -1324,7 +1420,8 @@ async function handleMashupUpload() {
 
 onMounted(async () => {
   sessions.reset()
-  await Promise.all([sessions.load(), loadAudioDefaults(), registerDevice()])
+  shortlists.reset()
+  await Promise.all([sessions.load(), loadAudioDefaults(), registerDevice(), shortlists.load()])
   if (availableYears.value.length > 0) selectedYear.value = availableYears.value[0]
   document.addEventListener('click', closeRatingPopup)
   await Promise.all([loadBands(), loadInstruments(), loadBandMemberSessions()])
@@ -1763,6 +1860,7 @@ onMounted(async () => {
                         </div>
                       </td>
                       <td>
+                        <ShortlistButton :session="session" :bands="activeBands" />
                         <button class="share-btn" @click="shareSession(session)" title="Share">⬆</button>
                         <button class="delete-btn" @click="deleteSession(session.id)" title="Delete">✕</button>
                       </td>
@@ -1871,6 +1969,7 @@ onMounted(async () => {
                       </td>
                       <td class="muted">{{ session.band_name || '—' }}</td>
                       <td>
+                        <ShortlistButton :session="session" :bands="activeBands" />
                         <button class="share-btn" @click="shareSession(session)" title="Share">⬆</button>
                       </td>
                     </tr>
@@ -1949,6 +2048,7 @@ onMounted(async () => {
                     </div>
                   </td>
                   <td>
+                    <ShortlistButton :session="session" :bands="activeBands" />
                     <button class="share-btn" @click="shareSession(session)" title="Share">⬆</button>
                     <button class="delete-btn" @click="deleteSession(session.id)" title="Delete">✕</button>
                   </td>
@@ -2429,6 +2529,138 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- Shortlists -->
+    <div class="card shortlists-card">
+      <div class="sessions-header">
+        <h2 class="card-title">Shortlists <span class="count">({{ filteredShortlists.length }})</span></h2>
+        <select v-if="activeBands.length > 1" v-model="shortlistsBandFilter" class="bm-band-select">
+          <option value="">All Bands</option>
+          <option v-for="b in activeBands" :key="b.id" :value="b.id">{{ b.name }}</option>
+        </select>
+      </div>
+
+      <p class="shortlists-intro">
+        Pull specific recordings out for focused evaluation and discussion. Use the
+        <span class="inline-icon">📑</span> icon on any recording below (or in your
+        other recordings) to add it to one of these.
+      </p>
+
+      <div v-if="filteredShortlists.length === 0" class="empty-state">
+        No shortlists yet. Create one below, or add a recording to a new one via its
+        <span class="inline-icon">📑</span> icon.
+      </div>
+
+      <div v-else class="shortlist-list">
+        <div v-for="sl in filteredShortlists" :key="sl.id" class="shortlist-row">
+          <button class="shortlist-row-header" @click="toggleExpandShortlist(sl.id)">
+            <span class="month-chevron">{{ expandedShortlistId === sl.id ? '▼' : '▶' }}</span>
+            <span v-if="renamingShortlistId !== sl.id" class="shortlist-name">{{ sl.name }}</span>
+            <input v-else class="inline-edit shortlist-rename-input" :value="renameShortlistValue"
+                   @click.stop @input="e => renameShortlistValue = e.target.value"
+                   @blur="saveRenameShortlist(sl)" @keydown.enter="e => e.target.blur()" />
+            <span v-if="activeBands.length > 1" class="band-tag">{{ sl.band_name }}</span>
+            <span class="month-count">{{ sl.item_count }}</span>
+          </button>
+          <div class="shortlist-row-actions">
+            <button class="link-btn" @click.stop="startRenameShortlist(sl)">Rename</button>
+            <button class="link-btn delete-link" @click.stop="deleteShortlist(sl)">Delete</button>
+          </div>
+
+          <div v-if="expandedShortlistId === sl.id" class="shortlist-detail">
+            <div v-if="shortlistDetailLoading" class="empty-state">Loading…</div>
+            <div v-else-if="!shortlistDetail || shortlistDetail.sessions.length === 0" class="empty-state">
+              No recordings in this shortlist yet.
+            </div>
+            <div v-else class="table-wrapper">
+              <table class="sessions-table">
+                <thead>
+                  <tr>
+                    <th class="col-play"></th>
+                    <th>Name</th>
+                    <th>Uploaded by</th>
+                    <th>Rating</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template v-for="session in shortlistDetail.sessions" :key="session.id">
+                  <tr :class="{ playing: playingId === session.id }">
+                    <td class="col-play">
+                      <button class="play-btn" @click="togglePlay(session)"
+                              :title="playingId === session.id && isPlaying ? 'Pause' : 'Play'">
+                        {{ playingId === session.id && isPlaying ? '⏸' : '▶' }}
+                      </button>
+                    </td>
+                    <td class="col-name">
+                      <span class="session-name-text">{{ session.name }}</span>
+                      <span v-if="session.band_name" class="session-sub muted">{{ session.band_name }}</span>
+                    </td>
+                    <td class="muted">@{{ session.uploader_handle }}</td>
+                    <td class="col-rating">
+                      <div class="rating-cell" @click.stop>
+                        <span class="avg-rating" :class="{ unrated: !session.avg_rating }">
+                          {{ session.avg_rating ? `★ ${session.avg_rating}` : '★ —' }}
+                          <span v-if="session.rating_count > 0" class="rating-count">({{ session.rating_count }})</span>
+                        </span>
+                        <button class="rate-btn" :class="{ rated: session.my_rating }"
+                                @click="openRatingPopup(session.id, $event)"
+                                :title="session.my_rating ? `Your rating: ${session.my_rating}/10` : 'Rate this recording'">
+                          {{ session.my_rating ? session.my_rating : 'Rate' }}
+                        </button>
+                        <div v-if="ratingPopupId === session.id" class="rating-popup" @click.stop>
+                          <div class="popup-label">Your rating</div>
+                          <div class="popup-numbers">
+                            <button v-for="n in 10" :key="n" class="popup-num"
+                                    :class="{ selected: session.my_rating === n }"
+                                    @click="submitRating(session, n)">{{ n }}</button>
+                          </div>
+                          <button v-if="session.my_rating" class="popup-clear" @click="submitRating(session, null)">
+                            Clear rating
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <button class="link-btn comment-toggle" @click="toggleSessionComments(session.id)">
+                        💬 {{ session.comment_count > 0 ? `(${session.comment_count})` : '' }}
+                      </button>
+                      <button class="link-btn delete-link" @click="removeFromShortlist(session.id)">Remove</button>
+                    </td>
+                  </tr>
+                  <tr v-if="playingId === session.id" class="player-row">
+                    <td colspan="5">
+                      <audio ref="audioEl" :src="`/api/sessions/${playingId}/stream`"
+                             @play="onAudioPlay" @pause="onAudioPause" @ended="onAudioEnded"
+                             @loadedmetadata="onAudioMetadata"
+                             controls preload="metadata"></audio>
+                    </td>
+                  </tr>
+                  <tr v-if="commentsOpenSessionId === session.id" class="player-row">
+                    <td colspan="5">
+                      <SessionComments :session-id="session.id" />
+                    </td>
+                  </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="new-shortlist-row">
+        <select v-if="activeBands.length > 1" v-model="newShortlistBandId" class="bm-band-select">
+          <option value="">— band —</option>
+          <option v-for="b in activeBands" :key="b.id" :value="b.id">{{ b.name }}</option>
+        </select>
+        <input v-model="newShortlistName" type="text" class="text-input" placeholder="New shortlist name…"
+               @keydown.enter="createShortlistFromCard" />
+        <button class="btn-outline" :disabled="!newShortlistName.trim()" @click="createShortlistFromCard">
+          + New Shortlist
+        </button>
+      </div>
+    </div>
+
     <!-- Sessions Card -->
     <div class="card sessions-card">
       <div class="sessions-header">
@@ -2523,6 +2755,7 @@ onMounted(async () => {
                       </div>
                     </td>
                     <td>
+                      <ShortlistButton :session="session" :bands="activeBands" />
                       <button class="share-btn" @click="shareSession(session)" title="Share">⬆</button>
                       <button class="delete-btn" @click="deleteSession(session.id)" title="Delete">✕</button>
                     </td>
@@ -2648,6 +2881,69 @@ onMounted(async () => {
 .month-heading:hover { color: var(--color-text); }
 .month-chevron { font-size: 0.65rem; }
 .month-count { margin-left: auto; font-size: 0.8rem; font-weight: 400; background: var(--color-background, #333); border-radius: 10px; padding: 1px 8px; }
+
+/* Shortlists */
+.shortlists-intro { font-size: 0.85rem; color: var(--color-text-muted); margin: 0 0 16px; line-height: 1.5; }
+.inline-icon { font-size: 0.9em; }
+
+.shortlist-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; }
+
+.shortlist-row { border-bottom: 1px solid var(--color-border, #2a2a2a); }
+.shortlist-row:last-child { border-bottom: none; }
+
+.shortlist-row-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  color: var(--color-text);
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 10px 0;
+  width: 100%;
+  text-align: left;
+}
+.shortlist-row-header:hover { color: var(--color-accent); }
+
+.shortlist-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shortlist-rename-input { flex: 1; min-width: 0; }
+
+.band-tag {
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  background: var(--color-background, #333);
+  border-radius: 10px;
+  padding: 1px 8px;
+}
+
+.shortlist-row-actions { display: flex; gap: 12px; padding: 0 0 8px 22px; }
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 0;
+}
+.link-btn:hover { color: var(--color-accent); }
+.link-btn.delete-link:hover { color: var(--color-error, #e53935); }
+.link-btn.comment-toggle { margin-right: 10px; color: var(--color-text-muted); }
+
+.shortlist-detail { padding: 4px 0 12px 22px; }
+
+.new-shortlist-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border, #2a2a2a);
+}
+.new-shortlist-row .text-input { flex: 1; min-width: 180px; }
 
 /* Table */
 .table-wrapper { overflow-x: auto; margin-bottom: 4px; }
