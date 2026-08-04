@@ -10,6 +10,7 @@ import { getVisitorId } from './utilities/visitorId.js'
 import HeaderNotification from './components/HeaderNotification.vue'
 import PopupNotification from './components/PopupNotification.vue'
 import MentionToast from './components/MentionToast.vue'
+import ShortlistCommentToast from './components/ShortlistCommentToast.vue'
 import AppSidebar from './components/AppSidebar.vue'
 import BottomTabBar from './components/BottomTabBar.vue'
 import SupportModal from './components/SupportModal.vue'
@@ -29,6 +30,23 @@ function addMention(data) {
 
 function dismissMention(id) {
   mentionQueue.value = mentionQueue.value.filter(m => m.id !== id)
+}
+
+// Shortlist comments have no durable badge-count field on /api/user/badge-counts
+// (unlike chat/friend/blog), so this routes to an ephemeral toast rather than a
+// persistent badge, matching the fallback used for chat mentions above.
+const shortlistCommentQueue = ref([])
+
+function addShortlistCommentToast(data) {
+  const id = Date.now()
+  shortlistCommentQueue.value.push({ id, ...data })
+  setTimeout(() => {
+    shortlistCommentQueue.value = shortlistCommentQueue.value.filter(m => m.id !== id)
+  }, 6000)
+}
+
+function dismissShortlistCommentToast(id) {
+  shortlistCommentQueue.value = shortlistCommentQueue.value.filter(m => m.id !== id)
 }
 
 const router = useRouter()
@@ -142,6 +160,10 @@ function setupNotificationSocket() {
 
   socket.on('blog_badge_update', ({ postId }) => {
     badges.onBlogBadgeUpdate(postId)
+  })
+
+  socket.on('shortlist_comment_badge_update', (data) => {
+    addShortlistCommentToast(data)
   })
 
   socket.on('scheduled_message_warning', (data) => {
@@ -274,6 +296,7 @@ setInterval(() => {
   <HeaderNotification />
   <PopupNotification />
   <MentionToast :mentions="mentionQueue" @dismiss="dismissMention" />
+  <ShortlistCommentToast :items="shortlistCommentQueue" @dismiss="dismissShortlistCommentToast" />
   <SupportModal :visible="showSupport" @close="showSupport = false" />
 
   <!-- Scheduled message warning modal -->

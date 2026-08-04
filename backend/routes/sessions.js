@@ -470,7 +470,11 @@ router.post('/:id/comments', authenticateToken, async (req, res) => {
       );
       const s = settingResult.rows[0];
       if (!s || s.notifications_enabled) {
-        emitToUser(targetUserId, 'shortlist_comment_badge_update', { sessionId: parseInt(req.params.id, 10) });
+        emitToUser(targetUserId, 'shortlist_comment_badge_update', {
+          sessionId: parseInt(req.params.id, 10),
+          commenterHandle: req.user.handle,
+          preview: content.substring(0, 100)
+        });
         sendToUser(targetUserId, {
           type: 'shortlist_comment',
           sessionId: String(req.params.id),

@@ -1093,11 +1093,23 @@ async function toggleExpandShortlist(shortlistId) {
   }
 }
 
+// Removing/deleting a shortlist doesn't automatically refresh the cached
+// shortlist_count on the session's row back in the main recording tables, leaving its
+// bookmark icon stuck filled until the next reload. Patch both lists in place for any
+// session currently known client-side (mirrors the same fix made on Android).
+function bumpShortlistCount(sessionId, delta) {
+  for (const list of [sessions.list, bandMemberSessions.value]) {
+    const session = list.find(s => s.id === sessionId)
+    if (session) session.shortlist_count = Math.max(0, (session.shortlist_count || 0) + delta)
+  }
+}
+
 async function removeFromShortlist(sessionId) {
   if (!expandedShortlistId.value) return
   try {
     await shortlists.removeSession(expandedShortlistId.value, sessionId)
     shortlistDetail.value.sessions = shortlistDetail.value.sessions.filter(s => s.id !== sessionId)
+    bumpShortlistCount(sessionId, -1)
   } catch (err) {
     console.error('Failed to remove from shortlist:', err)
   }
@@ -1124,12 +1136,19 @@ async function saveRenameShortlist(shortlist) {
 
 async function deleteShortlist(shortlist) {
   if (!confirm(`Delete "${shortlist.name}"? Recordings in it won't be deleted, just unlisted.`)) return
+  // Deleting cascades to shortlist_sessions server-side, but only sessions currently
+  // loaded in shortlistDetail (i.e. this shortlist is expanded) are known client-side to
+  // patch -- anything not currently expanded stays stale until the next full reload.
+  const affectedSessionIds = (shortlistDetail.value && shortlistDetail.value.shortlist.id === shortlist.id)
+    ? shortlistDetail.value.sessions.map(s => s.id)
+    : []
   try {
     await shortlists.remove(shortlist.id)
     if (expandedShortlistId.value === shortlist.id) {
       expandedShortlistId.value = null
       shortlistDetail.value = null
     }
+    affectedSessionIds.forEach(id => bumpShortlistCount(id, -1))
   } catch (err) {
     console.error('Failed to delete shortlist:', err)
   }
