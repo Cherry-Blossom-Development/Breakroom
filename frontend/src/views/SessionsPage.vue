@@ -3,6 +3,7 @@ import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
 import draggable from 'vuedraggable'
 import { sessions } from '@/stores/sessions'
 import { shortlists } from '@/stores/shortlists'
+import { user } from '@/stores/user.js'
 import { authFetch } from '@/utilities/authFetch'
 import { buildDevicePayload } from '@/utilities/deviceId'
 import SessionsPaywallModal from '@/components/SessionsPaywallModal.vue'
@@ -153,6 +154,45 @@ const inviteEmail = ref('')
 const inviteEmailError = ref(null)
 const inviteEmailSuccess = ref(null)
 const invitingEmail = ref(false)
+
+// --- Invite handle autocomplete ---
+const inviteAllUsers = ref([])
+const inviteUsersLoaded = ref(false)
+const showInviteDropdown = ref(false)
+
+async function loadInviteUsers() {
+  if (inviteUsersLoaded.value) return
+  inviteUsersLoaded.value = true
+  try {
+    const res = await authFetch('/api/user/all')
+    if (res.ok) {
+      const data = await res.json()
+      inviteAllUsers.value = data.users || []
+    }
+  } catch (err) {
+    console.error('Failed to load users for invite autocomplete:', err)
+  }
+}
+
+const filteredInviteUsers = computed(() => {
+  const q = inviteHandle.value.trim().toLowerCase().replace(/^@/, '')
+  if (!q) return []
+  const existingHandles = new Set((activeBand.value?.members || []).map(m => m.handle.toLowerCase()))
+  return inviteAllUsers.value
+    .filter(u => {
+      if (u.handle.toLowerCase() === user.username?.toLowerCase()) return false
+      if (existingHandles.has(u.handle.toLowerCase())) return false
+      return u.handle.toLowerCase().includes(q) ||
+        (u.first_name && u.first_name.toLowerCase().includes(q)) ||
+        (u.last_name && u.last_name.toLowerCase().includes(q))
+    })
+    .slice(0, 8)
+})
+
+function selectInviteUser(handle) {
+  inviteHandle.value = handle
+  showInviteDropdown.value = false
+}
 
 // Edit band name inline
 const editingBandName = ref(false)
@@ -2417,7 +2457,18 @@ onMounted(async () => {
               <div v-if="inviteError" class="error-msg">{{ inviteError }}</div>
               <div v-if="inviteSuccess" class="success-msg">{{ inviteSuccess }}</div>
               <div class="invite-row">
-                <input v-model="inviteHandle" class="text-input" placeholder="@handle" @keyup.enter="inviteMember" />
+                <div class="autocomplete-container">
+                  <input v-model="inviteHandle" class="text-input" placeholder="@handle"
+                         @keyup.enter="inviteMember"
+                         @focus="showInviteDropdown = true; loadInviteUsers()"
+                         @blur="showInviteDropdown = false" />
+                  <ul v-if="showInviteDropdown && filteredInviteUsers.length > 0" class="autocomplete-dropdown">
+                    <li v-for="u in filteredInviteUsers" :key="u.id"
+                        @mousedown.prevent="selectInviteUser(u.handle)">
+                      @{{ u.handle }}<span v-if="u.first_name" class="autocomplete-subtext"> — {{ u.first_name }} {{ u.last_name }}</span>
+                    </li>
+                  </ul>
+                </div>
                 <button class="btn-primary" :disabled="inviting || !inviteHandle.trim()" @click="inviteMember">
                   {{ inviting ? 'Inviting…' : 'Send Invite' }}
                 </button>
@@ -3127,6 +3178,8 @@ onMounted(async () => {
 .autocomplete-dropdown li:hover { background: var(--color-background-hover); }
 .invite-section { border-top: 1px solid var(--color-border); padding-top: 20px; }
 .invite-row { display: flex; gap: 10px; align-items: center; }
+.invite-row .autocomplete-container { flex: 1; }
+.autocomplete-subtext { color: var(--color-text-muted); font-weight: 400; }
 .invite-row .text-input { flex: 1; }
 .invite-or { color: var(--color-text-muted); font-size: 0.85em; margin: 14px 0 6px; text-align: center; }
 
