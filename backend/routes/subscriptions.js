@@ -6,7 +6,7 @@ const { AppStoreServerAPIClient, Environment, SignedDataVerifier } = require('@a
 const fs = require('fs');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
-const { sendMail } = require('../utilities/aws-ses-email');
+const { sendMail, sendMailToUser } = require('../utilities/aws-ses-email');
 
 require('dotenv').config();
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -375,14 +375,15 @@ router.post('/admin/grant', authenticate, async (req, res) => {
       );
 
       const emailRow = await client.query(
-        `SELECT email, first_name FROM users WHERE id = $1`,
+        `SELECT email, first_name, alternate_email, alternate_email_verified, send_notices_to_alternate_email
+         FROM users WHERE id = $1`,
         [targetId]
       );
       if (emailRow.rowCount > 0) {
-        const { email, first_name } = emailRow.rows[0];
+        const { first_name } = emailRow.rows[0];
         const greeting = first_name ? `Hi ${first_name},` : 'Hi there,';
-        sendMail(
-          email,
+        sendMailToUser(
+          emailRow.rows[0],
           'noreply@prosaurus.com',
           'Your Prosaurus account has been upgraded — on us',
           `<p>${greeting}</p>

@@ -3,7 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
-const { sendMail } = require('../utilities/aws-ses-email');
+const { sendMail, sendMailToUser } = require('../utilities/aws-ses-email');
 const { getProcessor } = require('../utilities/payments');
 const { ProcessorAuthError } = require('../utilities/payments/errors');
 
@@ -239,14 +239,17 @@ router.post('/public/:storeUrl/contact', async (req, res) => {
     client = await getClient();
 
     const storeResult = await client.query(
-      `SELECT u.email, u.first_name FROM user_storefront us
+      `SELECT u.email, u.first_name,
+              u.alternate_email, u.alternate_email_verified, u.send_notices_to_alternate_email
+       FROM user_storefront us
        JOIN users u ON us.user_id = u.id
        WHERE us.store_url = $1`,
       [req.params.storeUrl]
     );
     if (storeResult.rowCount === 0) return res.status(404).json({ message: 'Store not found' });
 
-    const { email: sellerEmail, first_name: sellerFirst } = storeResult.rows[0];
+    const seller = storeResult.rows[0];
+    const sellerFirst = seller.first_name;
 
     const subject = item_name
       ? `Inquiry about "${item_name}" from ${buyer_name}`
@@ -264,7 +267,7 @@ router.post('/public/:storeUrl/contact', async (req, res) => {
       <p style="color:#888;font-size:0.9em">Reply directly to this email to respond to ${buyer_name}.</p>
       <p>— Prosaurus</p>`;
 
-    await sendMail(sellerEmail, 'noreply@prosaurus.com', subject, html, buyer_email);
+    await sendMailToUser(seller, 'noreply@prosaurus.com', subject, html, buyer_email);
 
     res.json({ message: 'Message sent' });
   } catch (err) {
@@ -411,11 +414,15 @@ router.post('/public/:storeUrl/items/:itemId/checkout', async (req, res) => {
     try {
       const fmt = cents => `$${(cents / 100).toFixed(2)}`;
       const addr = `${ship_to_address1}${ship_to_address2 ? ', ' + ship_to_address2 : ''}, ${ship_to_city}, ${ship_to_state} ${ship_to_zip}, ${country}`;
-      const sellerResult = await client.query('SELECT email, first_name FROM users WHERE id = $1', [sellerUserId]);
+      const sellerResult = await client.query(
+        `SELECT email, first_name, alternate_email, alternate_email_verified, send_notices_to_alternate_email
+         FROM users WHERE id = $1`,
+        [sellerUserId]
+      );
       const seller = sellerResult.rows[0];
 
-      await sendMail(
-        seller.email,
+      await sendMailToUser(
+        seller,
         'noreply@prosaurus.com',
         `New order: ${item.name}`,
         `<p>Hi ${seller.first_name || 'there'},</p>
@@ -430,6 +437,8 @@ router.post('/public/:storeUrl/items/:itemId/checkout', async (req, res) => {
          <p>— Prosaurus</p>`
       );
 
+      // Not sendMailToUser: storefront checkout is unauthenticated, buyer_email is
+      // whatever the guest typed in and may not correspond to any Prosaurus account.
       await sendMail(
         buyer_email,
         'noreply@prosaurus.com',
@@ -524,6 +533,7 @@ router.put('/orders/:id/ship', authenticate, async (req, res) => {
       const trackingLine = tracking_number
         ? `<p>Tracking: <strong>${tracking_carrier || ''} ${tracking_number}</strong></p>`
         : '';
+      // Not sendMailToUser -- same guest-checkout caveat as the order confirmation above.
       await sendMail(
         o.buyer_email,
         'noreply@prosaurus.com',

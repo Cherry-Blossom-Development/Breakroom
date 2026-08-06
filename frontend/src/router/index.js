@@ -155,6 +155,11 @@ const router = createRouter({
       component: () => import('../views/VerifyPage.vue'),
     },
     {
+      path: '/verify-alternate-email',
+      name: 'verifyAlternateEmail',
+      component: () => import('../views/VerifyAlternateEmailPage.vue'),
+    },
+    {
       path: '/forgot-password',
       name: 'forgotPassword',
       component: () => import('../views/ForgotPasswordPage.vue'),

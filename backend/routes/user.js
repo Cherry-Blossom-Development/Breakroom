@@ -4,7 +4,10 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const fs = require('fs');
+const path = require('path');
 const { sendMail } = require('../utilities/sendgrid-email');
+const { sendMail: sendMailSES } = require('../utilities/aws-ses-email');
 
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
@@ -35,6 +38,7 @@ router.get('/all', async (req, res) => {
     const users = await client.query(
       `SELECT
          u.id, u.handle, u.first_name, u.last_name, u.email, u.is_internal,
+         u.alternate_email, u.alternate_email_verified, u.send_notices_to_alternate_email,
          us.platform  AS sub_platform,
          us.status    AS sub_status,
          us.expires_at AS sub_expires_at
@@ -50,6 +54,203 @@ router.get('/all', async (req, res) => {
     client.release();
   }
 });
+
+
+// ── Alternate email ──────────────────────────────────────────────────────────
+// A second address a user (or an admin, on their behalf -- see PUT /:id) can add so
+// eligible notices also get delivered there. Self-service entry requires the address
+// to be confirmed via emailed link before it's used; see data/migrations/048-alternate-email.sql.
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * GET /api/user/alternate-email
+ * Returns the current user's alternate email state.
+ */
+router.get('/alternate-email', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      `SELECT alternate_email, alternate_email_verified, send_notices_to_alternate_email
+       FROM users WHERE id = $1`,
+      [req.user.id]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching alternate email:', err);
+    res.status(500).json({ message: 'Failed to fetch alternate email' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * PUT /api/user/alternate-email
+ * Sets (or clears, if alternate_email is empty) the current user's alternate email.
+ * A newly set address always starts unverified and gets a confirmation email --
+ * changing an existing one re-verifies from scratch.
+ */
+router.put('/alternate-email', authenticate, async (req, res) => {
+  const alternateEmail = (req.body?.alternate_email || '').trim();
+  const client = await getClient();
+  try {
+    if (!alternateEmail) {
+      await client.query(
+        `UPDATE users SET alternate_email = NULL, alternate_email_verified = FALSE,
+           alternate_email_verification_token = NULL, alternate_email_verification_expires_at = NULL,
+           send_notices_to_alternate_email = FALSE
+         WHERE id = $1`,
+        [req.user.id]
+      );
+      return res.json({ message: 'Alternate email removed' });
+    }
+
+    if (!EMAIL_RE.test(alternateEmail)) {
+      return res.status(400).json({ message: 'Invalid email address' });
+    }
+
+    const token = uuidv4();
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 1);
+
+    await client.query(
+      `UPDATE users SET alternate_email = $1, alternate_email_verified = FALSE,
+         alternate_email_verification_token = $2, alternate_email_verification_expires_at = $3,
+         send_notices_to_alternate_email = FALSE
+       WHERE id = $4`,
+      [alternateEmail, token, expiresAt, req.user.id]
+    );
+
+    await sendAlternateEmailVerification(client, alternateEmail, token);
+
+    res.json({ message: 'Verification email sent' });
+  } catch (err) {
+    console.error('Error setting alternate email:', err);
+    res.status(500).json({ message: 'Failed to set alternate email' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/user/alternate-email/resend
+ * Regenerates the token/expiry and resends the confirmation email.
+ */
+router.post('/alternate-email/resend', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const existing = await client.query(
+      'SELECT alternate_email, alternate_email_verified FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const row = existing.rows[0];
+    if (!row || !row.alternate_email) {
+      return res.status(400).json({ message: 'No alternate email is set' });
+    }
+    if (row.alternate_email_verified) {
+      return res.status(400).json({ message: 'Alternate email is already verified' });
+    }
+
+    const token = uuidv4();
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 1);
+
+    await client.query(
+      `UPDATE users SET alternate_email_verification_token = $1, alternate_email_verification_expires_at = $2
+       WHERE id = $3`,
+      [token, expiresAt, req.user.id]
+    );
+
+    await sendAlternateEmailVerification(client, row.alternate_email, token);
+
+    res.json({ message: 'Verification email resent' });
+  } catch (err) {
+    console.error('Error resending alternate email verification:', err);
+    res.status(500).json({ message: 'Failed to resend verification email' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/user/alternate-email/confirm
+ * Not behind `authenticate` -- the token itself is the credential, since the user may
+ * click the link on a different device/session than the one that set it (mirrors
+ * POST /api/auth/verify for the primary email).
+ */
+router.post('/alternate-email/confirm', async (req, res) => {
+  const client = await getClient();
+  try {
+    const now = new Date();
+    const result = await client.query(
+      `SELECT id FROM users
+       WHERE alternate_email_verification_token = $1 AND alternate_email_verification_expires_at > $2`,
+      [req.body?.token, now]
+    );
+    if (result.rowCount === 0) {
+      return res.status(400).json({ message: 'This confirmation link is invalid or has expired' });
+    }
+
+    await client.query('UPDATE users SET alternate_email_verified = TRUE WHERE id = $1', [result.rows[0].id]);
+    res.json({ message: 'Alternate email confirmed' });
+  } catch (err) {
+    console.error('Error confirming alternate email:', err);
+    res.status(500).json({ message: 'Failed to confirm alternate email' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * PUT /api/user/alternate-email/notify
+ * Toggles whether eligible notices are also sent to the (already-verified) alternate
+ * email. Rejects turning it on before verification -- the toggle is otherwise inert.
+ */
+router.put('/alternate-email/notify', authenticate, async (req, res) => {
+  const enabled = !!req.body?.enabled;
+  const client = await getClient();
+  try {
+    if (enabled) {
+      const existing = await client.query(
+        'SELECT alternate_email_verified FROM users WHERE id = $1',
+        [req.user.id]
+      );
+      if (!existing.rows[0]?.alternate_email_verified) {
+        return res.status(400).json({ message: 'Confirm your alternate email before turning this on' });
+      }
+    }
+    await client.query('UPDATE users SET send_notices_to_alternate_email = $1 WHERE id = $2', [enabled, req.user.id]);
+    res.json({ message: 'Saved' });
+  } catch (err) {
+    console.error('Error saving alternate email notify setting:', err);
+    res.status(500).json({ message: 'Failed to save setting' });
+  } finally {
+    client.release();
+  }
+});
+
+// Shared by the initial-set and resend routes above.
+async function sendAlternateEmailVerification(client, toAddress, token) {
+  const emailTemplate = await client.query(
+    'SELECT from_address, subject, html_content FROM system_emails WHERE email_key = $1 AND is_active = true',
+    ['alternate_email_verification']
+  );
+  if (emailTemplate.rowCount === 0) return;
+
+  const { from_address, subject, html_content } = emailTemplate.rows[0];
+  const processedContent = html_content.replace(/\{\{alternate_verification_token\}\}/g, token);
+
+  if (process.env.NODE_ENV === 'test') {
+    const testEmailDir = path.join(__dirname, '..', 'test-emails');
+    if (!fs.existsSync(testEmailDir)) fs.mkdirSync(testEmailDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(testEmailDir, `${toAddress}.json`),
+      JSON.stringify({ to: toAddress, from: from_address, subject, html: processedContent, token, timestamp: new Date().toISOString() }, null, 2)
+    );
+  } else {
+    await sendMailSES(toAddress, from_address, subject, processedContent);
+  }
+}
 
 
 router.post('/invite', async (req, res) => {
@@ -139,6 +340,10 @@ router.put('/:id', authenticate, checkPermission('admin_access'), async (req, re
 
     // Flagging a user internal also retires their real_user_number -- the
     // number is never reassigned to anyone else (see 041-real-user-number.sql).
+    // Admin-set alternate emails skip the confirmation-link flow self-service entry
+    // requires -- an admin setting it is already an informed, trusted action (see
+    // data/migrations/048-alternate-email.sql).
+    const alternateEmail = (user.alternate_email || '').trim() || null;
     const searchResult = await client.query(
       `UPDATE users SET
         handle = $1,
@@ -146,9 +351,13 @@ router.put('/:id', authenticate, checkPermission('admin_access'), async (req, re
         last_name = $3,
         email = $4,
         is_internal = $5,
-        real_user_number = CASE WHEN $5 = true THEN NULL ELSE real_user_number END
-      WHERE id = $6`,
-      [user.handle, user.first_name, user.last_name, user.email, user.is_internal ?? false, id]
+        real_user_number = CASE WHEN $5 = true THEN NULL ELSE real_user_number END,
+        alternate_email = $6,
+        alternate_email_verified = $7,
+        send_notices_to_alternate_email = $8
+      WHERE id = $9`,
+      [user.handle, user.first_name, user.last_name, user.email, user.is_internal ?? false,
+       alternateEmail, !!alternateEmail, !!alternateEmail && !!user.send_notices_to_alternate_email, id]
     );
 
     // make sure there is even a user to update

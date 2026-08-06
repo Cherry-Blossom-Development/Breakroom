@@ -96,10 +96,22 @@
               <label>Last Name</label>
               <input v-model="editingUser.last_name" placeholder="Last Name" />
             </div>
+            <div class="field">
+              <label>Alternate Email</label>
+              <input v-model="editingUser.alternate_email" placeholder="Alternate Email" />
+            </div>
           </div>
           <label class="internal-checkbox">
             <input type="checkbox" v-model="editingUser.is_internal" />
             Internal user (excluded from analytics)
+          </label>
+          <label class="internal-checkbox">
+            <input type="checkbox" v-model="editingUser.send_notices_to_alternate_email"
+                   :disabled="!editingUser.alternate_email" />
+            Send notices to alternate email
+            <span v-if="editingUser.alternate_email && !editingUser.alternate_email_verified" class="unverified-tag">
+              (will be marked verified on save)
+            </span>
           </label>
         </section>
 
@@ -432,6 +444,7 @@ thead { background-color: var(--color-background-soft); }
 
 .internal-checkbox { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 0.9rem; cursor: pointer; }
 .internal-checkbox input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; accent-color: var(--color-accent); }
+.unverified-tag { color: var(--color-text-muted); font-size: 0.8rem; font-weight: 400; }
 
 .btn-edit { padding: 5px 14px; border: none; border-radius: 4px; cursor: pointer; background: var(--color-accent); color: white; font-size: 0.85rem; }
 .btn-edit:hover { background: var(--color-accent-hover); }

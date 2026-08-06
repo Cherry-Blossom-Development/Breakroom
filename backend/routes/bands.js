@@ -7,7 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { isSubscribed } = require('../utilities/subscription');
-const { sendMail } = require('../utilities/aws-ses-email');
+const { sendMail, sendMailToUser } = require('../utilities/aws-ses-email');
 const { uploadToS3, deleteFromS3, getS3Url } = require('../utilities/aws-s3');
 const { emitToUser } = require('../utilities/socket');
 const { sendToUsers } = require('../utilities/fcm');
@@ -347,7 +347,7 @@ async function inviteExistingUserToBand(client, { bandId, targetUser, inviterId 
       <p style="color:#666;font-size:0.9em">Log in to Prosaurus and open Band Practice to accept or decline.</p>
     </div>
   `;
-  await sendMail(targetUser.email, fromAddress, `${inviterName} invited you to join ${bandName} on Prosaurus`, html);
+  await sendMailToUser(targetUser, fromAddress, `${inviterName} invited you to join ${bandName} on Prosaurus`, html);
 
   // In-app notification
   const notifTypeResult = await client.query(
@@ -395,7 +395,12 @@ router.post('/:id/invites', authenticate, async (req, res) => {
     const { handle } = req.body;
     if (!handle) return res.status(400).json({ message: 'User handle is required' });
 
-    const target = await client.query('SELECT id, handle, email, first_name, last_name FROM users WHERE handle = $1', [handle.trim()]);
+    const target = await client.query(
+      `SELECT id, handle, email, first_name, last_name,
+              alternate_email, alternate_email_verified, send_notices_to_alternate_email
+       FROM users WHERE handle = $1`,
+      [handle.trim()]
+    );
     if (target.rowCount === 0) {
       return res.status(404).json({ message: 'That user does not exist. Please invite them by email instead.' });
     }
@@ -438,7 +443,12 @@ router.post('/:id/email-invites', authenticate, async (req, res) => {
     // If that email already belongs to a Prosaurus account, invite them the
     // same way a handle-invite would -- band_members row + email + in-app
     // notification + push, rather than the token-based signup flow below.
-    const existing = await client.query('SELECT id, handle, email, first_name, last_name FROM users WHERE email = $1', [emailTrimmed]);
+    const existing = await client.query(
+      `SELECT id, handle, email, first_name, last_name,
+              alternate_email, alternate_email_verified, send_notices_to_alternate_email
+       FROM users WHERE email = $1`,
+      [emailTrimmed]
+    );
     if (existing.rowCount > 0) {
       const result = await inviteExistingUserToBand(client, {
         bandId: req.params.id,
@@ -495,6 +505,8 @@ router.post('/:id/email-invites', authenticate, async (req, res) => {
       </div>
     `;
 
+    // Not sendMailToUser: this branch invites someone with no Prosaurus account yet,
+    // so there's no alternate_email to look up.
     await sendMail(emailTrimmed, fromAddress, `${inviterName} invited you to join ${bandName} on Prosaurus`, html);
 
     res.status(201).json({ message: `Invite sent to ${emailTrimmed}` });

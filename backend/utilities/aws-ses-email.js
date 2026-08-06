@@ -44,6 +44,18 @@ const sendMail = async (to, from, subject, htmlContent, replyTo = null) => {
   }
 };
 
+// Sends to the user's primary email, and additionally (fire-and-forget) to their
+// alternate email if they've verified one and turned on alternate delivery. Centralizes
+// that check so call sites don't each duplicate it -- see data/migrations/048-alternate-email.sql.
+const sendMailToUser = async (userRow, from, subject, htmlContent, replyTo = null) => {
+  await sendMail(userRow.email, from, subject, htmlContent, replyTo);
+  if (userRow.alternate_email && userRow.alternate_email_verified && userRow.send_notices_to_alternate_email) {
+    sendMail(userRow.alternate_email, from, subject, htmlContent, replyTo)
+      .catch(err => console.error('Failed to send notice to alternate email:', err));
+  }
+};
+
 module.exports = {
-  sendMail
+  sendMail,
+  sendMailToUser
 };

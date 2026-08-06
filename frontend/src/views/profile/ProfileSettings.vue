@@ -39,6 +39,55 @@
       </div>
     </div>
 
+    <!-- ── Alternate Email ── -->
+    <div class="settings-section">
+      <h3>Alternate Email</h3>
+      <p class="section-hint">Add a second address so account notices can also reach you there.</p>
+
+      <div v-if="altEmailLoading" class="settings-loading">Loading...</div>
+
+      <div v-else>
+        <div v-if="altEmailEditing" class="form-group">
+          <label>Alternate email address</label>
+          <input type="email" v-model="altEmailInput" placeholder="you@example.com" class="alt-email-input" />
+          <div class="alt-email-actions">
+            <button class="btn-primary" :disabled="altEmailSaving || !altEmailInput.trim()" @click="saveAltEmail">
+              {{ altEmailSaving ? 'Sending…' : 'Send Verification Email' }}
+            </button>
+            <button v-if="altEmail.alternate_email" class="btn-secondary" @click="cancelEditAltEmail">Cancel</button>
+          </div>
+        </div>
+
+        <div v-else-if="!altEmail.alternate_email_verified" class="alt-email-status">
+          <p>Pending confirmation: <strong>{{ altEmail.alternate_email }}</strong></p>
+          <p class="section-hint">Check that inbox for a confirmation link.</p>
+          <div class="alt-email-actions">
+            <button class="btn-secondary" :disabled="altEmailResending" @click="resendAltEmailVerification">
+              {{ altEmailResending ? 'Sending…' : 'Resend Email' }}
+            </button>
+            <button class="btn-secondary" @click="startEditAltEmail">Change</button>
+            <button class="btn-secondary" @click="removeAltEmail">Remove</button>
+          </div>
+        </div>
+
+        <div v-else class="alt-email-status">
+          <p>Confirmed: <strong>{{ altEmail.alternate_email }}</strong></p>
+          <label class="toggle-row">
+            <span class="toggle-label">Also send notices to this address</span>
+            <input type="checkbox" v-model="altEmail.send_notices_to_alternate_email" @change="toggleAltEmailNotify" />
+            <span class="toggle-track" :class="{ on: altEmail.send_notices_to_alternate_email }"></span>
+          </label>
+          <div class="alt-email-actions">
+            <button class="btn-secondary" @click="startEditAltEmail">Change</button>
+            <button class="btn-secondary" @click="removeAltEmail">Remove</button>
+          </div>
+        </div>
+
+        <p v-if="altEmailMessage" class="alt-email-message">{{ altEmailMessage }}</p>
+        <p v-if="altEmailError" class="settings-error">{{ altEmailError }}</p>
+      </div>
+    </div>
+
     <div class="danger-zone">
       <h3>Account Deletion</h3>
       <p class="warning-text">
@@ -126,6 +175,131 @@ async function saveSettings() {
     }
   } catch (err) {
     settingsSaveError.value = 'Failed to save settings.'
+  }
+}
+
+// ── Alternate email ──────────────────────────────────────────────────────────
+const altEmailLoading = ref(true)
+const altEmail = ref({ alternate_email: null, alternate_email_verified: false, send_notices_to_alternate_email: false })
+const altEmailEditing = ref(false)
+const altEmailInput = ref('')
+const altEmailSaving = ref(false)
+const altEmailResending = ref(false)
+const altEmailMessage = ref('')
+const altEmailError = ref('')
+
+onMounted(loadAltEmail)
+
+async function loadAltEmail() {
+  altEmailLoading.value = true
+  try {
+    const res = await fetch('/api/user/alternate-email', { credentials: 'include' })
+    if (res.ok) {
+      altEmail.value = await res.json()
+      altEmailEditing.value = !altEmail.value.alternate_email
+    }
+  } catch (err) {
+    console.error('Failed to load alternate email:', err)
+  } finally {
+    altEmailLoading.value = false
+  }
+}
+
+function startEditAltEmail() {
+  altEmailInput.value = altEmail.value.alternate_email || ''
+  altEmailEditing.value = true
+  altEmailMessage.value = ''
+  altEmailError.value = ''
+}
+
+function cancelEditAltEmail() {
+  altEmailEditing.value = false
+  altEmailError.value = ''
+}
+
+async function saveAltEmail() {
+  if (!altEmailInput.value.trim() || altEmailSaving.value) return
+  altEmailSaving.value = true
+  altEmailError.value = ''
+  altEmailMessage.value = ''
+  try {
+    const res = await fetch('/api/user/alternate-email', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ alternate_email: altEmailInput.value.trim() })
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      altEmailError.value = data.message || 'Failed to set alternate email.'
+      return
+    }
+    altEmailMessage.value = data.message
+    await loadAltEmail()
+  } catch (err) {
+    altEmailError.value = 'Failed to set alternate email.'
+  } finally {
+    altEmailSaving.value = false
+  }
+}
+
+async function resendAltEmailVerification() {
+  altEmailResending.value = true
+  altEmailError.value = ''
+  altEmailMessage.value = ''
+  try {
+    const res = await fetch('/api/user/alternate-email/resend', { method: 'POST', credentials: 'include' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      altEmailError.value = data.message || 'Failed to resend verification email.'
+      return
+    }
+    altEmailMessage.value = data.message
+  } catch (err) {
+    altEmailError.value = 'Failed to resend verification email.'
+  } finally {
+    altEmailResending.value = false
+  }
+}
+
+async function removeAltEmail() {
+  altEmailError.value = ''
+  altEmailMessage.value = ''
+  try {
+    const res = await fetch('/api/user/alternate-email', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ alternate_email: '' })
+    })
+    if (!res.ok) {
+      altEmailError.value = 'Failed to remove alternate email.'
+      return
+    }
+    await loadAltEmail()
+  } catch (err) {
+    altEmailError.value = 'Failed to remove alternate email.'
+  }
+}
+
+async function toggleAltEmailNotify(e) {
+  const enabled = e.target.checked
+  altEmailError.value = ''
+  try {
+    const res = await fetch('/api/user/alternate-email/notify', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ enabled })
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      altEmailError.value = data.message || 'Failed to save setting.'
+      altEmail.value.send_notices_to_alternate_email = !enabled
+    }
+  } catch (err) {
+    altEmailError.value = 'Failed to save setting.'
+    altEmail.value.send_notices_to_alternate_email = !enabled
   }
 }
 
@@ -266,6 +440,80 @@ async function submitDeletionRequest() {
   color: #e53e3e;
   font-size: 0.85rem;
   margin: 0.5rem 0 0;
+}
+
+/* ── Alternate email ── */
+.section-hint {
+  color: #718096;
+  font-size: 0.85rem;
+  margin: 0 0 1rem;
+}
+
+.alt-email-input {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid #cbd5e0;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  box-sizing: border-box;
+  margin-top: 0.25rem;
+}
+
+.alt-email-status p {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  color: #2d3748;
+}
+
+.alt-email-status .toggle-row {
+  margin: 0.5rem 0;
+}
+
+.alt-email-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.alt-email-message {
+  color: #276749;
+  font-size: 0.85rem;
+  margin: 0.5rem 0 0;
+}
+
+.btn-primary {
+  padding: 0.5rem 1.25rem;
+  background: #3182ce;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary:not(:disabled):hover {
+  background: #2b6cb0;
+}
+
+.btn-secondary {
+  padding: 0.5rem 1.25rem;
+  background: #edf2f7;
+  color: #4a5568;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.btn-secondary:hover {
+  background: #e2e8f0;
 }
 
 .danger-zone {

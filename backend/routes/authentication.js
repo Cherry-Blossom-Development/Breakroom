@@ -238,6 +238,8 @@ router.post('/signup', async (req, res) => {
         );
         console.log(`[TEST MODE] Email written to backend/test-emails/${req.body.email}.json`);
       } else {
+        // Not sendMailToUser: primary-email verification stays primary-only by design
+        // (see data/migrations/048-alternate-email.sql) -- same for password reset below.
         sendMail(req.body.email, from_address, subject, processedContent);
       }
     }
