@@ -5,7 +5,7 @@
     </div>
     <span>Log In</span>
     <div>
-      <label>Login/Handle: </label>
+      <label>Handle or Email: </label>
       <input type="text" required v-model="handle">
     </div>
     <div>

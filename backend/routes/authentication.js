@@ -7,6 +7,7 @@ const { getClient } = require('../utilities/db');
 const { sendMail } = require('../utilities/aws-ses-email');
 const { getPlatform } = require('../utilities/platform');
 const { getIO } = require('../utilities/socket');
+const { findIdentifierCollision } = require('../utilities/userIdentifiers');
 
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
@@ -80,9 +81,12 @@ async function ensureGeneralChatterRooms(client, realUserNumber) {
 router.post('/signup', async (req, res) => {
   const client = await getClient();
 
-  const existingUser = await client.query('SELECT * FROM "users" WHERE handle = $1 OR email = $2;', [req.body.handle, req.body.email]);
+  // Also checks the new handle/email against every existing user's alternate_email,
+  // not just their handle/email -- keeps every login identifier unique across
+  // accounts now that login matches on alternate_email too (see /login below).
+  const collision = await findIdentifierCollision(client, { handle: req.body.handle, email: req.body.email });
 
-  if (existingUser.rowCount === 0) {
+  if (!collision) {
     const verificationToken = uuidv4();
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 1);
@@ -384,18 +388,20 @@ router.post('/login', async (req, res) => {
     client = await getClient();
     console.log('Connected to DB');
 
-    // Support both 'handle' (legacy) and 'usernameOrEmail' (current)
-    const identifier = req.body.usernameOrEmail || req.body.handle;
+    // Support both 'handle' (legacy) and 'usernameOrEmail' (current). Matches
+    // against handle, primary email, or alternate email in one shot -- all three
+    // columns share the same case-insensitive collation (utf8mb4_unicode_ci), so
+    // this is already case-insensitive without any LOWER()/lowercasing here.
+    const identifier = (req.body.usernameOrEmail || req.body.handle || '').trim();
     if (!identifier) {
       client.release();
       return res.status(400).json({ message: 'Username or email is required' });
     }
 
-    // Check if identifier is an email (contains @) or a handle
-    const isEmail = identifier.includes('@');
-    const user = isEmail
-      ? await client.query('SELECT * FROM "users" WHERE email = $1', [identifier])
-      : await client.query('SELECT * FROM "users" WHERE handle = $1', [identifier]);
+    const user = await client.query(
+      'SELECT * FROM "users" WHERE handle = $1 OR email = $1 OR alternate_email = $1',
+      [identifier]
+    );
 
     if (user.rowCount === 1) {
       // User has been located

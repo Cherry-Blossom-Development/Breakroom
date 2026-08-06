@@ -12,6 +12,7 @@ const { sendMail: sendMailSES } = require('../utilities/aws-ses-email');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { checkPermission } = require('../middleware/checkPermission');
+const { findIdentifierCollision } = require('../utilities/userIdentifiers');
 
 require('dotenv').config();
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -107,6 +108,11 @@ router.put('/alternate-email', authenticate, async (req, res) => {
 
     if (!EMAIL_RE.test(alternateEmail)) {
       return res.status(400).json({ message: 'Invalid email address' });
+    }
+
+    const collision = await findIdentifierCollision(client, { alternateEmail }, req.user.id);
+    if (collision) {
+      return res.status(409).json({ message: 'That email is already associated with another account' });
     }
 
     const token = uuidv4();
@@ -323,13 +329,18 @@ router.put('/:id', authenticate, checkPermission('admin_access'), async (req, re
 
   const client = await getClient();
   try {
-    // Check for duplicate handle or email (excluding current user)
-    const existing = await client.query(
-      'SELECT id FROM "users" WHERE (handle = $1 OR email = $2) AND id != $3;',
-      [user.handle, user.email, id]
-    );
+    // Admin-set alternate emails skip the confirmation-link flow self-service entry
+    // requires -- an admin setting it is already an informed, trusted action (see
+    // data/migrations/048-alternate-email.sql).
+    const alternateEmail = (user.alternate_email || '').trim() || null;
 
-    if (existing.rowCount > 0) {
+    // Check for duplicate handle/email/alternate_email against every OTHER user's
+    // handle/email/alternate_email (excluding current user) -- keeps every login
+    // identifier unique across accounts now that login matches on alternate_email too.
+    const collision = await findIdentifierCollision(
+      client, { handle: user.handle, email: user.email, alternateEmail }, id
+    );
+    if (collision) {
       return res.status(409).json({
         message: 'Another user with this handle or email already exists.',
       });
@@ -338,12 +349,6 @@ router.put('/:id', authenticate, checkPermission('admin_access'), async (req, re
     // Begin the transactional part of the process
     await client.beginTransaction();
 
-    // Flagging a user internal also retires their real_user_number -- the
-    // number is never reassigned to anyone else (see 041-real-user-number.sql).
-    // Admin-set alternate emails skip the confirmation-link flow self-service entry
-    // requires -- an admin setting it is already an informed, trusted action (see
-    // data/migrations/048-alternate-email.sql).
-    const alternateEmail = (user.alternate_email || '').trim() || null;
     const searchResult = await client.query(
       `UPDATE users SET
         handle = $1,
