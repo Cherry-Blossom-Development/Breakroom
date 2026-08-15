@@ -87,6 +87,7 @@ router.get('/', authenticateToken, async (req, res) => {
       `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,
          s.band_id, b.name AS band_name,
          s.instrument_id, i.name AS instrument_name,
+         s.duration_ms,
          ROUND(AVG(sr.rating), 1) AS avg_rating,
          COUNT(sr.rating) AS rating_count,
          MAX(CASE WHEN sr.user_id = $2 THEN sr.rating END) AS my_rating,
@@ -117,6 +118,7 @@ router.get('/band-members', authenticateToken, async (req, res) => {
       `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,
          s.band_id, b.name AS band_name,
          s.instrument_id, i.name AS instrument_name,
+         s.duration_ms,
          u.handle AS uploader_handle,
          ROUND(AVG(sr.rating), 1) AS avg_rating,
          COUNT(sr.rating) AS rating_count,
@@ -241,9 +243,11 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
   const instrumentIdVal = instrument_id ? parseInt(instrument_id, 10) : null;
 
   // Normalize to WAV: convert any format → 44100Hz 16-bit WAV with EBU R128 loudness normalization
-  let wavBuffer;
+  let wavBuffer, durationMs;
   try {
-    wavBuffer = await normalizeToWav(req.file.buffer);
+    const result = await normalizeToWav(req.file.buffer);
+    wavBuffer = result.buffer;
+    durationMs = result.durationMs;
   } catch (err) {
     console.error('Audio normalization failed:', err);
     return res.status(500).json({ message: 'Failed to process audio: ' + err.message });
@@ -259,12 +263,13 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
   const client = await getClient();
   try {
     const insertResult = await client.query(
-      'INSERT INTO sessions (user_id, name, s3_key, file_size, mime_type, recorded_at, band_id, session_type, instrument_id, normalized) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
-      [req.user.id, name || 'Untitled Session', s3Key, wavBuffer.length, 'audio/wav', recorded_at || null, bandIdVal, sessionTypeVal, instrumentIdVal, 1]
+      'INSERT INTO sessions (user_id, name, s3_key, file_size, mime_type, recorded_at, band_id, session_type, instrument_id, normalized, duration_ms) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)',
+      [req.user.id, name || 'Untitled Session', s3Key, wavBuffer.length, 'audio/wav', recorded_at || null, bandIdVal, sessionTypeVal, instrumentIdVal, 1, durationMs]
     );
     const session = await client.query(
       `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,
          s.band_id, b.name AS band_name, s.instrument_id, i.name AS instrument_name,
+         s.duration_ms,
          NULL AS avg_rating, 0 AS rating_count, NULL AS my_rating
        FROM sessions s
        LEFT JOIN bands b ON b.id = s.band_id
@@ -577,6 +582,7 @@ router.patch('/:id', authenticateToken, async (req, res) => {
       `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,
          s.band_id, b.name AS band_name,
          s.instrument_id, i.name AS instrument_name,
+         s.duration_ms,
          ROUND(AVG(sr.rating), 1) AS avg_rating,
          COUNT(sr.rating) AS rating_count,
          MAX(CASE WHEN sr.user_id = $2 THEN sr.rating END) AS my_rating
@@ -606,6 +612,7 @@ router.get('/:id/public', async (req, res) => {
       `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at,
          u.handle AS uploader_handle,
          s.instrument_id, i.name AS instrument_name,
+         s.duration_ms,
          ROUND(AVG(sr.rating), 1) AS avg_rating,
          COUNT(sr.rating) AS rating_count
        FROM sessions s

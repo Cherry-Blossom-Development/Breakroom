@@ -782,7 +782,7 @@ router.get('/:id/page', authenticate, async (req, res) => {
 
     // Band sessions available to feature
     const sessions = await client.query(
-      `SELECT s.id, s.name, s.recorded_at, u.handle AS uploader_handle,
+      `SELECT s.id, s.name, s.recorded_at, s.duration_ms, u.handle AS uploader_handle,
               i.name AS instrument_name,
               CASE WHEN bps.session_id IS NOT NULL THEN 1 ELSE 0 END AS on_page,
               COALESCE(bps.display_order, 999) AS display_order

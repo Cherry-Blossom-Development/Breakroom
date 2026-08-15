@@ -10,7 +10,7 @@ const FFMPEG_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
  * Target: -14 LUFS integrated, -1 dBTP true peak, LRA=11.
  *
  * @param {Buffer} inputBuffer - Raw audio file bytes (any format FFmpeg supports)
- * @returns {Promise<Buffer>} - Normalized WAV file as a Buffer
+ * @returns {Promise<{buffer: Buffer, durationMs: number|null}>} - Normalized WAV file and duration in ms
  */
 async function normalizeToWav(inputBuffer) {
   const tmpPath = `/tmp/br-${crypto.randomUUID()}.audio`;
@@ -18,14 +18,15 @@ async function normalizeToWav(inputBuffer) {
   try {
     await fs.promises.writeFile(tmpPath, inputBuffer);
 
-    // Pass 1: analyze loudness and detect channel count
+    // Pass 1: analyze loudness, detect channel count, and extract duration
     const pass1Result = await runFfmpegPass1(tmpPath);
     const channels = pass1Result.channels;
     const loudnormStats = pass1Result.stats;
+    const durationMs = pass1Result.durationMs;
 
     // Pass 2: apply normalization and convert to WAV, stream to stdout
     const wavBuffer = await runFfmpegPass2(tmpPath, loudnormStats, channels);
-    return wavBuffer;
+    return { buffer: wavBuffer, durationMs };
 
   } finally {
     await fs.promises.unlink(tmpPath).catch(() => {});
@@ -68,6 +69,19 @@ function runFfmpegPass1(inputPath) {
       const channelMatch = stderr.match(/Audio:.*?(\d+)\s+channel/);
       const channels = channelMatch ? Math.min(parseInt(channelMatch[1], 10), 2) : 1;
 
+      // Parse duration from FFmpeg output, e.g. "Duration: 00:03:45.12" or "Duration: 01:23:45.67"
+      let durationMs = null;
+      const durationMatch = stderr.match(/Duration:\s*(\d{2}):(\d{2}):(\d{2})\.(\d+)/);
+      if (durationMatch) {
+        const hours = parseInt(durationMatch[1], 10);
+        const minutes = parseInt(durationMatch[2], 10);
+        const seconds = parseInt(durationMatch[3], 10);
+        // Handle fractional seconds (could be 1-3 digits)
+        const fracStr = durationMatch[4].padEnd(3, '0').slice(0, 3);
+        const milliseconds = parseInt(fracStr, 10);
+        durationMs = (hours * 3600 + minutes * 60 + seconds) * 1000 + milliseconds;
+      }
+
       // Parse loudnorm JSON from end of stderr
       const jsonMatch = stderr.match(/\{[\s\S]*"input_i"[\s\S]*\}/);
       if (!jsonMatch) {
@@ -81,7 +95,7 @@ function runFfmpegPass1(inputPath) {
         return reject(new Error('FFmpeg pass 1: failed to parse loudnorm JSON'));
       }
 
-      resolve({ channels, stats });
+      resolve({ channels, stats, durationMs });
     });
 
     proc.on('error', err => {

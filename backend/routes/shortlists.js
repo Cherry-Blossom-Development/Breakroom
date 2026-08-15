@@ -152,7 +152,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 
     const sessionsResult = await client.query(
       `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,
-         s.band_id, sb.name AS band_name, u.handle AS uploader_handle,
+         s.band_id, sb.name AS band_name, s.duration_ms, u.handle AS uploader_handle,
          ss.added_by, ss.added_at,
          ROUND(AVG(sr.rating), 1) AS avg_rating,
          COUNT(DISTINCT sr.user_id) AS rating_count,
