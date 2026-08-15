@@ -826,10 +826,16 @@ function formatDate(iso) {
   if (!iso) return '—'
   return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
 }
-function formatBytes(bytes) {
-  if (!bytes) return '—'
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+function formatDuration(ms) {
+  if (!ms) return '—'
+  const totalSeconds = Math.round(ms / 1000)
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+  }
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
 }
 function defaultName() {
   return `Session - ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`
@@ -1863,7 +1869,7 @@ onMounted(async () => {
                       <th class="col-play"></th>
                       <th>Name</th>
                       <th>Recorded</th>
-                      <th>Size</th>
+                      <th>Duration</th>
                       <th>Rating</th>
                       <th></th>
                     </tr>
@@ -1893,7 +1899,7 @@ onMounted(async () => {
                                :value="session.recorded_at ? session.recorded_at.slice(0, 10) : ''"
                                @change="e => saveRecordedAt(session, e.target.value)" />
                       </td>
-                      <td class="muted">{{ formatBytes(session.file_size) }}</td>
+                      <td class="muted">{{ formatDuration(session.duration_ms) }}</td>
                       <td class="col-rating">
                         <div class="rating-cell" @click.stop>
                           <span class="avg-rating" :class="{ unrated: !session.avg_rating }">
@@ -1980,7 +1986,7 @@ onMounted(async () => {
                       <th class="col-play"></th>
                       <th>Name</th>
                       <th>Recorded</th>
-                      <th>Size</th>
+                      <th>Duration</th>
                       <th>Rating</th>
                       <th>Band</th>
                       <th></th>
@@ -2001,7 +2007,7 @@ onMounted(async () => {
                         <span v-if="session.uploader_handle" class="session-sub muted">@{{ session.uploader_handle }}</span>
                       </td>
                       <td>{{ session.recorded_at ? session.recorded_at.slice(0, 10) : '—' }}</td>
-                      <td class="muted">{{ formatBytes(session.file_size) }}</td>
+                      <td class="muted">{{ formatDuration(session.duration_ms) }}</td>
                       <td class="col-rating">
                         <div class="rating-cell" @click.stop>
                           <span class="avg-rating" :class="{ unrated: !session.avg_rating }">
@@ -2061,7 +2067,7 @@ onMounted(async () => {
                 <th class="col-play"></th>
                 <th>Name</th>
                 <th>Recorded</th>
-                <th>Size</th>
+                <th>Duration</th>
                 <th>Rating</th>
                 <th></th>
               </tr>
@@ -2081,7 +2087,7 @@ onMounted(async () => {
                            @keydown.enter="e => e.target.blur()" />
                   </td>
                   <td>{{ session.recorded_at ? session.recorded_at.slice(0, 10) : '—' }}</td>
-                  <td class="muted">{{ formatBytes(session.file_size) }}</td>
+                  <td class="muted">{{ formatDuration(session.duration_ms) }}</td>
                   <td class="col-rating">
                     <div class="rating-cell" @click.stop>
                       <span class="avg-rating" :class="{ unrated: !session.avg_rating }">
@@ -2765,7 +2771,7 @@ onMounted(async () => {
                     <th class="col-play"></th>
                     <th>Name</th>
                     <th>Recorded</th>
-                    <th>Size</th>
+                    <th>Duration</th>
                     <th>Rating</th>
                     <th></th>
                   </tr>
@@ -2795,7 +2801,7 @@ onMounted(async () => {
                              :value="session.recorded_at ? session.recorded_at.slice(0, 10) : ''"
                              @change="e => saveRecordedAt(session, e.target.value)" />
                     </td>
-                    <td class="muted">{{ formatBytes(session.file_size) }}</td>
+                    <td class="muted">{{ formatDuration(session.duration_ms) }}</td>
                     <td class="col-rating">
                       <div class="rating-cell" @click.stop>
                         <!-- Average display -->
