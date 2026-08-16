@@ -52,6 +52,55 @@ const DEFAULT_SECTIONS = [
   { id: 'collections', type: 'collections', visible: true, title: 'My Collections' }
 ];
 
+// GET /api/storefront/public  (no auth) — Discover directory of storefronts the
+// artist has opted in to list publicly. Only storefronts with a completed URL and
+// at least one item image are included, so the directory doesn't surface empty stores.
+router.get('/public', async (req, res) => {
+  let client;
+  try {
+    client = await getClient();
+    const result = await client.query(
+      `SELECT us.store_url, us.page_title, us.updated_at,
+              u.handle, u.first_name, u.last_name, u.photo_path,
+              (SELECT COUNT(*) FROM collection_items ci
+                 JOIN user_collections uc ON uc.id = ci.collection_id
+                 WHERE uc.user_id = us.user_id AND ci.image_path IS NOT NULL) AS item_count,
+              (SELECT ci.image_path FROM collection_items ci
+                 JOIN user_collections uc ON uc.id = ci.collection_id
+                 WHERE uc.user_id = us.user_id AND ci.image_path IS NOT NULL
+                 ORDER BY ci.created_at DESC LIMIT 1) AS cover_image_path
+       FROM user_storefront us
+       JOIN users u ON u.id = us.user_id
+       WHERE us.is_public = TRUE
+         AND us.store_url IS NOT NULL
+         AND EXISTS (SELECT 1 FROM collection_items ci
+                     JOIN user_collections uc ON uc.id = ci.collection_id
+                     WHERE uc.user_id = us.user_id AND ci.image_path IS NOT NULL)
+       ORDER BY us.updated_at DESC`
+    );
+
+    res.json({
+      storefronts: result.rows.map(row => ({
+        store_url: row.store_url,
+        page_title: row.page_title,
+        item_count: row.item_count,
+        cover_image_path: row.cover_image_path,
+        artist: {
+          handle: row.handle,
+          first_name: row.first_name,
+          last_name: row.last_name,
+          photo_path: row.photo_path
+        }
+      }))
+    });
+  } catch (err) {
+    console.error('Error fetching public storefront directory:', err);
+    res.status(500).json({ message: 'Failed to fetch storefronts' });
+  } finally {
+    if (client) client.release();
+  }
+});
+
 // GET /api/storefront/public/:storeUrl  (no auth — must be before /)
 router.get('/public/:storeUrl', async (req, res) => {
   let client;
@@ -172,7 +221,7 @@ router.get('/', authenticate, async (req, res) => {
   try {
     client = await getClient();
     const result = await client.query(
-      'SELECT id, store_url, page_title, content, settings, external_url, updated_at FROM user_storefront WHERE user_id = $1',
+      'SELECT id, store_url, page_title, is_public, content, settings, external_url, updated_at FROM user_storefront WHERE user_id = $1',
       [req.user.id]
     );
     if (result.rowCount === 0) return res.json(null);
@@ -187,7 +236,7 @@ router.get('/', authenticate, async (req, res) => {
 
 // PUT /api/storefront — upsert
 router.put('/', authenticate, async (req, res) => {
-  const { store_url, page_title, content, settings, external_url } = req.body || {};
+  const { store_url, page_title, is_public, content, settings, external_url } = req.body || {};
 
   if (store_url && !SLUG_RE.test(store_url)) {
     return res.status(400).json({ message: 'Invalid store URL format.' });
@@ -212,10 +261,10 @@ router.put('/', authenticate, async (req, res) => {
     const externalUrlValue = external_url && external_url.trim() ? external_url.trim() : null;
 
     await client.query(
-      `INSERT INTO user_storefront (user_id, store_url, page_title, content, settings, external_url)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON DUPLICATE KEY UPDATE store_url = $2, page_title = $3, content = $4, settings = $5, external_url = $6`,
-      [req.user.id, store_url || null, page_title || '', content || '', JSON.stringify(settings || {}), externalUrlValue]
+      `INSERT INTO user_storefront (user_id, store_url, page_title, is_public, content, settings, external_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON DUPLICATE KEY UPDATE store_url = $2, page_title = $3, is_public = $4, content = $5, settings = $6, external_url = $7`,
+      [req.user.id, store_url || null, page_title || '', !!is_public, content || '', JSON.stringify(settings || {}), externalUrlValue]
     );
     res.json({ message: 'Saved' });
   } catch (err) {

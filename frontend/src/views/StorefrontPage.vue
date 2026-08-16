@@ -72,6 +72,14 @@
           />
         </div>
 
+        <!-- Discoverable -->
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" v-model="isPublic" />
+            Make Discoverable
+          </label>
+        </div>
+
         <!-- Custom Domain -->
         <div class="form-group">
           <label class="form-label" for="external-url">Custom Domain</label>
@@ -219,6 +227,7 @@ const saving = ref(false)
 const savedAt = ref(null)
 const storeUrl = ref('')
 const pageTitle = ref('')
+const isPublic = ref(false)
 const contentBody = ref('')
 const backgroundColor = ref('#ffffff')
 const sections = ref(DEFAULT_SECTIONS.map(s => ({ ...s })))
@@ -286,6 +295,7 @@ async function fetchStorefront() {
       if (data) {
         storeUrl.value = data.store_url || ''
         pageTitle.value = data.page_title || ''
+        isPublic.value = !!data.is_public
         contentBody.value = data.content || ''
         savedAt.value = formatDate(data.updated_at)
         if (storeUrl.value) urlAvailable.value = true
@@ -315,6 +325,7 @@ async function save() {
       body: JSON.stringify({
         store_url: storeUrl.value,
         page_title: pageTitle.value,
+        is_public: isPublic.value,
         content: contentBody.value,
         external_url: externalUrl.value || null,
         settings: {
@@ -491,6 +502,15 @@ onBeforeUnmount(() => clearTimeout(urlCheckTimer))
   font-size: 0.88rem;
   font-weight: 600;
   color: var(--color-text);
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--color-text-secondary);
 }
 
 .form-hint {

@@ -205,9 +205,9 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
-      path: '/public-galleries',
-      name: 'publicGalleries',
-      component: () => import('../views/PublicGalleriesPage.vue'),
+      path: '/discover',
+      name: 'discover',
+      component: () => import('../views/DiscoverPage.vue'),
       meta: { requiresAuth: true },
     },
     {

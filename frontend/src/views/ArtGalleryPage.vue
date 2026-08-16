@@ -475,7 +475,7 @@ async function exportToShowcase() {
           <div class="form-group">
             <label class="checkbox-label">
               <input type="checkbox" v-model="isPublic" />
-              List my gallery in Public Galleries
+              Make Discoverable
             </label>
           </div>
           <div class="form-group">
