@@ -144,7 +144,6 @@
               <div class="card-actions">
                 <RouterLink :to="`/collections/${col.id}`" class="btn-sm">Items →</RouterLink>
                 <button class="btn-sm" @click="openEdit(col)">Settings</button>
-                <button class="btn-sm btn-danger" @click="confirmDelete(col)">Delete</button>
               </div>
             </div>
           </div>
@@ -248,6 +247,10 @@
           >
             {{ saving ? 'Saving…' : 'Save' }}
           </button>
+        </div>
+
+        <div v-if="editing" class="modal-danger-zone">
+          <button class="btn-sm btn-danger" @click="deleteFromModal">Delete Collection</button>
         </div>
       </div>
     </div>
@@ -470,6 +473,12 @@ async function save() {
 function confirmDelete(col) {
   deletingCollection.value = col
   showDeleteConfirm.value = true
+}
+
+function deleteFromModal() {
+  const col = editing.value
+  closeModal()
+  confirmDelete(col)
 }
 
 async function executeDelete() {
@@ -1108,6 +1117,14 @@ onMounted(() => {
   justify-content: flex-end;
   gap: 10px;
   margin-top: 28px;
+}
+
+.modal-danger-zone {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  justify-content: flex-end;
 }
 
 @media (max-width: 600px) {
