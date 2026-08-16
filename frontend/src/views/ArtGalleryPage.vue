@@ -15,6 +15,7 @@ const successMessage = ref('')
 const galleryUrl = ref('')
 const galleryName = ref('')
 const galleryBio = ref('')
+const isPublic = ref(false)
 const useCustomBg = ref(false)
 const backgroundColor = ref('#ffffff')
 const urlAvailable = ref(true)
@@ -81,6 +82,7 @@ async function loadGalleryData() {
         galleryUrl.value = data.settings.gallery_url
         galleryName.value = data.settings.gallery_name
         galleryBio.value = data.settings.bio || ''
+        isPublic.value = !!data.settings.is_public
         const savedBg = data.settings.settings?.background_color
         useCustomBg.value = !!savedBg
         backgroundColor.value = savedBg || '#ffffff'
@@ -112,6 +114,7 @@ async function saveSettings() {
       body: JSON.stringify({
         gallery_url: galleryUrl.value,
         gallery_name: galleryName.value,
+        is_public: isPublic.value,
         bio: galleryBio.value.trim() || null,
         settings: useCustomBg.value ? { background_color: backgroundColor.value } : {}
       })
@@ -217,6 +220,7 @@ async function uploadArtwork() {
             galleryUrl.value = settingsData.settings.gallery_url
             galleryName.value = settingsData.settings.gallery_name
             galleryBio.value = settingsData.settings.bio || ''
+            isPublic.value = !!settingsData.settings.is_public
             const savedBg = settingsData.settings.settings?.background_color
             useCustomBg.value = !!savedBg
             backgroundColor.value = savedBg || '#ffffff'
@@ -467,6 +471,12 @@ async function exportToShowcase() {
               rows="3"
               placeholder="Describe your gallery (leave blank to use your profile bio)"
             ></textarea>
+          </div>
+          <div class="form-group">
+            <label class="checkbox-label">
+              <input type="checkbox" v-model="isPublic" />
+              List my gallery in Public Galleries
+            </label>
           </div>
           <div class="form-group">
             <label>Background Color</label>

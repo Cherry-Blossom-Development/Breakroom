@@ -60,6 +60,52 @@ const authenticate = async (req, res, next) => {
 // PUBLIC GALLERY ENDPOINTS (no auth required)
 // =====================
 
+// Directory of galleries the artist has opted in to list publicly.
+// Only galleries with at least one published artwork are included, so the
+// directory doesn't surface empty/placeholder galleries.
+router.get('/public', async (req, res) => {
+  const client = await getClient();
+
+  try {
+    const result = await client.query(
+      `SELECT ug.gallery_url, ug.gallery_name, ug.bio, ug.updated_at,
+              u.handle, u.first_name, u.last_name, u.photo_path,
+              (SELECT COUNT(*) FROM gallery_artworks ga
+                 WHERE ga.user_id = ug.user_id AND ga.is_published = TRUE) AS artwork_count,
+              (SELECT image_path FROM gallery_artworks ga
+                 WHERE ga.user_id = ug.user_id AND ga.is_published = TRUE
+                 ORDER BY created_at DESC LIMIT 1) AS cover_image_path
+       FROM user_gallery ug
+       JOIN users u ON u.id = ug.user_id
+       WHERE ug.is_public = TRUE
+         AND EXISTS (SELECT 1 FROM gallery_artworks ga
+                     WHERE ga.user_id = ug.user_id AND ga.is_published = TRUE)
+       ORDER BY ug.updated_at DESC`
+    );
+
+    res.json({
+      galleries: result.rows.map(row => ({
+        gallery_url: row.gallery_url,
+        gallery_name: row.gallery_name,
+        bio: row.bio || null,
+        artwork_count: row.artwork_count,
+        cover_image_path: row.cover_image_path,
+        artist: {
+          handle: row.handle,
+          first_name: row.first_name,
+          last_name: row.last_name,
+          photo_path: row.photo_path
+        }
+      }))
+    });
+  } catch (err) {
+    console.error('Error fetching public gallery directory:', err);
+    res.status(500).json({ message: 'Failed to fetch galleries' });
+  } finally {
+    client.release();
+  }
+});
+
 // Get public gallery by URL - returns gallery info and all published artworks
 router.get('/public/:galleryUrl', async (req, res) => {
   const { galleryUrl } = req.params;
@@ -188,7 +234,7 @@ router.get('/settings', authenticate, async (req, res) => {
 
   try {
     const result = await client.query(
-      `SELECT id, gallery_url, gallery_name, bio, settings, created_at
+      `SELECT id, gallery_url, gallery_name, is_public, bio, settings, created_at
        FROM user_gallery
        WHERE user_id = $1`,
       [req.user.id]
@@ -214,7 +260,7 @@ router.get('/settings', authenticate, async (req, res) => {
 
 // Create gallery settings
 router.post('/settings', authenticate, async (req, res) => {
-  const { gallery_url, gallery_name, bio, settings } = req.body;
+  const { gallery_url, gallery_name, is_public, bio, settings } = req.body;
   const client = await getClient();
 
   try {
@@ -243,13 +289,13 @@ router.post('/settings', authenticate, async (req, res) => {
     }
 
     await client.query(
-      `INSERT INTO user_gallery (user_id, gallery_url, gallery_name, bio, settings)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [req.user.id, finalGalleryUrl, finalGalleryName, bio || null, settings ? JSON.stringify(settings) : null]
+      `INSERT INTO user_gallery (user_id, gallery_url, gallery_name, is_public, bio, settings)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [req.user.id, finalGalleryUrl, finalGalleryName, !!is_public, bio || null, settings ? JSON.stringify(settings) : null]
     );
 
     const result = await client.query(
-      'SELECT id, gallery_url, gallery_name, bio, settings, created_at FROM user_gallery WHERE user_id = $1',
+      'SELECT id, gallery_url, gallery_name, is_public, bio, settings, created_at FROM user_gallery WHERE user_id = $1',
       [req.user.id]
     );
 
@@ -269,7 +315,7 @@ router.post('/settings', authenticate, async (req, res) => {
 
 // Update gallery settings
 router.put('/settings', authenticate, async (req, res) => {
-  const { gallery_url, gallery_name, bio, settings } = req.body;
+  const { gallery_url, gallery_name, is_public, bio, settings } = req.body;
   const client = await getClient();
 
   try {
@@ -288,8 +334,8 @@ router.put('/settings', authenticate, async (req, res) => {
     }
 
     const result = await client.query(
-      `UPDATE user_gallery SET gallery_url = $1, gallery_name = $2, bio = $3, settings = $4 WHERE user_id = $5`,
-      [gallery_url.trim(), gallery_name || `${req.user.handle}'s Gallery`, bio || null, settings ? JSON.stringify(settings) : null, req.user.id]
+      `UPDATE user_gallery SET gallery_url = $1, gallery_name = $2, is_public = $3, bio = $4, settings = $5 WHERE user_id = $6`,
+      [gallery_url.trim(), gallery_name || `${req.user.handle}'s Gallery`, !!is_public, bio || null, settings ? JSON.stringify(settings) : null, req.user.id]
     );
 
     if (result.affectedRows === 0) {
@@ -297,7 +343,7 @@ router.put('/settings', authenticate, async (req, res) => {
     }
 
     const updated = await client.query(
-      'SELECT id, gallery_url, gallery_name, bio, settings, created_at FROM user_gallery WHERE user_id = $1',
+      'SELECT id, gallery_url, gallery_name, is_public, bio, settings, created_at FROM user_gallery WHERE user_id = $1',
       [req.user.id]
     );
 
