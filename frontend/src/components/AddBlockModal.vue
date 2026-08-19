@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import { breakroom } from '@/stores/breakroom.js'
 import { chat } from '@/stores/chat.js'
 
@@ -24,6 +24,8 @@ const availableRooms = computed(() => {
       return true
     })
 })
+
+const firstFocusable = ref(null)
 
 const blockType = ref('widget')
 const selectedRoom = ref(null)
@@ -76,8 +78,15 @@ watch(selectedWidget, (newWidget) => {
   }
 })
 
+function handleKeydown(e) {
+  if (e.key === 'Escape') emit('close')
+}
+
 // Fetch rooms when modal opens
 onMounted(async () => {
+  document.addEventListener('keydown', handleKeydown)
+  nextTick(() => firstFocusable.value?.focus())
+
   await Promise.all([
     chat.rooms.length === 0 ? chat.fetchRooms() : Promise.resolve(),
     chat.discoverableRooms.length === 0 ? chat.fetchDiscoverableRooms() : Promise.resolve()
@@ -86,6 +95,10 @@ onMounted(async () => {
   if (availableRooms.value.length > 0) {
     selectedRoom.value = availableRooms.value[0].id
   }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown)
 })
 
 // Find the first available position for a block of given width and height
@@ -174,8 +187,8 @@ const handleSubmit = async () => {
 
 <template>
   <div class="modal-overlay" @click.self="emit('close')">
-    <div class="modal">
-      <h2>Add Block</h2>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="add-block-modal-title">
+      <h2 id="add-block-modal-title">Add Block</h2>
 
       <form @submit.prevent="handleSubmit">
         <!-- Block Type -->
@@ -183,7 +196,7 @@ const handleSubmit = async () => {
           <label>Block Type</label>
           <div class="type-options">
             <label class="type-option" :class="{ selected: blockType === 'chat' }">
-              <input type="radio" v-model="blockType" value="chat" />
+              <input ref="firstFocusable" type="radio" v-model="blockType" value="chat" />
               <span class="type-label">Chat Room</span>
               <span class="type-desc">Embed a chat room</span>
             </label>

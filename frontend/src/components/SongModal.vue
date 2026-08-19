@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { lyrics } from '@/stores/lyrics.js'
 import { friends } from '@/stores/friends.js'
 
@@ -25,6 +25,7 @@ const error = ref(null)
 const showUnsavedWarning = ref(false)
 
 const originalValues = ref(null)
+const closeBtn = ref(null)
 
 const isEditing = computed(() => props.song && props.song.id)
 
@@ -110,7 +111,18 @@ onMounted(async () => {
     visibility: visibility.value,
     songDate: songDate.value
   }
+
+  document.addEventListener('keydown', handleKeydown)
+  nextTick(() => closeBtn.value?.focus())
 })
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown)
+})
+
+function handleKeydown(e) {
+  if (e.key === 'Escape') requestClose()
+}
 
 function requestClose() {
   if (isDirty.value) {
@@ -215,10 +227,10 @@ function selectGenre(g) {
 
 <template>
   <div class="modal-overlay">
-    <div class="modal-content">
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="song-modal-title">
       <div class="modal-header">
-        <h2>{{ promotingLyric ? 'Promote to Song' : (isEditing ? 'Edit Song' : 'New Song') }}</h2>
-        <button class="close-btn" aria-label="Close" @click="requestClose">&times;</button>
+        <h2 id="song-modal-title">{{ promotingLyric ? 'Promote to Song' : (isEditing ? 'Edit Song' : 'New Song') }}</h2>
+        <button ref="closeBtn" class="close-btn" aria-label="Close" @click="requestClose">&times;</button>
       </div>
 
       <div class="modal-body">

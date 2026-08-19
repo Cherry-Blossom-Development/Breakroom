@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import { chat } from '@/stores/chat.js'
 import { friends } from '@/stores/friends.js'
 import { user } from '@/stores/user.js'
@@ -15,6 +15,8 @@ const newRoomName = ref('')
 const newRoomDescription = ref('')
 const editingRoom = ref(null)
 const formError = ref('')
+const createModalFirstInput = ref(null)
+const editModalFirstInput = ref(null)
 
 // Invite on create state
 const inviteSearch = ref('')
@@ -46,6 +48,37 @@ onMounted(async () => {
   friends.fetchFriends()
   await chat.fetchUnreadCounts()
   await chat.fetchDMs()
+})
+
+function handleCreateModalKeydown(e) {
+  if (e.key === 'Escape') showCreateModal.value = false
+}
+
+function handleEditModalKeydown(e) {
+  if (e.key === 'Escape') showEditModal.value = false
+}
+
+watch(showCreateModal, (isVisible) => {
+  if (isVisible) {
+    document.addEventListener('keydown', handleCreateModalKeydown)
+    nextTick(() => createModalFirstInput.value?.focus())
+  } else {
+    document.removeEventListener('keydown', handleCreateModalKeydown)
+  }
+})
+
+watch(showEditModal, (isVisible) => {
+  if (isVisible) {
+    document.addEventListener('keydown', handleEditModalKeydown)
+    nextTick(() => editModalFirstInput.value?.focus())
+  } else {
+    document.removeEventListener('keydown', handleEditModalKeydown)
+  }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleCreateModalKeydown)
+  document.removeEventListener('keydown', handleEditModalKeydown)
 })
 
 // Switch to a room or DM
@@ -331,10 +364,11 @@ const openInviteModal = (room) => {
 
     <!-- Create Room Modal -->
     <div v-if="showCreateModal" class="modal-overlay" @click.self="showCreateModal = false">
-      <div class="modal">
-        <h2>Create New Room</h2>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="create-room-modal-title">
+        <h2 id="create-room-modal-title">Create New Room</h2>
         <form @submit.prevent="createRoom">
           <input
+            ref="createModalFirstInput"
             v-model="newRoomName"
             placeholder="Room name"
             maxlength="64"
@@ -392,10 +426,11 @@ const openInviteModal = (room) => {
 
     <!-- Edit Room Modal -->
     <div v-if="showEditModal" class="modal-overlay" @click.self="showEditModal = false">
-      <div class="modal">
-        <h2>Edit Room</h2>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="edit-room-modal-title">
+        <h2 id="edit-room-modal-title">Edit Room</h2>
         <form @submit.prevent="updateRoom">
           <input
+            ref="editModalFirstInput"
             v-model="editingRoom.name"
             placeholder="Room name"
             maxlength="64"

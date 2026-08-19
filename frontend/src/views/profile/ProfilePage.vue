@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import LoadingSpinner from '../../components/LoadingSpinner.vue'
 import RichTextEditor from '../../components/RichTextEditor.vue'
 
@@ -40,6 +40,7 @@ let skillSearchTimeout = null
 // Jobs management
 const showJobModal = ref(false)
 const editingJob = ref(null)
+const jobModalCloseBtn = ref(null)
 const isSavingJob = ref(false)
 const jobForm = ref({
   title: '',
@@ -409,6 +410,23 @@ function closeJobModal() {
   editingJob.value = null
 }
 
+function handleJobModalKeydown(e) {
+  if (e.key === 'Escape') closeJobModal()
+}
+
+watch(showJobModal, (isVisible) => {
+  if (isVisible) {
+    document.addEventListener('keydown', handleJobModalKeydown)
+    nextTick(() => jobModalCloseBtn.value?.focus())
+  } else {
+    document.removeEventListener('keydown', handleJobModalKeydown)
+  }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleJobModalKeydown)
+})
+
 async function saveJob() {
   if (!jobForm.value.title.trim() || !jobForm.value.company.trim() || !jobForm.value.startDate) {
     error.value = 'Title, company, and start date are required'
@@ -743,10 +761,10 @@ onMounted(() => {
 
     <!-- Job Modal -->
     <div v-if="showJobModal" class="modal-overlay" @click.self="closeJobModal">
-      <div class="modal-content job-modal">
+      <div class="modal-content job-modal" role="dialog" aria-modal="true" aria-labelledby="job-modal-title">
         <div class="modal-header">
-          <h2>{{ editingJob ? 'Edit Job' : 'Add Job' }}</h2>
-          <button @click="closeJobModal" class="modal-close" aria-label="Close">&times;</button>
+          <h2 id="job-modal-title">{{ editingJob ? 'Edit Job' : 'Add Job' }}</h2>
+          <button ref="jobModalCloseBtn" @click="closeJobModal" class="modal-close" aria-label="Close">&times;</button>
         </div>
 
         <form @submit.prevent="saveJob" class="job-form">
