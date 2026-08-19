@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import LoadingSpinner from './LoadingSpinner.vue'
 
 const emit = defineEmits(['close', 'saved'])
@@ -12,6 +12,7 @@ const loading = ref(true)
 const saving = ref(false)
 const error = ref('')
 const success = ref('')
+const closeBtn = ref(null)
 
 const form = ref({
   blog_url: '',
@@ -28,7 +29,17 @@ const publicUrl = computed(() => {
 
 onMounted(() => {
   fetchSettings()
+  document.addEventListener('keydown', handleKeydown)
+  nextTick(() => closeBtn.value?.focus())
 })
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown)
+})
+
+function handleKeydown(e) {
+  if (e.key === 'Escape') close()
+}
 
 // Debounced URL availability check
 let urlCheckTimeout = null
@@ -125,10 +136,10 @@ function close() {
 
 <template>
   <div class="modal-overlay" @click.self="close">
-    <div class="modal blog-settings-modal">
+    <div class="modal blog-settings-modal" role="dialog" aria-modal="true" aria-labelledby="blog-settings-title">
       <header class="modal-header">
-        <h2>Blog Settings</h2>
-        <button class="close-btn" @click="close" aria-label="Close">&times;</button>
+        <h2 id="blog-settings-title">Blog Settings</h2>
+        <button ref="closeBtn" class="close-btn" @click="close" aria-label="Close">&times;</button>
       </header>
 
       <div v-if="loading" class="loading">

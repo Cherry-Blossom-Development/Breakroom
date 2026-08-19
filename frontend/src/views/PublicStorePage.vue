@@ -97,8 +97,8 @@
     <!-- ── View-only lightbox ── -->
     <Teleport to="body">
       <div v-if="viewModal.open" class="modal-backdrop" @click.self="viewModal.open = false">
-        <div class="modal modal-lightbox">
-          <button class="modal-close lightbox-close" @click="viewModal.open = false" aria-label="Close">✕</button>
+        <div class="modal modal-lightbox" role="dialog" aria-modal="true" :aria-label="viewModal.item?.name || 'Item preview'">
+          <button ref="viewCloseBtn" class="modal-close lightbox-close" @click="viewModal.open = false" aria-label="Close">✕</button>
           <div class="lightbox-scroll">
             <img
               v-if="viewModal.item?.image_path"
@@ -118,11 +118,11 @@
     <!-- ── Purchase modal ── -->
     <Teleport to="body">
       <div v-if="modal.open" class="modal-backdrop">
-        <div class="modal" :class="{ 'modal-lightbox': modal.step === 0 }">
+        <div class="modal" :class="{ 'modal-lightbox': modal.step === 0 }" role="dialog" aria-modal="true" :aria-label="`Purchase ${modal.item?.name || 'item'}`">
 
           <!-- Step 0: Preview -->
           <template v-if="modal.step === 0">
-            <button class="modal-close lightbox-close" @click="closeModal" aria-label="Close">✕</button>
+            <button ref="purchaseCloseBtn" class="modal-close lightbox-close" @click="closeModal" aria-label="Close">✕</button>
             <div class="lightbox-scroll">
               <img
                 v-if="modal.item?.image_path"
@@ -159,7 +159,7 @@
                   </div>
                 </div>
               </div>
-              <button class="modal-close" @click="closeModal" aria-label="Close">✕</button>
+              <button ref="purchaseCloseBtn" class="modal-close" @click="closeModal" aria-label="Close">✕</button>
             </div>
 
             <div class="modal-body">
@@ -221,7 +221,7 @@
           <template v-else-if="modal.step === 2">
             <div class="modal-header">
               <h2 class="modal-title">Payment</h2>
-              <button class="modal-close" @click="closeModal" aria-label="Close">✕</button>
+              <button ref="purchaseCloseBtn" class="modal-close" @click="closeModal" aria-label="Close">✕</button>
             </div>
 
             <div class="modal-body">
@@ -258,7 +258,7 @@
           <template v-else-if="modal.step === 3">
             <div class="modal-header">
               <h2 class="modal-title">Order confirmed!</h2>
-              <button class="modal-close" @click="closeModal" aria-label="Close">✕</button>
+              <button ref="purchaseCloseBtn" class="modal-close" @click="closeModal" aria-label="Close">✕</button>
             </div>
             <div class="modal-body confirmation">
               <div class="confirm-icon">✓</div>
@@ -278,10 +278,10 @@
     <!-- ── Contact Seller modal ── -->
     <Teleport to="body">
       <div v-if="contactModal.open" class="modal-backdrop">
-        <div class="modal contact-modal">
+        <div class="modal contact-modal" role="dialog" aria-modal="true" aria-labelledby="contact-seller-title">
           <div class="modal-header">
-            <h2 class="modal-title">Contact Seller</h2>
-            <button class="modal-close" @click="closeContact" aria-label="Close">✕</button>
+            <h2 id="contact-seller-title" class="modal-title">Contact Seller</h2>
+            <button ref="contactCloseBtn" class="modal-close" @click="closeContact" aria-label="Close">✕</button>
           </div>
 
           <div v-if="contactModal.sent" class="modal-body confirmation">
@@ -319,7 +319,7 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, nextTick, onMounted } from 'vue'
+import { ref, computed, reactive, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { mountSquareCard, tokenizeCard } from '@/utilities/squarePayments'
 
@@ -413,6 +413,7 @@ onMounted(fetchStore)
 
 // ── View-only lightbox ───────────────────────────────────────────────────────
 const viewModal = reactive({ open: false, item: null })
+const viewCloseBtn = ref(null)
 
 function openItem(item) {
   if (item.is_available) {
@@ -422,6 +423,19 @@ function openItem(item) {
     viewModal.open = true
   }
 }
+
+function handleViewModalKeydown(e) {
+  if (e.key === 'Escape') viewModal.open = false
+}
+
+watch(() => viewModal.open, (isOpen) => {
+  if (isOpen) {
+    document.addEventListener('keydown', handleViewModalKeydown)
+    nextTick(() => viewCloseBtn.value?.focus())
+  } else {
+    document.removeEventListener('keydown', handleViewModalKeydown)
+  }
+})
 
 // ── Purchase modal ────────────────────────────────────────────────────────────
 const modal = reactive({
@@ -447,6 +461,7 @@ const form = reactive({
 
 const squareError = ref(null)
 let cardHandle = null
+const purchaseCloseBtn = ref(null)
 
 function openPurchase(item) {
   modal.item = item
@@ -465,6 +480,19 @@ function closeModal() {
     cardHandle = null
   }
 }
+
+function handlePurchaseModalKeydown(e) {
+  if (e.key === 'Escape') closeModal()
+}
+
+watch(() => modal.open, (isOpen) => {
+  if (isOpen) {
+    document.addEventListener('keydown', handlePurchaseModalKeydown)
+    nextTick(() => purchaseCloseBtn.value?.focus())
+  } else {
+    document.removeEventListener('keydown', handlePurchaseModalKeydown)
+  }
+})
 
 function syncShipName() {
   if (!form.ship_to_name) form.ship_to_name = form.buyer_name
@@ -537,6 +565,7 @@ async function submitPayment() {
 // ── Contact Seller ────────────────────────────────────────────────────────────
 const contactModal = reactive({ open: false, item: null, loading: false, error: null, sent: false })
 const contactForm = reactive({ buyer_name: '', buyer_email: '', message: '' })
+const contactCloseBtn = ref(null)
 
 function openContact(item) {
   contactModal.item = item
@@ -549,6 +578,25 @@ function openContact(item) {
 function closeContact() {
   contactModal.open = false
 }
+
+function handleContactModalKeydown(e) {
+  if (e.key === 'Escape') closeContact()
+}
+
+watch(() => contactModal.open, (isOpen) => {
+  if (isOpen) {
+    document.addEventListener('keydown', handleContactModalKeydown)
+    nextTick(() => contactCloseBtn.value?.focus())
+  } else {
+    document.removeEventListener('keydown', handleContactModalKeydown)
+  }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleViewModalKeydown)
+  document.removeEventListener('keydown', handlePurchaseModalKeydown)
+  document.removeEventListener('keydown', handleContactModalKeydown)
+})
 
 async function submitContact() {
   contactModal.error = null

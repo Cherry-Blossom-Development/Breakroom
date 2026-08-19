@@ -237,10 +237,10 @@
     <!-- ── Subscribe modal ── -->
     <Teleport to="body">
       <div v-if="subscribeModal.open" class="modal-backdrop" @click.self="closeSubscribeModal">
-        <div class="modal">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="subscribe-modal-title">
           <div class="modal-header">
-            <h2 class="modal-title">Upgrade to Pro</h2>
-            <button class="modal-close" @click="closeSubscribeModal" aria-label="Close">✕</button>
+            <h2 id="subscribe-modal-title" class="modal-title">Upgrade to Pro</h2>
+            <button ref="subscribeCloseBtn" class="modal-close" @click="closeSubscribeModal" aria-label="Close">✕</button>
           </div>
           <div class="modal-body">
             <p class="modal-sub">$3.99/mo, cancel anytime.</p>
@@ -260,10 +260,10 @@
     <!-- ── Manage subscription modal ── -->
     <Teleport to="body">
       <div v-if="manageModal.open" class="modal-backdrop" @click.self="closeManageModal">
-        <div class="modal">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="manage-modal-title">
           <div class="modal-header">
-            <h2 class="modal-title">Manage Subscription</h2>
-            <button class="modal-close" @click="closeManageModal" aria-label="Close">✕</button>
+            <h2 id="manage-modal-title" class="modal-title">Manage Subscription</h2>
+            <button ref="manageCloseBtn" class="modal-close" @click="closeManageModal" aria-label="Close">✕</button>
           </div>
 
           <template v-if="manageModal.mode === 'menu'">
@@ -324,7 +324,7 @@
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import { authFetch } from '@/utilities/authFetch'
 import { mountSquareCard, tokenizeCard } from '@/utilities/squarePayments'
@@ -359,6 +359,39 @@ const subscribeModal = ref({ open: false, loading: false, error: '' })
 const manageModal = ref({ open: false, mode: 'menu', loading: false, error: '', expiresAt: null })
 let subscribeCardHandle = null
 let manageCardHandle = null
+const subscribeCloseBtn = ref(null)
+const manageCloseBtn = ref(null)
+
+function handleSubscribeModalKeydown(e) {
+  if (e.key === 'Escape') closeSubscribeModal()
+}
+
+function handleManageModalKeydown(e) {
+  if (e.key === 'Escape') closeManageModal()
+}
+
+watch(() => subscribeModal.value.open, (isOpen) => {
+  if (isOpen) {
+    document.addEventListener('keydown', handleSubscribeModalKeydown)
+    nextTick(() => subscribeCloseBtn.value?.focus())
+  } else {
+    document.removeEventListener('keydown', handleSubscribeModalKeydown)
+  }
+})
+
+watch(() => manageModal.value.open, (isOpen) => {
+  if (isOpen) {
+    document.addEventListener('keydown', handleManageModalKeydown)
+    nextTick(() => manageCloseBtn.value?.focus())
+  } else {
+    document.removeEventListener('keydown', handleManageModalKeydown)
+  }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleSubscribeModalKeydown)
+  document.removeEventListener('keydown', handleManageModalKeydown)
+})
 
 async function fetchStatus() {
   try {

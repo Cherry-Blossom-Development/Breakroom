@@ -70,10 +70,10 @@
 
     <!-- Unified Edit Dialog -->
     <div v-if="editingUser" class="modal-overlay" @click.self="cancelEdit">
-      <div class="modal modal-wide">
+      <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="edit-user-title">
         <div class="modal-header">
-          <h2>Edit User — @{{ editingUser.handle }}</h2>
-          <button type="button" class="btn-close" @click="cancelEdit" aria-label="Close">✕</button>
+          <h2 id="edit-user-title">Edit User — @{{ editingUser.handle }}</h2>
+          <button ref="editCloseBtn" type="button" class="btn-close" @click="cancelEdit" aria-label="Close">✕</button>
         </div>
 
         <!-- Basic Info -->
@@ -213,7 +213,7 @@
 </template>
 
 <script setup>
-import { ref, watchEffect } from 'vue'
+import { ref, watch, watchEffect, onUnmounted, nextTick } from 'vue'
 import DataFetcher from '@/components/DataFetcher.vue'
 
 const newUser = ref({ handle: '', email: '' })
@@ -224,6 +224,7 @@ const existingUsers = ref([])
 const fetchKey = ref(0)
 const matrix = ref(null)
 const editingUser = ref(null)
+const editCloseBtn = ref(null)
 
 // Info save state
 const infoSaving = ref(false)
@@ -361,6 +362,23 @@ async function deleteUser(userId) {
 function cancelEdit() {
   editingUser.value = null
 }
+
+function handleEditModalKeydown(e) {
+  if (e.key === 'Escape') cancelEdit()
+}
+
+watch(editingUser, (isOpen) => {
+  if (isOpen) {
+    document.addEventListener('keydown', handleEditModalKeydown)
+    nextTick(() => editCloseBtn.value?.focus())
+  } else {
+    document.removeEventListener('keydown', handleEditModalKeydown)
+  }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleEditModalKeydown)
+})
 
 async function submitPasswordReset() {
   passwordError.value = ''

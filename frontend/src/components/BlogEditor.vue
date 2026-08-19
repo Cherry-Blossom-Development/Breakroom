@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { blog } from '@/stores/blog.js'
 
 const props = defineProps({
@@ -20,6 +20,7 @@ const saving = ref(false)
 const savedFeedback = ref(false)
 const error = ref('')
 const postId = ref(props.post?.id || null)
+const closeBtn = ref(null)
 
 // Font options
 const fonts = [
@@ -51,7 +52,17 @@ onMounted(() => {
       editorRef.value.innerHTML = props.post.content || ''
     }
   }
+  document.addEventListener('keydown', handleKeydown)
+  nextTick(() => closeBtn.value?.focus())
 })
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown)
+})
+
+function handleKeydown(e) {
+  if (e.key === 'Escape') emit('close')
+}
 
 // Watch for post changes
 watch(() => props.post, (newPost) => {
@@ -155,7 +166,7 @@ const saveAndPublish = () => savePost(true)
 
 <template>
   <div class="editor-overlay">
-    <div class="editor-container">
+    <div class="editor-container" role="dialog" aria-modal="true" aria-label="Blog post editor">
       <!-- Header -->
       <div class="editor-header">
         <input
@@ -165,7 +176,7 @@ const saveAndPublish = () => savePost(true)
           placeholder="Post title..."
           maxlength="255"
         />
-        <button class="close-btn" @click="emit('close')" title="Close" aria-label="Close">
+        <button ref="closeBtn" class="close-btn" @click="emit('close')" title="Close" aria-label="Close">
           &times;
         </button>
       </div>

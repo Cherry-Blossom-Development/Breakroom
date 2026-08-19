@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { authFetch } from '../utilities/authFetch'
 import StatusBadge from '../components/StatusBadge.vue'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
@@ -25,6 +25,7 @@ const submitting = ref(false)
 
 // Selected ticket for detail view
 const selectedTicket = ref(null)
+const ticketCloseBtn = ref(null)
 
 // Comments state
 const ticketComments = ref([])
@@ -181,6 +182,23 @@ function closeDetail() {
   editingCommentId.value = null
   editCommentText.value = ''
 }
+
+function handleTicketDetailKeydown(e) {
+  if (e.key === 'Escape') closeDetail()
+}
+
+watch(selectedTicket, (isOpen) => {
+  if (isOpen) {
+    document.addEventListener('keydown', handleTicketDetailKeydown)
+    nextTick(() => ticketCloseBtn.value?.focus())
+  } else {
+    document.removeEventListener('keydown', handleTicketDetailKeydown)
+  }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleTicketDetailKeydown)
+})
 
 async function fetchComments(ticketId) {
   try {
@@ -368,13 +386,13 @@ onMounted(() => {
 
     <!-- Ticket Detail Modal -->
     <div v-if="selectedTicket" class="modal-overlay" @click.self="!editingTicket && closeDetail()">
-      <div class="modal ticket-detail">
+      <div class="modal ticket-detail" role="dialog" aria-modal="true" aria-labelledby="ticket-detail-title">
         <div class="detail-header">
-          <h2 v-if="!editingTicket">{{ selectedTicket.title }}</h2>
-          <h2 v-else>Edit Ticket</h2>
+          <h2 v-if="!editingTicket" id="ticket-detail-title">{{ selectedTicket.title }}</h2>
+          <h2 v-else id="ticket-detail-title">Edit Ticket</h2>
           <div class="header-buttons">
             <button v-if="!editingTicket && selectedTicket.creator_handle === user.username" class="btn-edit" @click="startEditTicket">Edit</button>
-            <button class="close-btn" @click="closeDetail" aria-label="Close">&times;</button>
+            <button ref="ticketCloseBtn" class="close-btn" @click="closeDetail" aria-label="Close">&times;</button>
           </div>
         </div>
 

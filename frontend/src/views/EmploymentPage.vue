@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -18,6 +18,7 @@ const employmentFilter = ref('')
 
 // Selected position for detail view
 const selectedPosition = ref(null)
+const modalCloseBtn = ref(null)
 
 const filteredPositions = computed(() => {
   let result = positions.value
@@ -69,6 +70,23 @@ function viewPosition(position) {
 function closePositionDetail() {
   selectedPosition.value = null
 }
+
+function handlePositionDetailKeydown(e) {
+  if (e.key === 'Escape') closePositionDetail()
+}
+
+watch(selectedPosition, (isOpen) => {
+  if (isOpen) {
+    document.addEventListener('keydown', handlePositionDetailKeydown)
+    nextTick(() => modalCloseBtn.value?.focus())
+  } else {
+    document.removeEventListener('keydown', handlePositionDetailKeydown)
+  }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handlePositionDetailKeydown)
+})
 
 function viewCompany(companyId) {
   router.push(`/company/${companyId}`)
@@ -244,11 +262,11 @@ onMounted(() => {
 
     <!-- Position Detail Modal -->
     <div v-if="selectedPosition" class="modal-overlay" @click.self="closePositionDetail">
-      <div class="modal-content">
-        <button @click="closePositionDetail" class="modal-close" aria-label="Close">&times;</button>
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="position-detail-title">
+        <button ref="modalCloseBtn" @click="closePositionDetail" class="modal-close" aria-label="Close">&times;</button>
 
         <div class="detail-header">
-          <h2>{{ selectedPosition.title }}</h2>
+          <h2 id="position-detail-title">{{ selectedPosition.title }}</h2>
           <div class="company-link" @click="viewCompany(selectedPosition.company_id)">
             {{ selectedPosition.company_name }}
           </div>

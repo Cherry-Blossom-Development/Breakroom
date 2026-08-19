@@ -92,10 +92,10 @@
 
     <!-- Run Detail Modal -->
     <div v-if="selectedRun" class="modal-overlay" @click.self="closeModal">
-      <div class="modal run-detail-modal">
+      <div class="modal run-detail-modal" role="dialog" aria-modal="true" aria-labelledby="run-detail-title">
         <div class="modal-header">
-          <h2>Test Run #{{ selectedRun.id }}</h2>
-          <button @click="closeModal" class="close-btn" aria-label="Close">&times;</button>
+          <h2 id="run-detail-title">Test Run #{{ selectedRun.id }}</h2>
+          <button ref="runDetailCloseBtn" @click="closeModal" class="close-btn" aria-label="Close">&times;</button>
         </div>
 
         <div class="run-summary">
@@ -200,7 +200,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import StatusBadge from '../../components/StatusBadge.vue'
 import LoadingSpinner from '../../components/LoadingSpinner.vue'
 
@@ -229,6 +229,7 @@ const filters = reactive({
 const selectedRun = ref(null)
 const suites = ref([])
 const expandedSuites = ref(new Set())
+const runDetailCloseBtn = ref(null)
 
 async function fetchRuns() {
   loading.value = true
@@ -305,6 +306,23 @@ function closeModal() {
   selectedRun.value = null
   suites.value = []
 }
+
+function handleRunDetailKeydown(e) {
+  if (e.key === 'Escape') closeModal()
+}
+
+watch(selectedRun, (isOpen) => {
+  if (isOpen) {
+    document.addEventListener('keydown', handleRunDetailKeydown)
+    nextTick(() => runDetailCloseBtn.value?.focus())
+  } else {
+    document.removeEventListener('keydown', handleRunDetailKeydown)
+  }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleRunDetailKeydown)
+})
 
 function toggleSuite(suiteId) {
   if (expandedSuites.value.has(suiteId)) {
