@@ -385,8 +385,8 @@ function handleNavClick() {
             >
               <span class="invite-room-name"># {{ invite.room_name }}</span>
               <div class="invite-btns">
-                <button @click="acceptInvite(invite)" class="invite-accept" title="Accept">Y</button>
-                <button @click="declineInvite(invite)" class="invite-decline" title="Decline">N</button>
+                <button @click="acceptInvite(invite)" class="invite-accept" :aria-label="`Accept invite to #${invite.room_name}`">Y</button>
+                <button @click="declineInvite(invite)" class="invite-decline" :aria-label="`Decline invite to #${invite.room_name}`">N</button>
               </div>
             </div>
           </div>
@@ -406,9 +406,9 @@ function handleNavClick() {
                 class="room-menu-btn"
                 :class="{ open: openRoomMenuId === room.id }"
                 @click="toggleRoomMenu(room.id)"
-                title="Options"
+                :aria-label="`Options for #${room.name}`"
               >
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
                   <circle cx="12" cy="5" r="1.5"/>
                   <circle cx="12" cy="12" r="1.5"/>
                   <circle cx="12" cy="19" r="1.5"/>
@@ -599,7 +599,7 @@ function handleNavClick() {
               class="selected-user-tag"
             >
               {{ u.handle }}
-              <button type="button" @click="removeUserFromInvite(u.id)">&times;</button>
+              <button type="button" @click="removeUserFromInvite(u.id)" :aria-label="`Remove ${u.handle} from invite`">&times;</button>
             </span>
           </div>
         </div>
