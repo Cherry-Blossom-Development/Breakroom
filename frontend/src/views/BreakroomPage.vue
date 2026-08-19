@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import { GridLayout, GridItem } from 'grid-layout-plus'
 import { breakroom } from '@/stores/breakroom.js'
@@ -134,6 +134,72 @@ const saveLayoutDebounced = () => {
   saveTimeout = setTimeout(() => {
     breakroom.saveLayoutForColCount(colCount, layoutItems.value)
   }, 500)
+}
+
+// Keyboard/Voice Control alternative to drag-and-drop repositioning and resizing.
+// Blocks are ordered by (y, x) reading order; "earlier"/"later" swap a block's
+// grid position with its neighbor in that order, then let vertical-compact
+// settle the result — mirroring what a drag-and-drop reorder would produce.
+const readingOrder = computed(() =>
+  [...layoutItems.value].sort((a, b) => a.y - b.y || a.x - b.x).map(item => item.i)
+)
+
+const canMoveEarlier = (itemId) => readingOrder.value.indexOf(itemId) > 0
+const canMoveLater = (itemId) => {
+  const idx = readingOrder.value.indexOf(itemId)
+  return idx !== -1 && idx < readingOrder.value.length - 1
+}
+const canGrow = (item) => item.w < Math.min(5, currentColCount.value) || item.h < 4
+const canShrink = (item) => item.h > 1 || item.w > 1
+
+const swapWithNeighbor = (itemId, neighborOffset) => {
+  const order = readingOrder.value
+  const idx = order.indexOf(itemId)
+  const neighborIdx = idx + neighborOffset
+  if (idx === -1 || neighborIdx < 0 || neighborIdx >= order.length) return
+  const item = layoutItems.value.find(i => i.i === itemId)
+  const neighbor = layoutItems.value.find(i => i.i === order[neighborIdx])
+  if (!item || !neighbor) return
+  const pos = { x: item.x, y: item.y }
+  item.x = neighbor.x
+  item.y = neighbor.y
+  neighbor.x = pos.x
+  neighbor.y = pos.y
+  // Force the grid to remount and re-run its initial compaction against the
+  // updated positions, the same way onBlockAdded does for a new block.
+  layoutKey.value++
+  saveLayoutDebounced()
+}
+
+const onMoveEarlier = (itemId) => swapWithNeighbor(itemId, -1)
+const onMoveLater = (itemId) => swapWithNeighbor(itemId, 1)
+
+const onGrow = (itemId) => {
+  const item = layoutItems.value.find(i => i.i === itemId)
+  if (!item) return
+  if (item.w < Math.min(5, currentColCount.value)) {
+    item.w++
+  } else if (item.h < 4) {
+    item.h++
+  } else {
+    return
+  }
+  layoutKey.value++
+  saveLayoutDebounced()
+}
+
+const onShrink = (itemId) => {
+  const item = layoutItems.value.find(i => i.i === itemId)
+  if (!item) return
+  if (item.h > 1) {
+    item.h--
+  } else if (item.w > 1) {
+    item.w--
+  } else {
+    return
+  }
+  layoutKey.value++
+  saveLayoutDebounced()
 }
 
 // Handle block removal
@@ -303,8 +369,17 @@ onUnmounted(() => {
           <BreakroomBlock
             :block="getBlock(item.i)"
             :expanded="expandedBlockId === parseInt(item.i)"
+            layout-controls
+            :can-move-earlier="canMoveEarlier(item.i)"
+            :can-move-later="canMoveLater(item.i)"
+            :can-grow="canGrow(item)"
+            :can-shrink="canShrink(item)"
             @remove="onRemoveBlock(parseInt(item.i))"
             @toggle="toggleBlock(parseInt(item.i))"
+            @move-earlier="onMoveEarlier(item.i)"
+            @move-later="onMoveLater(item.i)"
+            @grow="onGrow(item.i)"
+            @shrink="onShrink(item.i)"
           />
         </GridItem>
       </GridLayout>

@@ -17,10 +17,30 @@ const props = defineProps({
   expanded: {
     type: Boolean,
     default: false
+  },
+  layoutControls: {
+    type: Boolean,
+    default: false
+  },
+  canMoveEarlier: {
+    type: Boolean,
+    default: false
+  },
+  canMoveLater: {
+    type: Boolean,
+    default: false
+  },
+  canGrow: {
+    type: Boolean,
+    default: false
+  },
+  canShrink: {
+    type: Boolean,
+    default: false
   }
 })
 
-const emit = defineEmits(['remove', 'toggle'])
+const emit = defineEmits(['remove', 'toggle', 'move-earlier', 'move-later', 'grow', 'shrink'])
 
 // Flash the block header yellow briefly when a new chat message arrives
 const headerFlashing = ref(false)
@@ -65,9 +85,50 @@ const blockTitle = computed(() => {
         &times;
       </button>
       <span class="block-title">{{ blockTitle }}</span>
+      <div v-if="layoutControls" class="layout-controls">
+        <button
+          type="button"
+          class="layout-btn"
+          :disabled="!canMoveEarlier"
+          @click.stop="emit('move-earlier')"
+          :aria-label="`Move ${blockTitle} block earlier in layout`"
+          title="Move earlier"
+        >&uarr;</button>
+        <button
+          type="button"
+          class="layout-btn"
+          :disabled="!canMoveLater"
+          @click.stop="emit('move-later')"
+          :aria-label="`Move ${blockTitle} block later in layout`"
+          title="Move later"
+        >&darr;</button>
+        <button
+          type="button"
+          class="layout-btn"
+          :disabled="!canGrow"
+          @click.stop="emit('grow')"
+          :aria-label="`Increase ${blockTitle} block size`"
+          title="Grow"
+        >+</button>
+        <button
+          type="button"
+          class="layout-btn"
+          :disabled="!canShrink"
+          @click.stop="emit('shrink')"
+          :aria-label="`Decrease ${blockTitle} block size`"
+          title="Shrink"
+        >&minus;</button>
+      </div>
       <div class="block-actions">
-        <button class="expand-btn" :class="{ rotated: expanded }" title="Expand/Collapse">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+        <button
+          class="expand-btn"
+          :class="{ rotated: expanded }"
+          @click.stop="emit('toggle')"
+          :aria-label="expanded ? `Collapse ${blockTitle} block` : `Expand ${blockTitle} block`"
+          :aria-expanded="expanded"
+          title="Expand/Collapse"
+        >
+          <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
             <path d="M7 10l5 5 5-5z"/>
           </svg>
         </button>
@@ -182,6 +243,35 @@ const blockTitle = computed(() => {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.layout-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.layout-btn {
+  background: none;
+  border: none;
+  color: var(--color-header-text);
+  cursor: pointer;
+  padding: 2px 5px;
+  opacity: 0.7;
+  line-height: 1;
+  font-size: 0.85rem;
+  border-radius: 3px;
+}
+
+.layout-btn:hover:not(:disabled) {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.layout-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
 }
 
 .expand-btn {
