@@ -496,7 +496,7 @@ onMounted(async () => {
           <h2 v-else>Edit Ticket</h2>
           <div class="header-buttons">
             <button v-if="!editingTicket && selectedTicket.creator_handle === user.username" class="btn-edit" @click="startEditTicket">Edit</button>
-            <button class="close-btn" @click="closeDetail">&times;</button>
+            <button class="close-btn" @click="closeDetail" aria-label="Close">&times;</button>
           </div>
         </div>
 

@@ -309,7 +309,7 @@ function selectGenre(g) {
             <div v-for="collab in lyrics.collaborators" :key="collab.user_id" class="collaborator-item">
               <span class="collaborator-name">{{ collab.first_name || collab.handle }}</span>
               <span class="collaborator-role">{{ collab.role }}</span>
-              <button class="remove-btn" @click="removeCollaborator(collab.user_id)">&times;</button>
+              <button class="remove-btn" @click="removeCollaborator(collab.user_id)" :aria-label="`Remove ${collab.first_name || collab.handle} as collaborator`">&times;</button>
             </div>
           </div>
 

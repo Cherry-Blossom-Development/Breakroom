@@ -95,7 +95,7 @@
       <div class="modal run-detail-modal">
         <div class="modal-header">
           <h2>Test Run #{{ selectedRun.id }}</h2>
-          <button @click="closeModal" class="close-btn">&times;</button>
+          <button @click="closeModal" class="close-btn" aria-label="Close">&times;</button>
         </div>
 
         <div class="run-summary">

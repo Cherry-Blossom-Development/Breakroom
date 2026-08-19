@@ -15,7 +15,7 @@
             <div class="shortlist-toast-excerpt">{{ item.preview }}</div>
           </div>
         </div>
-        <button class="shortlist-toast-close" @click.stop="$emit('dismiss', item.id)">✕</button>
+        <button class="shortlist-toast-close" @click.stop="$emit('dismiss', item.id)" aria-label="Dismiss notification">✕</button>
       </div>
     </TransitionGroup>
   </div>

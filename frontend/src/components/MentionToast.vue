@@ -15,7 +15,7 @@
             <div class="mention-excerpt">{{ mention.excerpt }}</div>
           </div>
         </div>
-        <button class="mention-close" @click.stop="$emit('dismiss', mention.id)">✕</button>
+        <button class="mention-close" @click.stop="$emit('dismiss', mention.id)" aria-label="Dismiss notification">✕</button>
       </div>
     </TransitionGroup>
   </div>

@@ -187,7 +187,7 @@ function navigateArtwork(direction) {
       <!-- Lightbox for single artwork view -->
       <div v-if="currentArtwork" class="lightbox" @click="closeArtwork">
         <div class="lightbox-content" @click.stop>
-          <button class="lightbox-close" @click="closeArtwork">&times;</button>
+          <button class="lightbox-close" @click="closeArtwork" aria-label="Close">&times;</button>
 
           <button class="lightbox-nav prev" @click="navigateArtwork(-1)">&lsaquo;</button>
 

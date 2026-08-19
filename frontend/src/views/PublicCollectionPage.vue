@@ -65,7 +65,7 @@
     <Teleport to="body">
       <div v-if="viewModal.open" class="modal-backdrop" @click.self="viewModal.open = false">
         <div class="modal modal-lightbox">
-          <button class="modal-close lightbox-close" @click="viewModal.open = false">✕</button>
+          <button class="modal-close lightbox-close" @click="viewModal.open = false" aria-label="Close">✕</button>
           <img
             v-if="viewModal.item?.image_path"
             :src="`/api/uploads/${viewModal.item.image_path}`"
@@ -87,7 +87,7 @@
 
           <!-- Step 0: Preview (lightbox-style with Buy Now) -->
           <template v-if="modal.step === 0">
-            <button class="modal-close lightbox-close" @click="closeModal">✕</button>
+            <button class="modal-close lightbox-close" @click="closeModal" aria-label="Close">✕</button>
             <img
               v-if="modal.item?.image_path"
               :src="`/api/uploads/${modal.item.image_path}`"
@@ -122,7 +122,7 @@
                   </div>
                 </div>
               </div>
-              <button class="modal-close" @click="closeModal">✕</button>
+              <button class="modal-close" @click="closeModal" aria-label="Close">✕</button>
             </div>
 
             <div class="modal-body">
@@ -185,7 +185,7 @@
 
             <div class="modal-header">
               <h2 class="modal-title">Payment</h2>
-              <button class="modal-close" @click="closeModal">✕</button>
+              <button class="modal-close" @click="closeModal" aria-label="Close">✕</button>
             </div>
 
             <div class="modal-body">
@@ -222,7 +222,7 @@
           <template v-else-if="modal.step === 3">
             <div class="modal-header">
               <h2 class="modal-title">Order confirmed!</h2>
-              <button class="modal-close" @click="closeModal">✕</button>
+              <button class="modal-close" @click="closeModal" aria-label="Close">✕</button>
             </div>
             <div class="modal-body confirmation">
               <div class="confirm-icon">✓</div>
@@ -245,7 +245,7 @@
         <div class="modal contact-modal">
           <div class="modal-header">
             <h2 class="modal-title">Contact Seller</h2>
-            <button class="modal-close" @click="closeContact">✕</button>
+            <button class="modal-close" @click="closeContact" aria-label="Close">✕</button>
           </div>
 
           <div v-if="contactModal.sent" class="modal-body confirmation">

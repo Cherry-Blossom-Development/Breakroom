@@ -376,7 +376,7 @@ const openInviteModal = (room) => {
                 class="selected-user-tag"
               >
                 {{ u.handle }}
-                <button type="button" @click="removeUserFromInvite(u.id)">&times;</button>
+                <button type="button" @click="removeUserFromInvite(u.id)" :aria-label="`Remove ${u.handle} from invite`">&times;</button>
               </span>
             </div>
           </div>

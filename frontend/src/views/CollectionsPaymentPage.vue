@@ -240,7 +240,7 @@
         <div class="modal">
           <div class="modal-header">
             <h2 class="modal-title">Upgrade to Pro</h2>
-            <button class="modal-close" @click="closeSubscribeModal">✕</button>
+            <button class="modal-close" @click="closeSubscribeModal" aria-label="Close">✕</button>
           </div>
           <div class="modal-body">
             <p class="modal-sub">$3.99/mo, cancel anytime.</p>
@@ -263,7 +263,7 @@
         <div class="modal">
           <div class="modal-header">
             <h2 class="modal-title">Manage Subscription</h2>
-            <button class="modal-close" @click="closeManageModal">✕</button>
+            <button class="modal-close" @click="closeManageModal" aria-label="Close">✕</button>
           </div>
 
           <template v-if="manageModal.mode === 'menu'">

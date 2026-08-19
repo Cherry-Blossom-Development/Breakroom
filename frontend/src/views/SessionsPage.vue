@@ -1927,7 +1927,7 @@ onMounted(async () => {
                       <td>
                         <ShortlistButton :session="session" :bands="activeBands" />
                         <button class="share-btn" @click="shareSession(session)" title="Share">⬆</button>
-                        <button class="delete-btn" @click="deleteSession(session.id)" title="Delete">✕</button>
+                        <button class="delete-btn" @click="deleteSession(session.id)" title="Delete" :aria-label="`Delete ${session.name}`">✕</button>
                       </td>
                     </tr>
                     <tr v-if="playingId === session.id" class="player-row">
@@ -2115,7 +2115,7 @@ onMounted(async () => {
                   <td>
                     <ShortlistButton :session="session" :bands="activeBands" />
                     <button class="share-btn" @click="shareSession(session)" title="Share">⬆</button>
-                    <button class="delete-btn" @click="deleteSession(session.id)" title="Delete">✕</button>
+                    <button class="delete-btn" @click="deleteSession(session.id)" title="Delete" :aria-label="`Delete ${session.name}`">✕</button>
                   </td>
                 </tr>
                 <tr v-if="playingId === session.id" class="player-row">
@@ -2833,7 +2833,7 @@ onMounted(async () => {
                     <td>
                       <ShortlistButton :session="session" :bands="activeBands" />
                       <button class="share-btn" @click="shareSession(session)" title="Share">⬆</button>
-                      <button class="delete-btn" @click="deleteSession(session.id)" title="Delete">✕</button>
+                      <button class="delete-btn" @click="deleteSession(session.id)" title="Delete" :aria-label="`Delete ${session.name}`">✕</button>
                     </td>
                   </tr>
                   <tr v-if="playingId === session.id" class="player-row">

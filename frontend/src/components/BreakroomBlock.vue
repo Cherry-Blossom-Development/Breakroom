@@ -61,7 +61,7 @@ const blockTitle = computed(() => {
 <template>
   <div class="breakroom-block" :class="{ expanded, 'chat-type': block.block_type === 'chat' }">
     <div class="block-header" :class="{ 'header-flash': headerFlashing }" @click="emit('toggle')">
-      <button class="remove-btn" @click.stop="emit('remove')" title="Remove block">
+      <button class="remove-btn" @click.stop="emit('remove')" title="Remove block" :aria-label="`Remove ${blockTitle} block`">
         &times;
       </button>
       <span class="block-title">{{ blockTitle }}</span>

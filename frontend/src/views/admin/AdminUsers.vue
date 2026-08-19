@@ -73,7 +73,7 @@
       <div class="modal modal-wide">
         <div class="modal-header">
           <h2>Edit User — @{{ editingUser.handle }}</h2>
-          <button type="button" class="btn-close" @click="cancelEdit">✕</button>
+          <button type="button" class="btn-close" @click="cancelEdit" aria-label="Close">✕</button>
         </div>
 
         <!-- Basic Info -->

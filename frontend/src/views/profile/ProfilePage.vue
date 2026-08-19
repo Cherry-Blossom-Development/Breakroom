@@ -573,7 +573,7 @@ onMounted(() => {
                 class="skill-tag"
               >
                 {{ skill.name }}
-                <button @click="removeSkill(skill.id)" class="remove-skill" title="Remove skill">&times;</button>
+                <button @click="removeSkill(skill.id)" class="remove-skill" title="Remove skill" :aria-label="`Remove ${skill.name} skill`">&times;</button>
               </span>
             </div>
             <p v-else class="bio-empty">No skills added yet.</p>
@@ -625,7 +625,7 @@ onMounted(() => {
                   </div>
                   <div class="job-actions">
                     <button @click="openEditJobModal(job)" class="job-action-btn edit" title="Edit">✎</button>
-                    <button @click="deleteJob(job.id)" class="job-action-btn delete" title="Delete">&times;</button>
+                    <button @click="deleteJob(job.id)" class="job-action-btn delete" title="Delete" :aria-label="`Delete ${job.title} job`">&times;</button>
                   </div>
                 </div>
                 <div class="job-meta">
@@ -746,7 +746,7 @@ onMounted(() => {
       <div class="modal-content job-modal">
         <div class="modal-header">
           <h2>{{ editingJob ? 'Edit Job' : 'Add Job' }}</h2>
-          <button @click="closeJobModal" class="modal-close">&times;</button>
+          <button @click="closeJobModal" class="modal-close" aria-label="Close">&times;</button>
         </div>
 
         <form @submit.prevent="saveJob" class="job-form">

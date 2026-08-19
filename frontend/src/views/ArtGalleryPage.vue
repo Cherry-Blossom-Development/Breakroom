@@ -681,7 +681,7 @@ async function exportToShowcase() {
     <!-- Lightbox -->
     <div v-if="showLightbox" class="lightbox-overlay" @click="closeLightbox">
       <div class="lightbox-content" @click.stop>
-        <button class="lightbox-close" @click="closeLightbox">&times;</button>
+        <button class="lightbox-close" @click="closeLightbox" aria-label="Close">&times;</button>
         <img :src="getImageUrl(lightboxArtwork.image_path)" :alt="lightboxArtwork.title" />
         <div class="lightbox-info">
           <h3>{{ lightboxArtwork.title }}</h3>

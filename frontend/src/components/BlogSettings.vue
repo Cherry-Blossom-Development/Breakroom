@@ -128,7 +128,7 @@ function close() {
     <div class="modal blog-settings-modal">
       <header class="modal-header">
         <h2>Blog Settings</h2>
-        <button class="close-btn" @click="close">&times;</button>
+        <button class="close-btn" @click="close" aria-label="Close">&times;</button>
       </header>
 
       <div v-if="loading" class="loading">

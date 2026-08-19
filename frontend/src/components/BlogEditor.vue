@@ -165,7 +165,7 @@ const saveAndPublish = () => savePost(true)
           placeholder="Post title..."
           maxlength="255"
         />
-        <button class="close-btn" @click="emit('close')" title="Close">
+        <button class="close-btn" @click="emit('close')" title="Close" aria-label="Close">
           &times;
         </button>
       </div>

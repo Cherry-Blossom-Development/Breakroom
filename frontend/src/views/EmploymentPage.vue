@@ -245,7 +245,7 @@ onMounted(() => {
     <!-- Position Detail Modal -->
     <div v-if="selectedPosition" class="modal-overlay" @click.self="closePositionDetail">
       <div class="modal-content">
-        <button @click="closePositionDetail" class="modal-close">&times;</button>
+        <button @click="closePositionDetail" class="modal-close" aria-label="Close">&times;</button>
 
         <div class="detail-header">
           <h2>{{ selectedPosition.title }}</h2>
