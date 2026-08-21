@@ -565,7 +565,7 @@ async function submitContact() {
 <style scoped>
 .collection-shell {
   min-height: 100vh;
-  background: #fff;
+  background: var(--color-background);
 }
 
 .state-center {
@@ -576,10 +576,10 @@ async function submitContact() {
   min-height: 100vh;
   padding: 40px;
   text-align: center;
-  color: #555;
+  color: var(--color-text-secondary);
 }
 
-.state-center h1 { font-size: 2rem; margin-bottom: 12px; color: #222; }
+.state-center h1 { font-size: 2rem; margin-bottom: 12px; color: var(--color-text); }
 
 .collection-content {
   max-width: 960px;
@@ -606,7 +606,7 @@ async function submitContact() {
   color: inherit;
 }
 
-.empty-state { color: #888; font-size: 1rem; padding: 40px 0; }
+.empty-state { color: var(--color-text-light); font-size: 1rem; padding: 40px 0; }
 
 /* Items grid */
 .items-grid {
@@ -619,7 +619,7 @@ async function submitContact() {
   border-radius: 10px;
   overflow: hidden;
   background: rgba(255,255,255,0.85);
-  border: 1px solid rgba(0,0,0,0.08);
+  border: 1px solid var(--color-border);
   transition: box-shadow 0.15s, transform 0.15s;
 }
 
@@ -646,7 +646,7 @@ async function submitContact() {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(0,0,0,0.2);
+  color: var(--color-text-light);
 }
 
 .sold-badge {
@@ -685,11 +685,11 @@ async function submitContact() {
 .contact-seller-btn {
   margin-top: 10px;
   background: none;
-  border: 1px solid #ccc;
+  border: 1px solid var(--color-border-input);
   border-radius: 6px;
   padding: 5px 12px;
   font-size: 0.8rem;
-  color: #555;
+  color: var(--color-text-secondary);
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
   width: 100%;
@@ -700,19 +700,19 @@ async function submitContact() {
 
 .contact-item-ref {
   font-size: 0.88rem;
-  color: #555;
+  color: var(--color-text-secondary);
   margin: 0 0 16px;
   padding: 8px 12px;
-  background: #f5f5f5;
+  background: var(--color-background-hover);
   border-radius: 6px;
 }
 
 .form-row textarea {
   padding: 9px 11px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--color-border-medium);
   border-radius: 7px;
   font-size: 0.92rem;
-  color: #222;
+  color: var(--color-text);
   outline: none;
   resize: vertical;
   font-family: inherit;
@@ -731,7 +731,7 @@ async function submitContact() {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.55);
+  background: var(--color-overlay);
   z-index: 1000;
   display: flex;
   align-items: center;
@@ -740,7 +740,7 @@ async function submitContact() {
 }
 
 .modal {
-  background: #fff;
+  background: var(--color-background-card);
   border-radius: 14px;
   width: 100%;
   max-width: 540px;
@@ -756,7 +756,7 @@ async function submitContact() {
   align-items: flex-start;
   gap: 12px;
   padding: 20px 20px 16px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--color-border-light);
   flex-shrink: 0;
 }
 
@@ -771,22 +771,22 @@ async function submitContact() {
 }
 
 .modal-item-info { min-width: 0; }
-.modal-item-name { font-size: 1rem; font-weight: 700; color: #222; }
-.modal-item-price { font-size: 0.88rem; color: #555; margin-top: 3px; }
+.modal-item-name { font-size: 1rem; font-weight: 700; color: var(--color-text); }
+.modal-item-price { font-size: 0.88rem; color: var(--color-text-secondary); margin-top: 3px; }
 
-.modal-title { font-size: 1.15rem; font-weight: 700; color: #222; margin: 0; flex: 1; line-height: 1.3; }
+.modal-title { font-size: 1.15rem; font-weight: 700; color: var(--color-text); margin: 0; flex: 1; line-height: 1.3; }
 
 .modal-close {
   background: none;
   border: none;
   font-size: 1.1rem;
-  color: #999;
+  color: var(--color-text-placeholder);
   cursor: pointer;
   padding: 0 2px;
   line-height: 1;
   flex-shrink: 0;
 }
-.modal-close:hover { color: #333; }
+.modal-close:hover { color: var(--color-text); }
 
 .modal-body {
   flex: 1;
@@ -799,7 +799,7 @@ async function submitContact() {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #888;
+  color: var(--color-text-light);
   margin: 0 0 12px;
 }
 .modal-section-title + .form-row { margin-top: 0; }
@@ -817,16 +817,16 @@ async function submitContact() {
   flex-direction: column;
   font-size: 0.82rem;
   font-weight: 600;
-  color: #555;
+  color: var(--color-text-secondary);
   gap: 5px;
 }
 
 .form-row input {
   padding: 9px 11px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--color-border-medium);
   border-radius: 7px;
   font-size: 0.92rem;
-  color: #222;
+  color: var(--color-text);
   outline: none;
   transition: border-color 0.15s;
 }
@@ -836,7 +836,7 @@ async function submitContact() {
 
 /* Order summary (step 2) */
 .order-summary {
-  background: #f8f8f8;
+  background: var(--color-background-soft);
   border-radius: 8px;
   padding: 14px 16px;
   margin-bottom: 16px;
@@ -846,20 +846,20 @@ async function submitContact() {
   display: flex;
   justify-content: space-between;
   font-size: 0.9rem;
-  color: #555;
+  color: var(--color-text-secondary);
   padding: 4px 0;
 }
 .summary-row.total {
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid var(--color-border-medium);
   margin-top: 6px;
   padding-top: 8px;
   font-weight: 700;
-  color: #222;
+  color: var(--color-text);
 }
 
 .ship-summary {
   font-size: 0.82rem;
-  color: #666;
+  color: var(--color-text-muted);
   margin-bottom: 18px;
   line-height: 1.5;
 }
@@ -867,15 +867,15 @@ async function submitContact() {
 .square-card-label {
   font-size: 0.82rem;
   font-weight: 600;
-  color: #555;
+  color: var(--color-text-secondary);
   margin-bottom: 8px;
 }
 
 .square-card-mount {
-  border: 1px solid #ddd;
+  border: 1px solid var(--color-border-medium);
   border-radius: 7px;
   padding: 12px;
-  background: #fff;
+  background: var(--color-background-input);
 }
 
 .square-notice {
@@ -883,12 +883,12 @@ async function submitContact() {
   align-items: center;
   gap: 5px;
   font-size: 0.75rem;
-  color: #999;
+  color: var(--color-text-placeholder);
   margin: 12px 0 0;
 }
 
 .form-error {
-  color: #e53935;
+  color: var(--color-error);
   font-size: 0.85rem;
   margin: 10px 0 0;
 }
@@ -902,8 +902,8 @@ async function submitContact() {
 .confirm-icon {
   width: 56px;
   height: 56px;
-  background: #e8f5e9;
-  color: #2e7d32;
+  background: var(--color-success-bg);
+  color: var(--color-success);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -912,14 +912,14 @@ async function submitContact() {
   margin: 0 auto 20px;
 }
 
-.confirmation p { color: #444; line-height: 1.6; margin: 0 0 10px; font-size: 0.95rem; }
+.confirmation p { color: var(--color-text-secondary); line-height: 1.6; margin: 0 0 10px; font-size: 0.95rem; }
 
 .modal-footer {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
   padding: 14px 20px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--color-border-light);
   flex-shrink: 0;
 }
 
@@ -938,8 +938,8 @@ async function submitContact() {
 .btn-primary:not(:disabled):hover { opacity: 0.88; }
 
 .btn-secondary {
-  background: #f3f3f3;
-  color: #444;
+  background: var(--color-background-hover);
+  color: var(--color-text-secondary);
   border: none;
   border-radius: 8px;
   padding: 10px 18px;
@@ -948,7 +948,7 @@ async function submitContact() {
   cursor: pointer;
   transition: background 0.15s;
 }
-.btn-secondary:hover { background: #e8e8e8; }
+.btn-secondary:hover { background: var(--color-border-medium); }
 
 /* ── Lightbox ── */
 .modal-lightbox {
@@ -986,19 +986,19 @@ async function submitContact() {
 
 .lightbox-info {
   padding: 18px 20px 22px;
-  background: #fff;
+  background: var(--color-background-card);
 }
 
 .lightbox-name {
   font-size: 1.1rem;
   font-weight: 700;
-  color: #222;
+  color: var(--color-text);
   margin-bottom: 6px;
 }
 
 .lightbox-desc {
   font-size: 0.9rem;
-  color: #555;
+  color: var(--color-text-secondary);
   line-height: 1.6;
   margin-bottom: 8px;
 }
@@ -1014,18 +1014,18 @@ async function submitContact() {
 .lightbox-price {
   font-size: 1.05rem;
   font-weight: 700;
-  color: #222;
+  color: var(--color-text);
 }
 
 .lightbox-shipping {
   font-size: 0.82rem;
-  color: #777;
+  color: var(--color-text-muted);
 }
 
 .lightbox-footer {
   border-top: none;
   padding: 12px 20px 20px;
-  background: #fff;
+  background: var(--color-background-card);
 }
 
 .btn-buy-now {
