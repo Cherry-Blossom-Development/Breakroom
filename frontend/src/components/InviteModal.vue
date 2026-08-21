@@ -128,7 +128,7 @@ const inviteUser = async (user) => {
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--color-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -136,8 +136,8 @@ const inviteUser = async (user) => {
 }
 
 .modal {
-  background: white;
-  color: #333;
+  background: var(--color-background-card);
+  color: var(--color-text);
   padding: 25px;
   border-radius: 10px;
   width: 400px;
@@ -155,10 +155,12 @@ const inviteUser = async (user) => {
   width: 100%;
   padding: 10px;
   margin-bottom: 15px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--color-border-medium);
   border-radius: 5px;
   font-size: 1em;
   box-sizing: border-box;
+  background: var(--color-background-input);
+  color: var(--color-text);
 }
 
 .loading, .no-users {
@@ -166,7 +168,7 @@ const inviteUser = async (user) => {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: #666;
+  color: var(--color-text-muted);
   padding: 20px;
 }
 
@@ -183,7 +185,7 @@ const inviteUser = async (user) => {
   justify-content: space-between;
   align-items: center;
   padding: 10px;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--color-border-light);
 }
 
 .user-item:last-child {
@@ -202,11 +204,11 @@ const inviteUser = async (user) => {
 
 .user-name {
   font-size: 0.85em;
-  color: #666;
+  color: var(--color-text-muted);
 }
 
 .invite-btn {
-  background: #42b983;
+  background: var(--color-accent);
   color: white;
   border: none;
   padding: 6px 12px;
@@ -216,7 +218,7 @@ const inviteUser = async (user) => {
 }
 
 .invite-btn:hover:not(:disabled) {
-  background: #3aa876;
+  background: var(--color-accent-hover);
 }
 
 .invite-btn:disabled {
@@ -225,13 +227,13 @@ const inviteUser = async (user) => {
 }
 
 .error {
-  color: #c0392b;
+  color: var(--color-error);
   font-size: 0.9em;
   margin: 10px 0;
 }
 
 .success {
-  color: #42b983;
+  color: var(--color-success);
   font-size: 0.9em;
   margin: 10px 0;
 }
@@ -243,8 +245,8 @@ const inviteUser = async (user) => {
 }
 
 .btn-secondary {
-  background: #ddd;
-  color: #333;
+  background: var(--color-button-secondary);
+  color: var(--color-text);
   border: none;
   padding: 10px 20px;
   border-radius: 5px;
@@ -252,6 +254,6 @@ const inviteUser = async (user) => {
 }
 
 .btn-secondary:hover {
-  background: #ccc;
+  background: var(--color-button-secondary-hover);
 }
 </style>
