@@ -23,6 +23,8 @@
 
 /* semantic color variables for this project */
 :root {
+  color-scheme: light dark;
+
   --color-background: #ffffff;
   --color-background-soft: #f8f8f8;
   --color-background-mute: #f2f2f2;
