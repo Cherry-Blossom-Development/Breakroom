@@ -551,7 +551,7 @@ onUnmounted(() => {
           @click="goLeft"
           aria-label="Previous room (older)"
         ><span aria-hidden="true">‹</span></button>
-        <span class="ccw-room-name"># {{ currentRoom?.room_name ?? '…' }}</span>
+        <span class="ccw-room-name" :title="currentRoom?.room_name"># {{ currentRoom?.room_name ?? '…' }}</span>
         <span class="ccw-pos">{{ posLabel }}</span>
         <button
           class="ccw-arrow"

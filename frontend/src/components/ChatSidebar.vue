@@ -274,7 +274,7 @@ const openInviteModal = (room) => {
       <ul class="invite-list">
         <li v-for="invite in chat.invites" :key="invite.room_id" class="invite-item">
           <div class="invite-info">
-            <span class="room-name"># {{ invite.room_name }}</span>
+            <span class="room-name" :title="invite.room_name"># {{ invite.room_name }}</span>
             <span class="invited-by">from {{ invite.invited_by_handle }}</span>
           </div>
           <div class="invite-actions">
@@ -295,7 +295,7 @@ const openInviteModal = (room) => {
         :class="{ active: chat.currentRoom === room.id }"
         @click="selectRoom(room)"
       >
-        <span class="room-name"># {{ room.name }}</span>
+        <span class="room-name" :title="room.name"># {{ room.name }}</span>
         <div class="room-right">
           <span v-if="chat.unreadCounts[room.id]" class="unread-badge">
             {{ chat.unreadCounts[room.id] > 99 ? '99+' : chat.unreadCounts[room.id] }}
@@ -354,7 +354,7 @@ const openInviteModal = (room) => {
           :class="{ active: chat.currentRoom === dm.id }"
           @click="selectRoom(dm)"
         >
-          <span class="room-name">@ {{ dm.partner_handle }}</span>
+          <span class="room-name" :title="dm.partner_handle">@ {{ dm.partner_handle }}</span>
           <span v-if="chat.unreadCounts[dm.id]" class="unread-badge">
             {{ chat.unreadCounts[dm.id] > 99 ? '99+' : chat.unreadCounts[dm.id] }}
           </span>

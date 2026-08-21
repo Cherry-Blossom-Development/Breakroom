@@ -84,7 +84,7 @@ const blockTitle = computed(() => {
       <button class="remove-btn" @click.stop="emit('remove')" title="Remove block" :aria-label="`Remove ${blockTitle} block`">
         &times;
       </button>
-      <span class="block-title">{{ blockTitle }}</span>
+      <span class="block-title" :title="blockTitle">{{ blockTitle }}</span>
       <div v-if="layoutControls" class="layout-controls">
         <button
           type="button"

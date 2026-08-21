@@ -383,7 +383,7 @@ function handleNavClick() {
               :key="invite.room_id"
               class="invite-item"
             >
-              <span class="invite-room-name"># {{ invite.room_name }}</span>
+              <span class="invite-room-name" :title="invite.room_name"># {{ invite.room_name }}</span>
               <div class="invite-btns">
                 <button @click="acceptInvite(invite)" class="invite-accept" :aria-label="`Accept invite to #${invite.room_name}`">Y</button>
                 <button @click="declineInvite(invite)" class="invite-decline" :aria-label="`Decline invite to #${invite.room_name}`">N</button>
@@ -399,7 +399,7 @@ function handleNavClick() {
             :class="{ active: chat.currentRoom === room.id }"
             @click="selectRoom(room)"
           >
-            <span class="room-name"># {{ room.name }}</span>
+            <span class="room-name" :title="room.name"># {{ room.name }}</span>
             <span v-if="badges.chatUnread[room.id]" class="nav-badge room-badge">{{ badges.chatUnread[room.id] }}</span>
             <div class="room-menu-wrapper" @click.stop>
               <button
@@ -482,7 +482,7 @@ function handleNavClick() {
             :class="{ active: chat.currentRoom === dm.id }"
             @click="selectRoom(dm)"
           >
-            <span class="room-name">@ {{ dm.partner_handle }}</span>
+            <span class="room-name" :title="dm.partner_handle">@ {{ dm.partner_handle }}</span>
             <span v-if="chat.unreadCounts[dm.id]" class="nav-badge room-badge">
               {{ chat.unreadCounts[dm.id] > 99 ? '99+' : chat.unreadCounts[dm.id] }}
             </span>
