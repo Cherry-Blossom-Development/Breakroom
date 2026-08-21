@@ -11,6 +11,17 @@ import { renderMessage } from '@/utilities/linkify.js'
 
 const emit = defineEmits(['new-message'])
 
+// Grows a textarea to fit its content, capped at maxEm (em units, relative to
+// the textarea's own font-size) so the cap scales with the user's text size
+// instead of a fixed pixel height that shrinks the effective line budget when
+// text is larger.
+function autoGrowTextarea(el, maxEm) {
+  if (!el) return
+  const maxHeight = maxEm * parseFloat(getComputedStyle(el).fontSize)
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, maxHeight) + 'px'
+}
+
 // ── State ────────────────────────────────────────────────────────────────────
 
 // rooms sorted oldest-last-message → newest-last-message (left = old, right = new)
@@ -171,15 +182,14 @@ const startEdit = (msg) => {
   editText.value = msg.message
   deletingMessageId.value = null
   nextTick(() => {
-    const el = editInputEl.value
-    if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px'; el.focus() }
+    autoGrowTextarea(editInputEl.value, 12.5)
+    editInputEl.value?.focus()
   })
 }
 const cancelEdit = () => { editingMessageId.value = null; editText.value = '' }
 
 const handleEditInput = () => {
-  const el = editInputEl.value
-  if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px' }
+  autoGrowTextarea(editInputEl.value, 12.5)
 }
 
 async function saveEdit(messageId) {
@@ -857,7 +867,7 @@ onUnmounted(() => {
   border-radius: 6px; font-size: inherit; font-family: inherit; line-height: 1.4;
   background: var(--color-background-input);
   color: var(--color-text); outline: none; box-sizing: border-box;
-  resize: none; overflow-y: auto; max-height: 200px;
+  resize: none; overflow-y: auto; max-height: 12.5em;
   white-space: pre-wrap; word-wrap: break-word;
 }
 .edit-actions { display: flex; gap: 6px; margin-top: 4px; }
