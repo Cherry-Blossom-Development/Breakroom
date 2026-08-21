@@ -343,7 +343,7 @@ async function submitDeletionRequest() {
 
 /* ── Notification settings ── */
 .settings-section {
-  border: 1px solid var(--color-border, #e2e8f0);
+  border: 1px solid var(--color-border-medium);
   border-radius: 6px;
   padding: 1.5rem;
   margin-bottom: 1.5rem;
@@ -357,7 +357,7 @@ async function submitDeletionRequest() {
 }
 
 .settings-loading {
-  color: #718096;
+  color: var(--color-text-light);
   font-size: 0.9rem;
 }
 
@@ -382,18 +382,18 @@ async function submitDeletionRequest() {
 
 .toggle-label {
   font-size: 0.9rem;
-  color: #4a5568;
+  color: var(--color-text-secondary);
 }
 
 .master-toggle .toggle-label {
   font-weight: 600;
-  color: #2d3748;
+  color: var(--color-text);
 }
 
 .toggle-track {
   width: 36px;
   height: 20px;
-  background: #cbd5e0;
+  background: var(--color-border-medium);
   border-radius: 10px;
   position: relative;
   flex-shrink: 0;
@@ -407,14 +407,14 @@ async function submitDeletionRequest() {
   left: 3px;
   width: 14px;
   height: 14px;
-  background: white;
+  background: var(--color-background-card);
   border-radius: 50%;
   transition: transform 0.2s;
   box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 
 .toggle-track.on {
-  background: #48bb78;
+  background: var(--color-success);
 }
 
 .toggle-track.on::after {
@@ -426,7 +426,7 @@ async function submitDeletionRequest() {
   flex-direction: column;
   gap: 0.25rem;
   padding-left: 1rem;
-  border-left: 2px solid #e2e8f0;
+  border-left: 2px solid var(--color-border-medium);
   margin-left: 0.25rem;
   transition: opacity 0.2s;
 }
@@ -437,14 +437,14 @@ async function submitDeletionRequest() {
 }
 
 .settings-error {
-  color: #e53e3e;
+  color: var(--color-error);
   font-size: 0.85rem;
   margin: 0.5rem 0 0;
 }
 
 /* ── Alternate email ── */
 .section-hint {
-  color: #718096;
+  color: var(--color-text-light);
   font-size: 0.85rem;
   margin: 0 0 1rem;
 }
@@ -452,7 +452,7 @@ async function submitDeletionRequest() {
 .alt-email-input {
   width: 100%;
   padding: 0.5rem;
-  border: 1px solid #cbd5e0;
+  border: 1px solid var(--color-border-medium);
   border-radius: 4px;
   font-size: 0.9rem;
   box-sizing: border-box;
@@ -462,7 +462,7 @@ async function submitDeletionRequest() {
 .alt-email-status p {
   margin: 0 0 0.5rem;
   font-size: 0.9rem;
-  color: #2d3748;
+  color: var(--color-text);
 }
 
 .alt-email-status .toggle-row {
@@ -476,14 +476,14 @@ async function submitDeletionRequest() {
 }
 
 .alt-email-message {
-  color: #276749;
+  color: var(--color-success);
   font-size: 0.85rem;
   margin: 0.5rem 0 0;
 }
 
 .btn-primary {
   padding: 0.5rem 1.25rem;
-  background: #3182ce;
+  background: var(--color-accent);
   color: white;
   border: none;
   border-radius: 4px;
@@ -498,13 +498,13 @@ async function submitDeletionRequest() {
 }
 
 .btn-primary:not(:disabled):hover {
-  background: #2b6cb0;
+  background: var(--color-accent-hover);
 }
 
 .btn-secondary {
   padding: 0.5rem 1.25rem;
-  background: #edf2f7;
-  color: #4a5568;
+  background: var(--color-background-hover);
+  color: var(--color-text-secondary);
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -513,23 +513,23 @@ async function submitDeletionRequest() {
 }
 
 .btn-secondary:hover {
-  background: #e2e8f0;
+  background: var(--color-border-medium);
 }
 
 .danger-zone {
-  border: 1px solid #e53e3e;
+  border: 1px solid var(--color-error);
   border-radius: 6px;
   padding: 1.5rem;
   margin-top: 1.5rem;
 }
 
 .danger-zone h3 {
-  color: #e53e3e;
+  color: var(--color-error);
   margin-top: 0;
 }
 
 .warning-text {
-  color: #718096;
+  color: var(--color-text-light);
   margin-bottom: 1.25rem;
 }
 
@@ -552,10 +552,10 @@ async function submitDeletionRequest() {
 
 .input-readonly {
   padding: 0.5rem;
-  border: 1px solid #cbd5e0;
+  border: 1px solid var(--color-border-medium);
   border-radius: 4px;
-  background: #f7fafc;
-  color: #718096;
+  background: var(--color-background-soft);
+  color: var(--color-text-light);
 }
 
 .checkbox-group {
@@ -578,7 +578,7 @@ async function submitDeletionRequest() {
 
 .btn-danger {
   padding: 0.5rem 1.25rem;
-  background: #e53e3e;
+  background: var(--color-error);
   color: white;
   border: none;
   border-radius: 4px;
@@ -593,7 +593,8 @@ async function submitDeletionRequest() {
 }
 
 .btn-danger:not(:disabled):hover {
-  background: #c53030;
+  background: var(--color-error);
+  opacity: 0.85;
 }
 
 .alert {
@@ -603,14 +604,14 @@ async function submitDeletionRequest() {
 }
 
 .alert-success {
-  background: #f0fff4;
-  border: 1px solid #9ae6b4;
-  color: #276749;
+  background: var(--color-success-bg);
+  border: 1px solid var(--color-success);
+  color: var(--color-success);
 }
 
 .alert-error {
-  background: #fff5f5;
-  border: 1px solid #feb2b2;
-  color: #c53030;
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error);
+  color: var(--color-error);
 }
 </style>
