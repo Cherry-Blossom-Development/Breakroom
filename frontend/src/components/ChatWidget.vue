@@ -18,6 +18,16 @@ const props = defineProps({
 
 const emit = defineEmits(['new-message'])
 
+// Grows a textarea to fit its content, capped at maxEm (em units, relative to
+// the textarea's own font-size) so the cap scales with the user's text size
+// instead of clipping content at a fixed pixel height when text is larger.
+function autoGrowTextarea(el, maxEm) {
+  if (!el) return
+  const maxHeight = maxEm * parseFloat(getComputedStyle(el).fontSize)
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, maxHeight) + 'px'
+}
+
 // Local state for this widget
 const messages = ref([])
 const newMessage = ref('')
@@ -74,8 +84,8 @@ const startEdit = (msg) => {
   editText.value = msg.message
   deletingMessageId.value = null
   nextTick(() => {
-    const el = editInputEl.value
-    if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px'; el.focus() }
+    autoGrowTextarea(editInputEl.value, 12.5)
+    editInputEl.value?.focus()
   })
 }
 
@@ -85,8 +95,7 @@ const cancelEdit = () => {
 }
 
 const handleEditInput = () => {
-  const el = editInputEl.value
-  if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px' }
+  autoGrowTextarea(editInputEl.value, 12.5)
 }
 
 const saveEdit = async (messageId) => {
@@ -319,8 +328,7 @@ const sendMessage = async () => {
 
 // Handle typing and @mention detection
 const onInput = () => {
-  const el = messageInputEl.value
-  if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px' }
+  autoGrowTextarea(messageInputEl.value, 7.5)
   if (socket && socket.connected) {
     socket.emit('typing_start', props.roomId)
 
@@ -1077,7 +1085,7 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   box-sizing: border-box;
   resize: none;
   overflow-y: auto;
-  max-height: 200px;
+  max-height: 12.5em;
   white-space: pre-wrap;
   word-wrap: break-word;
 }
@@ -1180,9 +1188,9 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
   background: var(--color-background-input);
   color: var(--color-text);
   resize: none;
-  overflow-y: hidden;
+  overflow-y: auto;
   line-height: 1.4;
-  max-height: 120px;
+  max-height: 7.5em;
   font-family: inherit;
 }
 

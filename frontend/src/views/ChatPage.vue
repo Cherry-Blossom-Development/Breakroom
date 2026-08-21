@@ -25,6 +25,16 @@ const mentionActive = ref(false)
 const mentionIndex = ref(0)
 let mentionDebounce = null
 
+// Grows a textarea to fit its content, capped at maxEm (em units, relative to
+// the textarea's own font-size) so the cap scales with the user's text size
+// instead of clipping content at a fixed pixel height when text is larger.
+function autoGrowTextarea(el, maxEm) {
+  if (!el) return
+  const maxHeight = maxEm * parseFloat(getComputedStyle(el).fontSize)
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, maxHeight) + 'px'
+}
+
 const toggleAttachMenu = () => {
   showAttachMenu.value = !showAttachMenu.value
 }
@@ -177,8 +187,7 @@ const selectMention = (user) => {
 
 // Handle typing indicator and mention detection
 const handleTyping = () => {
-  const el = messageInputEl.value
-  if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px' }
+  autoGrowTextarea(messageInputEl.value, 7.5)
   chat.startTyping()
 
   if (typingTimeout.value) clearTimeout(typingTimeout.value)
@@ -257,8 +266,8 @@ const startEdit = (msg) => {
   editText.value = msg.message
   deletingMessageId.value = null
   nextTick(() => {
-    const el = editInputEl.value
-    if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px'; el.focus() }
+    autoGrowTextarea(editInputEl.value, 12.5)
+    editInputEl.value?.focus()
   })
 }
 
@@ -268,8 +277,7 @@ const cancelEdit = () => {
 }
 
 const handleEditInput = () => {
-  const el = editInputEl.value
-  if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px' }
+  autoGrowTextarea(editInputEl.value, 12.5)
 }
 
 const saveEdit = async (messageId) => {
@@ -912,7 +920,7 @@ onUnmounted(() => {
   box-sizing: border-box;
   resize: none;
   overflow-y: auto;
-  max-height: 200px;
+  max-height: 12.5em;
   white-space: pre-wrap;
   word-wrap: break-word;
 }
@@ -1021,9 +1029,9 @@ onUnmounted(() => {
   background: var(--color-background-input);
   color: var(--color-text);
   resize: none;
-  overflow-y: hidden;
+  overflow-y: auto;
   line-height: 1.4;
-  max-height: 120px;
+  max-height: 7.5em;
   font-family: inherit;
 }
 
