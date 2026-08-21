@@ -29,7 +29,7 @@
 <style scoped>
 .profile-layout {
   min-height: calc(100vh - 60px);
-  background-color: #f5f5f5;
+  background-color: var(--color-background-page);
   padding: 30px 20px;
 }
 
@@ -47,35 +47,35 @@
 .nav-tab {
   padding: 10px 20px;
   text-decoration: none;
-  color: #666;
-  background: white;
+  color: var(--color-text-muted);
+  background: var(--color-background-card);
   border-radius: 6px 6px 0 0;
-  border: 1px solid #ddd;
+  border: 1px solid var(--color-border-medium);
   border-bottom: none;
   font-size: 0.95rem;
   transition: all 0.2s;
 }
 
 .nav-tab:hover {
-  color: #42b983;
-  background: #f9f9f9;
+  color: var(--color-accent);
+  background: var(--color-background-hover);
 }
 
 .nav-tab.active {
-  color: #42b983;
-  background: white;
+  color: var(--color-accent);
+  background: var(--color-background-card);
   font-weight: 600;
-  border-color: #42b983;
-  border-bottom: 2px solid white;
+  border-color: var(--color-accent);
+  border-bottom: 2px solid var(--color-background-card);
   margin-bottom: -1px;
 }
 
 .main-content {
-  background: white;
+  background: var(--color-background-card);
   border-radius: 10px;
   border-top-right-radius: 0;
   padding: 30px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
-  border: 1px solid #ddd;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--color-border-medium);
 }
 </style>
