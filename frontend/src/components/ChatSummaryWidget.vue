@@ -977,7 +977,7 @@ onUnmounted(() => {
 .mention-option-name { color: var(--color-text-muted); font-size: 0.78rem; }
 
 @keyframes msg-flash {
-  0%   { background-color: rgba(236, 201, 75, 0.35); }
+  0%   { background-color: rgba(236, 201, 75, 0.25); }
   100% { background-color: transparent; }
 }
 .message-flash { animation: msg-flash 2s ease-out forwards; border-radius: 4px; }
@@ -1027,7 +1027,7 @@ onUnmounted(() => {
 .ccw-arrow:disabled { opacity: 0.3; cursor: default; }
 
 @keyframes arrow-glow {
-  0%   { background-color: rgba(236, 201, 75, 0.7); border-color: rgba(236, 201, 75, 0.9); }
+  0%   { background-color: rgba(236, 201, 75, 0.35); border-color: rgba(236, 201, 75, 0.9); }
   100% { background-color: transparent; border-color: var(--color-border); }
 }
 .ccw-arrow--glow {

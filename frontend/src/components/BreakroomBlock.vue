@@ -204,7 +204,7 @@ const blockTitle = computed(() => {
 }
 
 @keyframes header-flash {
-  0%   { background-color: rgba(236, 201, 75, 0.7); }
+  0%   { background-color: rgba(236, 201, 75, 0.35); }
   100% { background-color: var(--color-header-bg); }
 }
 
