@@ -153,7 +153,7 @@
           <h3>Test Suites</h3>
           <div v-for="suite in suites" :key="suite.id" class="suite">
             <div class="suite-header" @click="toggleSuite(suite.id)">
-              <StatusBadge :color="testStatusColor[suite.status] || 'gray'" dot />
+              <StatusBadge :color="testStatusColor[suite.status] || 'gray'" dot>{{ suite.status }}</StatusBadge>
               <StatusBadge v-if="suite.category" color="teal">{{ suite.category }}</StatusBadge>
               <span class="suite-name">{{ suite.name }}</span>
               <span class="suite-stats">

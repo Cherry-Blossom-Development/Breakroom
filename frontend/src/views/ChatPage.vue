@@ -449,7 +449,16 @@ onUnmounted(() => {
         <div class="chat-header">
           <div class="room-info">
             <div class="room-title">
-              <span class="connection-dot" :class="chat.connected ? 'dot-connected' : 'dot-disconnected'"></span>
+              <span
+                class="connection-dot"
+                :class="chat.connected ? 'dot-connected' : 'dot-disconnected'"
+                role="img"
+                :aria-label="chat.connected ? 'Connected' : 'Disconnected'"
+                :title="chat.connected ? 'Connected' : 'Disconnected'"
+              >
+                <svg v-if="chat.connected" aria-hidden="true" viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 8 6.5 12 13 4"/></svg>
+                <svg v-else aria-hidden="true" viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="3" y1="3" x2="13" y2="13"/><line x1="13" y1="3" x2="3" y2="13"/></svg>
+              </span>
               <h2>{{ isDM ? '@' : '#' }} {{ currentRoomName }}</h2>
             </div>
             <p v-if="currentRoomDescription" class="room-description">{{ currentRoomDescription }}</p>
@@ -698,18 +707,23 @@ onUnmounted(() => {
 }
 
 .connection-dot {
-  width: 8px;
-  height: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
 .dot-connected {
-  background-color: #34c759;
+  background-color: rgba(52, 199, 89, 0.18);
+  color: #248a3d;
 }
 
 .dot-disconnected {
-  background-color: #ff3b30;
+  background-color: rgba(255, 59, 48, 0.18);
+  color: #ff3b30;
 }
 
 .room-description {
