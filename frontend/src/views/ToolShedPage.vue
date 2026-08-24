@@ -214,7 +214,7 @@ onMounted(async () => {
                   {{ addingShortcut === tool.id ? 'Adding...' : '+ Add to Shortcuts' }}
                 </button>
                 <span v-else class="shortcut-added">Added to shortcuts</span>
-                <button class="btn-open" @click="openTool(tool)">
+                <button class="btn-open" :aria-label="`Open ${tool.name}`" @click="openTool(tool)">
                   Open &rarr;
                 </button>
               </div>

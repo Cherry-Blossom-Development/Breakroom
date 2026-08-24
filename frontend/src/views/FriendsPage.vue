@@ -180,12 +180,20 @@ function goToProfile(handle) {
           No friends yet. Find users to connect with!
         </div>
         <div v-for="friend in friends.friends" :key="friend.id" class="user-card">
-          <div class="user-avatar clickable" @click="goToProfile(friend.handle)">
+          <div class="user-avatar clickable" aria-hidden="true" @click="goToProfile(friend.handle)">
             <img v-if="getPhotoUrl(friend)" :src="getPhotoUrl(friend)" alt="" />
             <span v-else class="avatar-placeholder">{{ getInitial(friend) }}</span>
           </div>
           <div class="user-info">
-            <span class="user-handle clickable" @click="goToProfile(friend.handle)">{{ friend.handle }}</span>
+            <span
+              class="user-handle clickable"
+              role="button"
+              tabindex="0"
+              :aria-label="`View ${friend.handle}'s profile`"
+              @click="goToProfile(friend.handle)"
+              @keydown.enter="goToProfile(friend.handle)"
+              @keydown.space.prevent="goToProfile(friend.handle)"
+            >{{ friend.handle }}</span>
             <span v-if="friend.first_name || friend.last_name" class="user-name">
               {{ friend.first_name }} {{ friend.last_name }}
             </span>
@@ -204,12 +212,20 @@ function goToProfile(handle) {
           No pending friend requests.
         </div>
         <div v-for="request in friends.requests" :key="request.id" class="user-card">
-          <div class="user-avatar clickable" @click="goToProfile(request.handle)">
+          <div class="user-avatar clickable" aria-hidden="true" @click="goToProfile(request.handle)">
             <img v-if="getPhotoUrl(request)" :src="getPhotoUrl(request)" alt="" />
             <span v-else class="avatar-placeholder">{{ getInitial(request) }}</span>
           </div>
           <div class="user-info">
-            <span class="user-handle clickable" @click="goToProfile(request.handle)">{{ request.handle }}</span>
+            <span
+              class="user-handle clickable"
+              role="button"
+              tabindex="0"
+              :aria-label="`View ${request.handle}'s profile`"
+              @click="goToProfile(request.handle)"
+              @keydown.enter="goToProfile(request.handle)"
+              @keydown.space.prevent="goToProfile(request.handle)"
+            >{{ request.handle }}</span>
             <span v-if="request.first_name || request.last_name" class="user-name">
               {{ request.first_name }} {{ request.last_name }}
             </span>
@@ -228,12 +244,20 @@ function goToProfile(handle) {
           No pending sent requests.
         </div>
         <div v-for="sent in friends.sent" :key="sent.id" class="user-card">
-          <div class="user-avatar clickable" @click="goToProfile(sent.handle)">
+          <div class="user-avatar clickable" aria-hidden="true" @click="goToProfile(sent.handle)">
             <img v-if="getPhotoUrl(sent)" :src="getPhotoUrl(sent)" alt="" />
             <span v-else class="avatar-placeholder">{{ getInitial(sent) }}</span>
           </div>
           <div class="user-info">
-            <span class="user-handle clickable" @click="goToProfile(sent.handle)">{{ sent.handle }}</span>
+            <span
+              class="user-handle clickable"
+              role="button"
+              tabindex="0"
+              :aria-label="`View ${sent.handle}'s profile`"
+              @click="goToProfile(sent.handle)"
+              @keydown.enter="goToProfile(sent.handle)"
+              @keydown.space.prevent="goToProfile(sent.handle)"
+            >{{ sent.handle }}</span>
             <span v-if="sent.first_name || sent.last_name" class="user-name">
               {{ sent.first_name }} {{ sent.last_name }}
             </span>
@@ -263,12 +287,20 @@ function goToProfile(handle) {
         </div>
         <div v-else class="user-list">
           <div v-for="u in searchResults" :key="u.id" class="user-card">
-            <div class="user-avatar clickable" @click="goToProfile(u.handle)">
+            <div class="user-avatar clickable" aria-hidden="true" @click="goToProfile(u.handle)">
               <img v-if="getPhotoUrl(u)" :src="getPhotoUrl(u)" alt="" />
               <span v-else class="avatar-placeholder">{{ getInitial(u) }}</span>
             </div>
             <div class="user-info">
-              <span class="user-name clickable" @click="goToProfile(u.handle)">
+              <span
+                class="user-name clickable"
+                role="button"
+                tabindex="0"
+                :aria-label="`View ${u.first_name} ${u.last_name}'s profile`"
+                @click="goToProfile(u.handle)"
+                @keydown.enter="goToProfile(u.handle)"
+                @keydown.space.prevent="goToProfile(u.handle)"
+              >
                 {{ u.first_name }} {{ u.last_name }}
               </span>
             </div>
@@ -285,11 +317,19 @@ function goToProfile(handle) {
           No blocked users.
         </div>
         <div v-for="blocked in friends.blocked" :key="blocked.id" class="user-card">
-          <div class="user-avatar clickable" @click="goToProfile(blocked.handle)">
+          <div class="user-avatar clickable" aria-hidden="true" @click="goToProfile(blocked.handle)">
             <span class="avatar-placeholder">{{ getInitial(blocked) }}</span>
           </div>
           <div class="user-info">
-            <span class="user-handle clickable" @click="goToProfile(blocked.handle)">{{ blocked.handle }}</span>
+            <span
+              class="user-handle clickable"
+              role="button"
+              tabindex="0"
+              :aria-label="`View ${blocked.handle}'s profile`"
+              @click="goToProfile(blocked.handle)"
+              @keydown.enter="goToProfile(blocked.handle)"
+              @keydown.space.prevent="goToProfile(blocked.handle)"
+            >{{ blocked.handle }}</span>
             <span v-if="blocked.first_name || blocked.last_name" class="user-name">
               {{ blocked.first_name }} {{ blocked.last_name }}
             </span>
@@ -466,6 +506,12 @@ h1 {
 
 .user-avatar.clickable:hover {
   opacity: 0.8;
+}
+
+.user-handle.clickable:focus-visible,
+.user-name.clickable:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .user-name {

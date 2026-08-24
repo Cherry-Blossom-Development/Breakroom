@@ -152,14 +152,23 @@
         <div class="suites">
           <h3>Test Suites</h3>
           <div v-for="suite in suites" :key="suite.id" class="suite">
-            <div class="suite-header" @click="toggleSuite(suite.id)">
-              <StatusBadge :color="testStatusColor[suite.status] || 'gray'" dot>{{ suite.status }}</StatusBadge>
-              <StatusBadge v-if="suite.category" color="teal">{{ suite.category }}</StatusBadge>
-              <span class="suite-name">{{ suite.name }}</span>
-              <span class="suite-stats">
+            <div
+              class="suite-header"
+              role="button"
+              tabindex="0"
+              :aria-expanded="expandedSuites.has(suite.id)"
+              :aria-label="`${suite.name}, ${suite.status}, ${suite.passed_tests}/${suite.total_tests} passed, ${expandedSuites.has(suite.id) ? 'collapse' : 'expand'}`"
+              @click="toggleSuite(suite.id)"
+              @keydown.enter="toggleSuite(suite.id)"
+              @keydown.space.prevent="toggleSuite(suite.id)"
+            >
+              <StatusBadge :color="testStatusColor[suite.status] || 'gray'" dot aria-hidden="true">{{ suite.status }}</StatusBadge>
+              <StatusBadge v-if="suite.category" color="teal" aria-hidden="true">{{ suite.category }}</StatusBadge>
+              <span class="suite-name" aria-hidden="true">{{ suite.name }}</span>
+              <span class="suite-stats" aria-hidden="true">
                 {{ suite.passed_tests }}/{{ suite.total_tests }} passed
               </span>
-              <span class="expand-icon">{{ expandedSuites.has(suite.id) ? '−' : '+' }}</span>
+              <span class="expand-icon" aria-hidden="true">{{ expandedSuites.has(suite.id) ? '−' : '+' }}</span>
             </div>
 
             <div v-if="expandedSuites.has(suite.id)" class="suite-cases">
@@ -631,6 +640,11 @@ td.failed {
 
 .suite-header:hover {
   background: var(--color-background);
+}
+
+.suite-header:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
 }
 
 /* Status indicators and category badges handled by StatusBadge component */

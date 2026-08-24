@@ -535,9 +535,17 @@ async function exportToShowcase() {
             class="artwork-card"
             :class="{ published: artwork.is_published }"
           >
-            <div class="artwork-image" @click="openLightbox(artwork)">
+            <div
+              class="artwork-image"
+              role="button"
+              tabindex="0"
+              :aria-label="`View ${artwork.title} full size`"
+              @click="openLightbox(artwork)"
+              @keydown.enter="openLightbox(artwork)"
+              @keydown.space.prevent="openLightbox(artwork)"
+            >
               <img :src="getImageUrl(artwork.image_path)" :alt="artwork.title" />
-              <div class="artwork-overlay">
+              <div class="artwork-overlay" aria-hidden="true">
                 <span class="view-icon">View</span>
               </div>
             </div>
@@ -987,6 +995,11 @@ async function exportToShowcase() {
   aspect-ratio: 4/3;
   overflow: hidden;
   cursor: pointer;
+}
+
+.artwork-image:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
 }
 
 .artwork-image img {

@@ -74,6 +74,20 @@ function seek(e) {
   audioEl.value.currentTime = ratio * duration.value
 }
 
+function seekBy(deltaSeconds) {
+  if (!audioEl.value || !duration.value) return
+  audioEl.value.currentTime = Math.min(Math.max(currentTime.value + deltaSeconds, 0), duration.value)
+}
+
+function seekKeydown(e) {
+  switch (e.key) {
+    case 'ArrowRight': e.preventDefault(); seekBy(5); break
+    case 'ArrowLeft': e.preventDefault(); seekBy(-5); break
+    case 'Home': e.preventDefault(); seekBy(-duration.value); break
+    case 'End': e.preventDefault(); seekBy(duration.value); break
+  }
+}
+
 function formatTime(s) {
   if (!s || isNaN(s)) return '0:00'
   const m = Math.floor(s / 60)
@@ -159,8 +173,22 @@ function formatTime(s) {
               </div>
 
               <!-- Progress bar (shown when this song is loaded) -->
-              <div v-if="currentSongId === song.id" class="bp-progress-wrap" @click="seek">
-                <div class="bp-progress-bar">
+              <div
+                v-if="currentSongId === song.id"
+                class="bp-progress-wrap"
+                @click="seek"
+              >
+                <div
+                  class="bp-progress-bar"
+                  role="slider"
+                  tabindex="0"
+                  :aria-label="`Seek ${song.name || 'track'}`"
+                  aria-valuemin="0"
+                  :aria-valuemax="duration"
+                  :aria-valuenow="currentTime"
+                  :aria-valuetext="`${formatTime(currentTime)} of ${formatTime(duration)}`"
+                  @keydown="seekKeydown"
+                >
                   <div class="bp-progress-fill" :style="{ width: duration ? `${(currentTime/duration)*100}%` : '0%' }" />
                 </div>
                 <div class="bp-progress-times">
@@ -326,6 +354,10 @@ function formatTime(s) {
   background: rgba(255,255,255,.2);
   border-radius: 2px;
   overflow: hidden;
+}
+.bp-progress-bar:focus-visible {
+  outline: 2px solid white;
+  outline-offset: 3px;
 }
 .bp-progress-fill {
   height: 100%;

@@ -133,6 +133,21 @@ function seek(event) {
   audioElement.value.currentTime = percent * duration.value
 }
 
+function seekBy(deltaSeconds) {
+  if (!audioElement.value || duration.value === 0) return
+  const next = Math.min(Math.max(currentTime.value + deltaSeconds, 0), duration.value)
+  audioElement.value.currentTime = next
+}
+
+function seekKeydown(event) {
+  switch (event.key) {
+    case 'ArrowRight': event.preventDefault(); seekBy(5); break
+    case 'ArrowLeft': event.preventDefault(); seekBy(-5); break
+    case 'Home': event.preventDefault(); seekBy(-duration.value); break
+    case 'End': event.preventDefault(); seekBy(duration.value); break
+  }
+}
+
 function formatFileSize(bytes) {
   if (!bytes) return ''
   if (bytes < 1024) return `${bytes} B`
@@ -189,7 +204,18 @@ function formatFileSize(bytes) {
             <span>{{ formattedCurrentTime }}</span>
             <span>{{ formattedDuration }}</span>
           </div>
-          <div class="progress-bar" @click="seek">
+          <div
+            class="progress-bar"
+            role="slider"
+            tabindex="0"
+            aria-label="Seek"
+            aria-valuemin="0"
+            :aria-valuemax="duration"
+            :aria-valuenow="currentTime"
+            :aria-valuetext="`${formattedCurrentTime} of ${formattedDuration}`"
+            @click="seek"
+            @keydown="seekKeydown"
+          >
             <div class="progress-fill" :style="{ width: progress + '%' }"></div>
           </div>
         </div>
@@ -373,6 +399,11 @@ function formatFileSize(bytes) {
   border-radius: 3px;
   cursor: pointer;
   overflow: hidden;
+}
+
+.progress-bar:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 3px;
 }
 
 .progress-fill {

@@ -112,13 +112,24 @@
             <img :src="`/api/uploads/${editing.image_path}`" alt="Current image" class="current-image" />
             <button class="replace-btn" @click="triggerFileInput">Replace image</button>
           </div>
-          <div v-else class="file-drop" @click="triggerFileInput" @dragover.prevent @drop.prevent="onDrop">
+          <div
+            v-else
+            class="file-drop"
+            role="button"
+            tabindex="0"
+            aria-label="Choose an image to upload"
+            @click="triggerFileInput"
+            @keydown.enter="triggerFileInput"
+            @keydown.space.prevent="triggerFileInput"
+            @dragover.prevent
+            @drop.prevent="onDrop"
+          >
             <template v-if="newImagePreview">
               <img :src="newImagePreview" alt="Preview" class="preview-image" />
-              <button class="replace-btn" @click.stop="clearImage">Remove</button>
+              <button class="replace-btn" @click.stop="clearImage" @keydown.stop>Remove</button>
             </template>
             <template v-else>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28" class="drop-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="28" height="28" class="drop-icon" aria-hidden="true">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                 <polyline points="17 8 12 3 7 8"/>
                 <line x1="12" y1="3" x2="12" y2="15"/>
@@ -1066,6 +1077,7 @@ onMounted(() => {
 }
 
 .file-drop:hover { border-color: var(--color-link); }
+.file-drop:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .drop-icon { color: var(--color-text-secondary); }
 
 .drop-label {

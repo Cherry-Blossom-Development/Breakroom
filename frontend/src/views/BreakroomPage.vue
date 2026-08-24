@@ -280,10 +280,16 @@ onUnmounted(() => {
 
       <!-- Mobile: dropdown menu -->
       <div class="mobile-menu-container mobile-only">
-        <button class="mobile-menu-toggle" @click="toggleMobileMenu" :class="{ open: mobileMenuOpen }">
-          <span class="hamburger-line"></span>
-          <span class="hamburger-line"></span>
-          <span class="hamburger-line"></span>
+        <button
+          class="mobile-menu-toggle"
+          @click="toggleMobileMenu"
+          :class="{ open: mobileMenuOpen }"
+          :aria-label="mobileMenuOpen ? 'Close menu' : 'Open menu'"
+          :aria-expanded="mobileMenuOpen"
+        >
+          <span class="hamburger-line" aria-hidden="true"></span>
+          <span class="hamburger-line" aria-hidden="true"></span>
+          <span class="hamburger-line" aria-hidden="true"></span>
         </button>
         <div v-if="mobileMenuOpen" class="mobile-dropdown" @click="closeMobileMenu">
           <button class="mobile-menu-item add-block-item" @click.stop="showAddModal = true; closeMobileMenu()">

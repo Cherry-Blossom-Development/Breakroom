@@ -530,17 +530,25 @@ onMounted(() => {
     <template v-else>
       <div class="profile-header">
         <div class="photo-section">
-          <div class="photo-container" @click="triggerPhotoUpload">
+          <div
+            class="photo-container"
+            role="button"
+            tabindex="0"
+            aria-label="Change profile photo"
+            @click="triggerPhotoUpload"
+            @keydown.enter="triggerPhotoUpload"
+            @keydown.space.prevent="triggerPhotoUpload"
+          >
             <img
               v-if="photoUrl"
               :src="photoUrl"
-              alt="Profile photo"
+              alt=""
               class="profile-photo"
             />
-            <div v-else class="photo-placeholder">
+            <div v-else class="photo-placeholder" aria-hidden="true">
               {{ profile.firstName?.charAt(0) || profile.handle?.charAt(0) || '?' }}
             </div>
-            <div class="photo-overlay">
+            <div class="photo-overlay" aria-hidden="true">
               <span>Change</span>
             </div>
           </div>
@@ -904,6 +912,11 @@ onMounted(() => {
   overflow: hidden;
   cursor: pointer;
   border: 3px solid var(--color-accent);
+}
+
+.photo-container:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
 }
 
 .profile-photo {

@@ -267,7 +267,15 @@ onMounted(() => {
 
         <div class="detail-header">
           <h2 id="position-detail-title">{{ selectedPosition.title }}</h2>
-          <div class="company-link" @click="viewCompany(selectedPosition.company_id)">
+          <div
+            class="company-link"
+            role="button"
+            tabindex="0"
+            :aria-label="`View ${selectedPosition.company_name} company page`"
+            @click="viewCompany(selectedPosition.company_id)"
+            @keydown.enter="viewCompany(selectedPosition.company_id)"
+            @keydown.space.prevent="viewCompany(selectedPosition.company_id)"
+          >
             {{ selectedPosition.company_name }}
           </div>
         </div>
@@ -575,6 +583,11 @@ onMounted(() => {
 
 .company-link:hover {
   text-decoration: underline;
+}
+
+.company-link:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .detail-meta {

@@ -37,8 +37,17 @@
           class="order-card"
           :class="`status-${order.status}`"
         >
-          <div class="order-header" @click="toggleExpand(order.id)">
-            <div class="order-thumb-wrap">
+          <div
+            class="order-header"
+            role="button"
+            tabindex="0"
+            :aria-expanded="expanded.has(order.id)"
+            :aria-label="`${order.item_name}, ${order.buyer_name}, $${(order.total_cents / 100).toFixed(2)}, ${statusLabel(order.status)}, ${expanded.has(order.id) ? 'collapse' : 'expand'} details`"
+            @click="toggleExpand(order.id)"
+            @keydown.enter="toggleExpand(order.id)"
+            @keydown.space.prevent="toggleExpand(order.id)"
+          >
+            <div class="order-thumb-wrap" aria-hidden="true">
               <img
                 v-if="order.item_image"
                 :src="`/api/uploads/${order.item_image}`"
@@ -47,13 +56,13 @@
               />
               <div v-else class="order-thumb-placeholder">🖼️</div>
             </div>
-            <div class="order-summary">
+            <div class="order-summary" aria-hidden="true">
               <div class="order-item-name">{{ order.item_name }}</div>
               <div class="order-meta">
                 {{ order.buyer_name }} · {{ formatDate(order.created_at) }}
               </div>
             </div>
-            <div class="order-right">
+            <div class="order-right" aria-hidden="true">
               <span class="order-total">${{ (order.total_cents / 100).toFixed(2) }}</span>
               <span class="status-badge" :class="`badge-${order.status}`">{{ statusLabel(order.status) }}</span>
               <span class="expand-arrow">{{ expanded.has(order.id) ? '▲' : '▼' }}</span>
@@ -305,6 +314,7 @@ onMounted(fetchOrders)
   transition: background 0.12s;
 }
 .order-header:hover { background: var(--color-background-soft); }
+.order-header:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 
 .order-thumb-wrap { flex-shrink: 0; }
 .order-thumb { width: 52px; height: 52px; object-fit: cover; border-radius: 6px; display: block; }

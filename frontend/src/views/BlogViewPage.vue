@@ -111,24 +111,32 @@ onMounted(async () => {
 
     <template v-else-if="post">
       <!-- Author header -->
-      <div class="author-header" @click="goToAuthorProfile">
-        <div class="author-photo-container">
+      <div
+        class="author-header"
+        role="button"
+        tabindex="0"
+        :aria-label="`View ${authorName}'s profile`"
+        @click="goToAuthorProfile"
+        @keydown.enter="goToAuthorProfile"
+        @keydown.space.prevent="goToAuthorProfile"
+      >
+        <div class="author-photo-container" aria-hidden="true">
           <img
             v-if="authorPhotoUrl"
             :src="authorPhotoUrl"
-            alt="Author photo"
+            alt=""
             class="author-photo"
           />
           <div v-else class="author-photo-placeholder">
             {{ post.author_first_name?.charAt(0) || post.author_handle?.charAt(0) || '?' }}
           </div>
         </div>
-        <div class="author-info">
+        <div class="author-info" aria-hidden="true">
           <span class="author-name">{{ authorName }}</span>
           <span class="author-handle">@{{ post.author_handle }}</span>
         </div>
-        <span class="view-profile-link">View Profile</span>
-        <div v-if="!isOwnPost" class="post-moderation-actions" @click.stop>
+        <span class="view-profile-link" aria-hidden="true">View Profile</span>
+        <div v-if="!isOwnPost" class="post-moderation-actions" @click.stop @keydown.stop>
           <button class="mod-btn flag-btn" @click="showFlagDialog = true" title="Report this post">Flag</button>
           <button class="mod-btn block-btn" @click="blockAuthor" :disabled="isBlocking || isBlocked" title="Block this user">
             {{ isBlocked ? 'Blocked' : 'Block User' }}
@@ -203,6 +211,11 @@ onMounted(async () => {
 
 .author-header:hover {
   background: var(--color-background-hover);
+}
+
+.author-header:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .author-photo-container {
