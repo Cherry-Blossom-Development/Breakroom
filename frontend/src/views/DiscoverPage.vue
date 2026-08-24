@@ -88,6 +88,7 @@ function openGallery(g) {
       type="text"
       class="search-input"
       placeholder="Search by name or artist..."
+      aria-label="Search by name or artist"
     />
 
     <div v-if="loading" class="loading"><LoadingSpinner size="small" /> Loading...</div>
@@ -104,13 +105,18 @@ function openGallery(g) {
             v-for="showcase in filteredShowcases"
             :key="showcase.store_url"
             class="discover-card"
+            tabindex="0"
+            role="button"
+            :aria-label="`Open ${showcase.page_title || showcase.store_url} showcase by ${artistName(showcase.artist)}, ${showcase.item_count} item${showcase.item_count === 1 ? '' : 's'}`"
             @click="openShowcase(showcase)"
+            @keydown.enter="openShowcase(showcase)"
+            @keydown.space.prevent="openShowcase(showcase)"
           >
-            <div class="discover-cover">
-              <img v-if="showcase.cover_image_path" :src="getPhotoUrl(showcase.cover_image_path)" :alt="showcase.page_title" />
+            <div class="discover-cover" aria-hidden="true">
+              <img v-if="showcase.cover_image_path" :src="getPhotoUrl(showcase.cover_image_path)" alt="" />
               <div v-else class="cover-placeholder">No preview</div>
             </div>
-            <div class="discover-info">
+            <div class="discover-info" aria-hidden="true">
               <h3 class="discover-name">{{ showcase.page_title || showcase.store_url }}</h3>
               <div class="discover-artist">
                 <div class="artist-avatar">
@@ -135,13 +141,18 @@ function openGallery(g) {
             v-for="gallery in filteredGalleries"
             :key="gallery.gallery_url"
             class="discover-card"
+            tabindex="0"
+            role="button"
+            :aria-label="`Open ${gallery.gallery_name} gallery by ${artistName(gallery.artist)}, ${gallery.artwork_count} artwork${gallery.artwork_count === 1 ? '' : 's'}`"
             @click="openGallery(gallery)"
+            @keydown.enter="openGallery(gallery)"
+            @keydown.space.prevent="openGallery(gallery)"
           >
-            <div class="discover-cover">
-              <img v-if="gallery.cover_image_path" :src="getPhotoUrl(gallery.cover_image_path)" :alt="gallery.gallery_name" />
+            <div class="discover-cover" aria-hidden="true">
+              <img v-if="gallery.cover_image_path" :src="getPhotoUrl(gallery.cover_image_path)" alt="" />
               <div v-else class="cover-placeholder">No preview</div>
             </div>
-            <div class="discover-info">
+            <div class="discover-info" aria-hidden="true">
               <h3 class="discover-name">{{ gallery.gallery_name }}</h3>
               <div class="discover-artist">
                 <div class="artist-avatar">
@@ -219,6 +230,11 @@ function openGallery(g) {
 .discover-card:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
+}
+
+.discover-card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .discover-cover {
