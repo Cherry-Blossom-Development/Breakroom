@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { RouterLink, RouterView, useRouter, useRoute } from 'vue-router'
 import { user } from './stores/user.js'
 import { notificationStore } from './stores/notification.js'
@@ -265,6 +265,9 @@ function toggleSidebar() {
   }
 }
 
+const hamburgerUnreadCount = computed(() => badges.totalChatUnread + badges.totalNonChat)
+const hamburgerBadgeLabel = computed(() => hamburgerUnreadCount.value > 99 ? '99+' : String(hamburgerUnreadCount.value))
+
 function closeSidebar() {
   sidebarOpen.value = false
 }
@@ -355,12 +358,18 @@ setInterval(() => {
 
     <!-- Tablet hamburger top bar -->
     <div class="tablet-top-bar">
-      <button class="hamburger-btn" @click="toggleSidebar" aria-label="Open menu" :class="{ 'has-badge': badges.hasUnseenBadges }">
+      <button
+        class="hamburger-btn"
+        @click="toggleSidebar"
+        :aria-label="hamburgerUnreadCount > 0 ? `Open menu, ${hamburgerUnreadCount} unread` : 'Open menu'"
+        :class="{ 'has-badge': badges.hasUnseenBadges }"
+      >
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="24" height="24">
           <line x1="3" y1="6" x2="21" y2="6"/>
           <line x1="3" y1="12" x2="21" y2="12"/>
           <line x1="3" y1="18" x2="21" y2="18"/>
         </svg>
+        <span v-if="hamburgerUnreadCount > 0" class="hamburger-badge" aria-hidden="true">{{ hamburgerBadgeLabel }}</span>
       </button>
       <img src="/logo-192x192-no-text.png" alt="Prosaurus" class="tablet-logo" />
     </div>
@@ -602,6 +611,7 @@ body {
 }
 
 .hamburger-btn {
+  position: relative;
   background: none;
   border: none;
   color: var(--color-header-text);
@@ -619,6 +629,21 @@ body {
   border-radius: 50%;
   box-shadow: 0 0 0 2px #e53e3e, 0 0 6px 2px rgba(229, 62, 62, 0.5);
   animation: badge-pulse 2s ease-in-out infinite;
+}
+
+.hamburger-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  background: #e53e3e;
+  color: white;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 10px;
+  min-width: 16px;
+  line-height: 1.3;
+  text-align: center;
 }
 
 @keyframes badge-pulse {
