@@ -212,6 +212,10 @@ const blockTitle = computed(() => {
   animation: header-flash 2s ease-out forwards;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .block-header.header-flash { animation: none; }
+}
+
 .remove-btn {
   background: none;
   border: none;

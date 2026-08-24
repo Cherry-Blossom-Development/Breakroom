@@ -651,6 +651,10 @@ body {
   50%       { box-shadow: 0 0 0 2px #e53e3e, 0 0 10px 4px rgba(229, 62, 62, 0.7); }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .hamburger-btn.has-badge { animation: none; }
+}
+
 .tablet-logo {
   width: 32px;
   height: 32px;
