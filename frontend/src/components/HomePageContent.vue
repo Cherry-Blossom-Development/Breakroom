@@ -40,7 +40,7 @@
       <RouterLink to="/explore" class="explore-link">See everything Prosaurus can do →</RouterLink>
     </div>
 
-    <p class="version-label">v1.10.0</p>
+    <p class="version-label">v1.12.0</p>
   </section>
 </template>
 
