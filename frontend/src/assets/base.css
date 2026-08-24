@@ -205,6 +205,32 @@
   }
 }
 
+/* Respond to the OS "Increase Contrast" preference: swap the lower-contrast
+   muted/light/placeholder text tokens (and soft borders) for values that
+   clear WCAG AA against the page background, matching the mobile apps'
+   Increase Contrast pass. */
+@media (prefers-contrast: more) {
+  :root {
+    --color-text-secondary: #333333;
+    --color-text-muted: #333333;
+    --color-text-light: #333333;
+    --color-text-placeholder: #444444;
+    --color-border: rgba(0, 0, 0, 0.5);
+    --color-border-hover: rgba(0, 0, 0, 0.7);
+  }
+}
+
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root {
+    --color-text-secondary: #f0f0f0;
+    --color-text-muted: #f0f0f0;
+    --color-text-light: #f0f0f0;
+    --color-text-placeholder: #d8d8d8;
+    --color-border: rgba(255, 255, 255, 0.5);
+    --color-border-hover: rgba(255, 255, 255, 0.7);
+  }
+}
+
 *,
 *::before,
 *::after {
