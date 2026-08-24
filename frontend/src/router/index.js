@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import HomePage from '../views/HomePage.vue'
 import { user } from '@/stores/user.js'
+import { features } from '@/stores/features.js'
 import { getVisitorId } from '@/utilities/visitorId.js'
 import { exploreFeatures } from '@/data/exploreFeatures.js'
 
@@ -209,6 +210,12 @@ const router = createRouter({
       name: 'discover',
       component: () => import('../views/DiscoverPage.vue'),
       meta: { requiresAuth: true },
+    },
+    {
+      path: '/games',
+      name: 'games',
+      component: () => import('../views/GamesPage.vue'),
+      meta: { requiresAuth: true, requiresFeature: 'games' },
     },
     {
       path: '/friends',
@@ -435,7 +442,18 @@ router.beforeEach(async (to, from, next) => {
         next({ name: 'breakroom' })
       }
     } else {
-      next()
+      const requiredFeature = to.matched.map(record => record.meta.requiresFeature).find(Boolean)
+      if (requiredFeature) {
+        await features.load()
+        if (features.has(requiredFeature)) {
+          next()
+        } else {
+          // Not enrolled in this feature flag, redirect to breakroom
+          next({ name: 'breakroom' })
+        }
+      } else {
+        next()
+      }
     }
   } else {
     next()

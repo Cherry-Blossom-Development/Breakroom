@@ -5,6 +5,7 @@ import { user } from './stores/user.js'
 import { notificationStore } from './stores/notification.js'
 import { moderationStore } from './stores/moderation.js'
 import { badges } from './stores/badges.js'
+import { features } from './stores/features.js'
 import { initEventService, destroyEventService } from './utilities/eventService.js'
 import { getVisitorId } from './utilities/visitorId.js'
 import HeaderNotification from './components/HeaderNotification.vue'
@@ -197,6 +198,7 @@ user.fetchUser().then(() => {
     notificationStore.fetchNotifications()
     moderationStore.fetchBlockList()
     badges.fetchAll()
+    features.load()
     initEventService()
     setupNotificationSocket()
   }
@@ -209,6 +211,7 @@ watch(() => user.username, (newUsername) => {
     notificationStore.fetchNotifications()
     moderationStore.fetchBlockList()
     badges.fetchAll()
+    features.load()
     initEventService()
     setupNotificationSocket()
   } else {
