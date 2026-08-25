@@ -223,7 +223,7 @@ const router = createRouter({
       path: '/games/haulonaut/play/:characterId',
       name: 'haulonautPlay',
       component: () => import('../views/HaulonautPlayPage.vue'),
-      meta: { requiresAuth: true, requiresFeature: 'games' },
+      meta: { requiresAuth: true, requiresFeature: 'games', bareLayout: true },
     },
     {
       path: '/games/haulonaut/admin',
