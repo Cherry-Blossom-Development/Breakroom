@@ -117,6 +117,7 @@ const scheduledMessagesRoutes = require('./routes/scheduled-messages');
 const customDomainsRoutes = require('./routes/custom-domains');
 const analyticsRoutes = require('./routes/analytics');
 const gamesRoutes = require('./routes/games');
+const adminGamesRoutes = require('./routes/admin-games');
 const { getS3Url } = require('./utilities/aws-s3');
 
 
@@ -174,6 +175,7 @@ app.use('/api/scheduled-messages', scheduledMessagesRoutes);
 app.use('/api/custom-domains', customDomainsRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/games', gamesRoutes);
+app.use('/api/admin/games', adminGamesRoutes);
 const emailNannyRoutes = require('./routes/emailnanny');
 app.use('/api/emailnanny', emailNannyRoutes);
 

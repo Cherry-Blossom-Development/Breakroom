@@ -41,6 +41,7 @@ import AdminNotifications from '@/views/admin/AdminNotifications.vue'
 import AdminSystemEmails from '@/views/admin/AdminSystemEmails.vue'
 import AdminTestResults from '@/views/admin/AdminTestResults.vue'
 import AdminFeatures from '@/views/admin/AdminFeatures.vue'
+import AdminGames from '@/views/admin/AdminGames.vue'
 import AdminModeration from '@/views/admin/AdminModeration.vue'
 import AdminImpersonate from '@/views/admin/AdminImpersonate.vue'
 
@@ -124,6 +125,7 @@ const router = createRouter({
         {path: 'system-emails', component: AdminSystemEmails},
         {path: 'test-results', component: AdminTestResults},
         {path: 'features', component: AdminFeatures},
+        {path: 'games', component: AdminGames},
         {path: 'moderation', component: AdminModeration},
         {path: 'impersonate', component: AdminImpersonate}
       ]
@@ -221,6 +223,12 @@ const router = createRouter({
       path: '/games/haulonaut/play/:characterId',
       name: 'haulonautPlay',
       component: () => import('../views/HaulonautPlayPage.vue'),
+      meta: { requiresAuth: true, requiresFeature: 'games' },
+    },
+    {
+      path: '/games/haulonaut/admin',
+      name: 'haulonautAdmin',
+      component: () => import('../views/HaulonautAdminPage.vue'),
       meta: { requiresAuth: true, requiresFeature: 'games' },
     },
     {

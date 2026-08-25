@@ -3,6 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
+const { buildUniverseGraph } = require('../utilities/haulonautUniverse');
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -24,6 +25,57 @@ const authenticate = async (req, res, next) => {
     return res.status(401).json({ message: 'Invalid token' });
   }
 };
+
+// Game admin: either an explicit game_admins row, or site-wide admin_access
+// (mirrors checkPermission.js's query, OR'd with the game-scoped grant).
+// Looks up the game by :gameKey and attaches req.gameId for downstream
+// handlers on success.
+const requireGameAdmin = async (req, res, next) => {
+  const client = await getClient();
+  try {
+    const gameResult = await client.query('SELECT id FROM games WHERE game_key = $1', [req.params.gameKey]);
+    if (gameResult.rowCount === 0) return res.status(404).json({ message: 'Game not found' });
+    const gameId = gameResult.rows[0].id;
+
+    const adminCheck = await client.query(
+      `SELECT 1 FROM game_admins WHERE game_id = $1 AND user_id = $2
+       UNION
+       SELECT 1 FROM permissions p
+       WHERE p.name = 'admin_access' AND p.is_active = true AND (
+         EXISTS (SELECT 1 FROM user_permissions up WHERE up.permission_id = p.id AND up.user_id = $3)
+         OR EXISTS (
+           SELECT 1 FROM group_permissions gp
+           JOIN user_groups ug ON ug.group_id = gp.group_id
+           WHERE gp.permission_id = p.id AND ug.user_id = $4
+         )
+       )`,
+      [gameId, req.user.id, req.user.id, req.user.id]
+    );
+    if (adminCheck.rowCount === 0) return res.status(403).json({ message: 'Not a game admin' });
+
+    req.gameId = gameId;
+    next();
+  } catch (err) {
+    console.error('Error checking game admin:', err);
+    res.status(500).json({ message: 'Failed to check game admin' });
+  } finally {
+    client.release();
+  }
+};
+
+// Builds "INSERT INTO table (cols) VALUES ($1,$2),($3,$4),..." with a
+// flattened params array. The db.js wrapper runs queries as MySQL prepared
+// statements, which don't support mysql2's "VALUES ?" bulk-array shortcut,
+// so multi-row inserts need every placeholder spelled out explicitly.
+function buildBulkInsertQuery(table, columns, rows) {
+  const valuesSql = rows
+    .map((_, rowIndex) => `(${columns.map((_, colIndex) => `$${rowIndex * columns.length + colIndex + 1}`).join(', ')})`)
+    .join(', ');
+  return {
+    sql: `INSERT INTO ${table} (${columns.join(', ')}) VALUES ${valuesSql}`,
+    params: rows.flat()
+  };
+}
 
 /**
  * GET /api/games/:gameKey
@@ -61,7 +113,23 @@ router.get('/:gameKey', authenticate, async (req, res) => {
       characters = charactersResult.rows;
     }
 
-    res.json({ game, instance, characters });
+    const adminCheck = await client.query(
+      `SELECT 1 FROM game_admins WHERE game_id = $1 AND user_id = $2
+       UNION
+       SELECT 1 FROM permissions p
+       WHERE p.name = 'admin_access' AND p.is_active = true AND (
+         EXISTS (SELECT 1 FROM user_permissions up WHERE up.permission_id = p.id AND up.user_id = $3)
+         OR EXISTS (
+           SELECT 1 FROM group_permissions gp
+           JOIN user_groups ug ON ug.group_id = gp.group_id
+           WHERE gp.permission_id = p.id AND ug.user_id = $4
+         )
+       )`,
+      [game.id, req.user.id, req.user.id, req.user.id]
+    );
+    const isAdmin = adminCheck.rowCount > 0;
+
+    res.json({ game, instance, characters, isAdmin });
   } catch (err) {
     console.error('Error loading game:', err);
     res.status(500).json({ message: 'Failed to load game' });
@@ -138,6 +206,134 @@ router.get('/:gameKey/characters/:id', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Error loading character:', err);
     res.status(500).json({ message: 'Failed to load character' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * GET /api/games/:gameKey/admin/overview
+ * Game-admin only: current active instance details plus the full player
+ * roster (every character in that instance, not just the caller's own).
+ */
+router.get('/:gameKey/admin/overview', authenticate, requireGameAdmin, async (req, res) => {
+  const client = await getClient();
+  try {
+    const instanceResult = await client.query(
+      `SELECT gi.id, gi.name, gi.status, gi.started_at,
+              (SELECT COUNT(*) FROM haulonaut_sectors hs WHERE hs.game_instance_id = gi.id) AS sector_count
+       FROM game_instances gi
+       WHERE gi.game_id = $1 AND gi.status = 'active'
+       ORDER BY gi.started_at DESC LIMIT 1`,
+      [req.gameId]
+    );
+    const instance = instanceResult.rowCount > 0 ? instanceResult.rows[0] : null;
+
+    let roster = [];
+    if (instance) {
+      const rosterResult = await client.query(
+        `SELECT gu.id, gu.display_name, gu.status, gu.created_at, gu.last_played_at, u.handle AS owner_handle
+         FROM game_users gu
+         LEFT JOIN users u ON u.id = gu.user_id
+         WHERE gu.game_instance_id = $1
+         ORDER BY gu.last_played_at DESC`,
+        [instance.id]
+      );
+      roster = rosterResult.rows;
+    }
+
+    res.json({ instance, roster });
+  } catch (err) {
+    console.error('Error loading game admin overview:', err);
+    res.status(500).json({ message: 'Failed to load overview' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/admin/universe
+ * Game-admin only: generate a fresh universe for this game, ending whatever
+ * instance is currently active. Body: { name, sectors, min_links, max_links,
+ * avg_degree } -- all optional, defaulting to the same values the CLI
+ * generator script uses.
+ */
+router.post('/:gameKey/admin/universe', authenticate, requireGameAdmin, async (req, res) => {
+  const name = (req.body.name || `Haulonaut Universe ${new Date().toISOString().slice(0, 19).replace('T', ' ')}`).trim();
+  const sectorCount = parseInt(req.body.sectors, 10) || 1000;
+  const minLinks = parseInt(req.body.min_links, 10) || 1;
+  const maxLinks = parseInt(req.body.max_links, 10) || 6;
+  const avgDegree = parseFloat(req.body.avg_degree) || 3.5;
+
+  if (sectorCount < 10 || sectorCount > 5000) {
+    return res.status(400).json({ message: 'sectors must be between 10 and 5000' });
+  }
+
+  let graph;
+  try {
+    graph = buildUniverseGraph(sectorCount, minLinks, maxLinks, avgDegree);
+  } catch (err) {
+    return res.status(400).json({ message: err.message });
+  }
+
+  const client = await getClient();
+  try {
+    await client.beginTransaction();
+
+    await client.query(
+      `UPDATE game_instances SET status = 'ended', ended_at = NOW() WHERE game_id = $1 AND status = 'active'`,
+      [req.gameId]
+    );
+
+    const instanceResult = await client.query(
+      `INSERT INTO game_instances (game_id, name, status) VALUES ($1, $2, 'setup')`,
+      [req.gameId, name]
+    );
+    const instanceId = instanceResult.insertId;
+
+    const sectorRows = [];
+    for (let n = 1; n <= sectorCount; n++) sectorRows.push([instanceId, n]);
+    const SECTOR_BATCH = 500;
+    for (let i = 0; i < sectorRows.length; i += SECTOR_BATCH) {
+      const { sql, params } = buildBulkInsertQuery(
+        'haulonaut_sectors', ['game_instance_id', 'sector_number'], sectorRows.slice(i, i + SECTOR_BATCH)
+      );
+      await client.query(sql, params);
+    }
+
+    const sectorIdResult = await client.query(
+      'SELECT id, sector_number FROM haulonaut_sectors WHERE game_instance_id = $1 ORDER BY sector_number',
+      [instanceId]
+    );
+    const idByIndex = sectorIdResult.rows.map(r => r.id); // index i -> sector_number i+1's DB id
+
+    const linkRows = [];
+    for (const [a, b] of graph.edges) {
+      linkRows.push([instanceId, idByIndex[a], idByIndex[b]]);
+      linkRows.push([instanceId, idByIndex[b], idByIndex[a]]);
+    }
+    const LINK_BATCH = 300;
+    for (let i = 0; i < linkRows.length; i += LINK_BATCH) {
+      const { sql, params } = buildBulkInsertQuery(
+        'haulonaut_sector_links', ['game_instance_id', 'from_sector_id', 'to_sector_id'], linkRows.slice(i, i + LINK_BATCH)
+      );
+      await client.query(sql, params);
+    }
+
+    await client.query(`UPDATE game_instances SET status = 'active', started_at = NOW() WHERE id = $1`, [instanceId]);
+
+    await client.commit();
+
+    res.status(201).json({
+      instance: { id: instanceId, name },
+      sectorCount: sectorRows.length,
+      linkCount: linkRows.length,
+      degreeStats: graph.stats
+    });
+  } catch (err) {
+    await client.rollback();
+    console.error('Error generating universe:', err);
+    res.status(500).json({ message: 'Failed to generate universe' });
   } finally {
     client.release();
   }

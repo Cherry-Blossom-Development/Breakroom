@@ -9,6 +9,7 @@ const error = ref('')
 const game = ref(null)
 const instance = ref(null)
 const characters = ref([])
+const isAdmin = ref(false)
 
 const showCreateModal = ref(false)
 const newCharacterName = ref('')
@@ -27,6 +28,7 @@ async function loadGame() {
     game.value = data.game
     instance.value = data.instance
     characters.value = data.characters || []
+    isAdmin.value = !!data.isAdmin
   } catch (err) {
     error.value = 'Failed to load Haulonaut.'
     console.error(err)
@@ -108,6 +110,7 @@ onMounted(loadGame)
         >
           {{ instance ? (mostRecentCharacter ? 'RESUME ▶' : 'PLAY NOW ▶') : 'UNIVERSE OFFLINE' }}
         </button>
+        <button v-if="isAdmin" class="admin-link-btn" @click="router.push('/games/haulonaut/admin')">⚙ Manage Universe</button>
       </div>
 
       <!-- Your current games -->
@@ -269,6 +272,28 @@ onMounted(loadGame)
 .ad-play-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.admin-link-btn {
+  display: block;
+  margin-top: 14px;
+  background: none;
+  border: 1px solid #1f8a4c;
+  color: #8fe6ab;
+  border-radius: 4px;
+  padding: 7px 14px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.admin-link-btn:hover {
+  background: #0d3a1e;
+}
+
+.admin-link-btn:focus-visible {
+  outline: 2px solid #baffcf;
+  outline-offset: 2px;
 }
 
 /* ---- Current games ---- */
