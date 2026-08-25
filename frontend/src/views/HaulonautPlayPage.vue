@@ -13,6 +13,7 @@ const connectedSectors = ref([])
 const navigating = ref(false)
 const navError = ref('')
 const logLines = ref([])
+const selectedIndex = ref(-1) // -1 = nothing highlighted; arrow keys move this, Enter confirms it
 
 async function loadCharacter() {
   loading.value = true
@@ -28,7 +29,7 @@ async function loadCharacter() {
       'DOCKING CONFIRMED',
       data.currentSector ? `Currently in Sector ${data.currentSector.sector_number}.` : null,
       'Your ship is fueled and ready. The universe awaits — gameplay coming soon.',
-      'Click a WARP TO button below, or press its number key, to move.'
+      'Use ←/→ to choose a warp target and ENTER to go, click a button, or press its number key.'
     ].filter(Boolean)
   } catch (err) {
     error.value = err.message
@@ -53,6 +54,7 @@ async function navigateTo(sector) {
     logLines.value.push(`Warping to Sector ${sector.sector_number}...`)
     currentSector.value = data.currentSector
     connectedSectors.value = data.connectedSectors || []
+    selectedIndex.value = -1
   } catch (err) {
     navError.value = err.message
   } finally {
@@ -69,11 +71,40 @@ function onKeydown(e) {
     backToGames()
     return
   }
-  // Number keys 1-6 warp to the correspondingly-numbered button below --
-  // sectors can have at most 6 connections, so this always covers every
-  // option without needing to type a (possibly 3-digit) sector number.
+  if (navigating.value || connectedSectors.value.length === 0) return
+  const count = connectedSectors.value.length
+
+  switch (e.key) {
+    // Down (or Right) enters/advances the highlight along the warp row;
+    // Up backs it back out to "nothing selected".
+    case 'ArrowDown':
+    case 'ArrowRight':
+      e.preventDefault()
+      selectedIndex.value = selectedIndex.value === -1 ? 0 : (selectedIndex.value + 1) % count
+      return
+    case 'ArrowLeft':
+      e.preventDefault()
+      selectedIndex.value = selectedIndex.value === -1 ? 0 : (selectedIndex.value - 1 + count) % count
+      return
+    case 'ArrowUp':
+      e.preventDefault()
+      selectedIndex.value = -1
+      return
+    case 'Enter':
+    case ' ':
+      if (selectedIndex.value !== -1) {
+        e.preventDefault()
+        navigateTo(connectedSectors.value[selectedIndex.value])
+      }
+      return
+  }
+
+  // Number keys 1-6 are a direct fast path (jump straight to that button
+  // without needing to arrow over to it first) -- sectors can have at most
+  // 6 connections, so this always covers every option.
   const hotkeyIndex = parseInt(e.key, 10) - 1
   if (Number.isInteger(hotkeyIndex) && hotkeyIndex >= 0 && connectedSectors.value[hotkeyIndex]) {
+    selectedIndex.value = hotkeyIndex
     navigateTo(connectedSectors.value[hotkeyIndex])
   }
 }
@@ -124,11 +155,13 @@ onUnmounted(() => {
                       v-for="(s, i) in connectedSectors"
                       :key="s.id"
                       class="warp-btn"
+                      :class="{ selected: selectedIndex === i }"
                       :disabled="navigating"
                       :aria-label="`Warp to Sector ${s.sector_number} (key ${i + 1})`"
+                      :aria-pressed="selectedIndex === i"
                       @click="navigateTo(s)"
                     >
-                      <span class="warp-hotkey" aria-hidden="true">{{ i + 1 }}</span>{{ s.sector_number }}
+                      <span class="warp-cursor" aria-hidden="true">{{ selectedIndex === i ? '▶' : '' }}</span><span class="warp-hotkey" aria-hidden="true">{{ i + 1 }}</span>{{ s.sector_number }}
                     </button>
                   </template>
                   <span v-else class="navbar-none">no warps available</span>
@@ -378,6 +411,35 @@ onUnmounted(() => {
   font-size: 0.85rem;
   font-weight: 700;
   cursor: pointer;
+}
+
+.warp-cursor {
+  display: inline-block;
+  width: 9px;
+  text-align: center;
+  color: #05130a;
+}
+
+.warp-btn.selected {
+  background: #4dff88;
+  color: #05130a;
+  border-color: #baffcf;
+  box-shadow: 0 0 10px 2px rgba(77, 255, 136, 0.7);
+  animation: warp-pulse 1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .warp-btn.selected { animation: none; }
+}
+
+@keyframes warp-pulse {
+  0%, 100% { box-shadow: 0 0 10px 2px rgba(77, 255, 136, 0.7); }
+  50% { box-shadow: 0 0 4px 1px rgba(77, 255, 136, 0.4); }
+}
+
+.warp-btn.selected .warp-hotkey {
+  background: rgba(5, 19, 10, 0.25);
+  color: #05130a;
 }
 
 .warp-hotkey {
