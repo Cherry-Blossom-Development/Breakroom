@@ -218,6 +218,12 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresFeature: 'games' },
     },
     {
+      path: '/games/haulonaut/play/:characterId',
+      name: 'haulonautPlay',
+      component: () => import('../views/HaulonautPlayPage.vue'),
+      meta: { requiresAuth: true, requiresFeature: 'games' },
+    },
+    {
       path: '/friends',
       name: 'friends',
       component: () => import('../views/FriendsPage.vue'),
