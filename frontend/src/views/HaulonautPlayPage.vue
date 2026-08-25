@@ -27,7 +27,8 @@ async function loadCharacter() {
     logLines.value = [
       'DOCKING CONFIRMED',
       data.currentSector ? `Currently in Sector ${data.currentSector.sector_number}.` : null,
-      'Your ship is fueled and ready. The universe awaits — gameplay coming soon.'
+      'Your ship is fueled and ready. The universe awaits — gameplay coming soon.',
+      'Click a WARP TO button below, or press its number key, to move.'
     ].filter(Boolean)
   } catch (err) {
     error.value = err.message
@@ -64,7 +65,17 @@ function backToGames() {
 }
 
 function onKeydown(e) {
-  if (e.key === 'Escape') backToGames()
+  if (e.key === 'Escape') {
+    backToGames()
+    return
+  }
+  // Number keys 1-6 warp to the correspondingly-numbered button below --
+  // sectors can have at most 6 connections, so this always covers every
+  // option without needing to type a (possibly 3-digit) sector number.
+  const hotkeyIndex = parseInt(e.key, 10) - 1
+  if (Number.isInteger(hotkeyIndex) && hotkeyIndex >= 0 && connectedSectors.value[hotkeyIndex]) {
+    navigateTo(connectedSectors.value[hotkeyIndex])
+  }
 }
 
 onMounted(() => {
@@ -110,13 +121,14 @@ onUnmounted(() => {
                   <span class="navbar-label">WARP TO:</span>
                   <template v-if="connectedSectors.length > 0">
                     <button
-                      v-for="s in connectedSectors"
+                      v-for="(s, i) in connectedSectors"
                       :key="s.id"
                       class="warp-btn"
                       :disabled="navigating"
+                      :aria-label="`Warp to Sector ${s.sector_number} (key ${i + 1})`"
                       @click="navigateTo(s)"
                     >
-                      {{ s.sector_number }}
+                      <span class="warp-hotkey" aria-hidden="true">{{ i + 1 }}</span>{{ s.sector_number }}
                     </button>
                   </template>
                   <span v-else class="navbar-none">no warps available</span>
@@ -353,6 +365,9 @@ onUnmounted(() => {
 }
 
 .warp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   min-width: 34px;
   background: rgba(77, 255, 136, 0.08);
   border: 1px solid #2fd66e;
@@ -363,6 +378,24 @@ onUnmounted(() => {
   font-size: 0.85rem;
   font-weight: 700;
   cursor: pointer;
+}
+
+.warp-hotkey {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 3px;
+  background: rgba(186, 255, 207, 0.15);
+  color: #8fe6ab;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.warp-btn:hover:not(:disabled) .warp-hotkey {
+  background: rgba(5, 19, 10, 0.25);
+  color: #05130a;
 }
 
 .warp-btn:hover:not(:disabled) {

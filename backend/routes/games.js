@@ -81,15 +81,26 @@ function buildBulkInsertQuery(table, columns, rows) {
 // from it (haulonaut_sector_links stores both directions of each
 // connection, so this is a single indexed lookup). Shared by the
 // character-fetch and navigate endpoints so both return the same shape.
+//
+// Self-healing: a character with no haulonaut_pilots row yet (spawned
+// before this table existed, or any other gap) gets one created here, at a
+// random sector in their instance, rather than surfacing a broken "nowhere"
+// state to the player.
 async function loadPilotLocation(client, gameUserId) {
-  const pilotResult = await client.query(
+  let pilotResult = await client.query(
     `SELECT hs.id, hs.sector_number
      FROM haulonaut_pilots hp
      JOIN haulonaut_sectors hs ON hs.id = hp.current_sector_id
      WHERE hp.game_user_id = $1`,
     [gameUserId]
   );
-  if (pilotResult.rowCount === 0) return { currentSector: null, connectedSectors: [] };
+
+  if (pilotResult.rowCount === 0) {
+    const spawned = await spawnPilotAtRandomSector(client, gameUserId);
+    if (!spawned) return { currentSector: null, connectedSectors: [] };
+    pilotResult = { rows: [spawned] };
+  }
+
   const currentSector = pilotResult.rows[0];
 
   const linksResult = await client.query(
@@ -102,6 +113,27 @@ async function loadPilotLocation(client, gameUserId) {
   );
 
   return { currentSector, connectedSectors: linksResult.rows };
+}
+
+// Picks a random sector in the character's instance and creates their
+// haulonaut_pilots row there. Returns the sector { id, sector_number }, or
+// null if the character or its instance has no sectors at all.
+async function spawnPilotAtRandomSector(client, gameUserId) {
+  const gameUserResult = await client.query('SELECT game_instance_id FROM game_users WHERE id = $1', [gameUserId]);
+  if (gameUserResult.rowCount === 0) return null;
+
+  const randomSector = await client.query(
+    'SELECT id, sector_number FROM haulonaut_sectors WHERE game_instance_id = $1 ORDER BY RAND() LIMIT 1',
+    [gameUserResult.rows[0].game_instance_id]
+  );
+  if (randomSector.rowCount === 0) return null;
+
+  await client.query(
+    'INSERT IGNORE INTO haulonaut_pilots (game_user_id, current_sector_id) VALUES ($1, $2)',
+    [gameUserId, randomSector.rows[0].id]
+  );
+
+  return randomSector.rows[0];
 }
 
 /**
@@ -194,7 +226,7 @@ router.post('/:gameKey/characters', authenticate, async (req, res) => {
     }
 
     const startSector = await client.query(
-      'SELECT id FROM haulonaut_sectors WHERE game_instance_id = $1 ORDER BY sector_number LIMIT 1',
+      'SELECT id FROM haulonaut_sectors WHERE game_instance_id = $1 ORDER BY RAND() LIMIT 1',
       [instanceId]
     );
     if (startSector.rowCount === 0) {
@@ -208,7 +240,7 @@ router.post('/:gameKey/characters', authenticate, async (req, res) => {
       [instanceId, req.user.id, displayName]
     );
 
-    // Spawn at sector 1 (the traditional "home base" starting sector).
+    // Spawn at a random sector -- no "home base," everyone starts somewhere different.
     await client.query(
       'INSERT INTO haulonaut_pilots (game_user_id, current_sector_id) VALUES ($1, $2)',
       [insertResult.insertId, startSector.rows[0].id]
