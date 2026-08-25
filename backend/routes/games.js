@@ -77,6 +77,33 @@ function buildBulkInsertQuery(table, columns, rows) {
   };
 }
 
+// Loads a character's current sector and every sector directly reachable
+// from it (haulonaut_sector_links stores both directions of each
+// connection, so this is a single indexed lookup). Shared by the
+// character-fetch and navigate endpoints so both return the same shape.
+async function loadPilotLocation(client, gameUserId) {
+  const pilotResult = await client.query(
+    `SELECT hs.id, hs.sector_number
+     FROM haulonaut_pilots hp
+     JOIN haulonaut_sectors hs ON hs.id = hp.current_sector_id
+     WHERE hp.game_user_id = $1`,
+    [gameUserId]
+  );
+  if (pilotResult.rowCount === 0) return { currentSector: null, connectedSectors: [] };
+  const currentSector = pilotResult.rows[0];
+
+  const linksResult = await client.query(
+    `SELECT hs.id, hs.sector_number
+     FROM haulonaut_sector_links hsl
+     JOIN haulonaut_sectors hs ON hs.id = hsl.to_sector_id
+     WHERE hsl.from_sector_id = $1
+     ORDER BY hs.sector_number`,
+    [currentSector.id]
+  );
+
+  return { currentSector, connectedSectors: linksResult.rows };
+}
+
 /**
  * GET /api/games/:gameKey
  * Game info, every currently-active universe instance (a game can have
@@ -166,10 +193,28 @@ router.post('/:gameKey/characters', authenticate, async (req, res) => {
       return res.status(409).json({ message: 'That universe is not active' });
     }
 
+    const startSector = await client.query(
+      'SELECT id FROM haulonaut_sectors WHERE game_instance_id = $1 ORDER BY sector_number LIMIT 1',
+      [instanceId]
+    );
+    if (startSector.rowCount === 0) {
+      return res.status(409).json({ message: 'That universe has no sectors yet' });
+    }
+
+    await client.beginTransaction();
+
     const insertResult = await client.query(
       `INSERT INTO game_users (game_instance_id, user_id, display_name, status) VALUES ($1, $2, $3, 'active')`,
       [instanceId, req.user.id, displayName]
     );
+
+    // Spawn at sector 1 (the traditional "home base" starting sector).
+    await client.query(
+      'INSERT INTO haulonaut_pilots (game_user_id, current_sector_id) VALUES ($1, $2)',
+      [insertResult.insertId, startSector.rows[0].id]
+    );
+
+    await client.commit();
 
     const created = await client.query(
       'SELECT id, display_name, status, created_at, last_played_at, died_at FROM game_users WHERE id = $1',
@@ -178,6 +223,7 @@ router.post('/:gameKey/characters', authenticate, async (req, res) => {
 
     res.status(201).json({ character: created.rows[0] });
   } catch (err) {
+    await client.rollback();
     console.error('Error creating game character:', err);
     res.status(500).json({ message: 'Failed to create character' });
   } finally {
@@ -188,7 +234,9 @@ router.post('/:gameKey/characters', authenticate, async (req, res) => {
 /**
  * GET /api/games/:gameKey/characters/:id
  * Fetch a single character owned by the requesting user, and mark it as
- * just-played (drives the "resume most recent" ordering on the landing page).
+ * just-played (drives the "resume most recent" ordering on the landing
+ * page). Also returns where they currently are and every sector reachable
+ * from there, for the navigation bar.
  */
 router.get('/:gameKey/characters/:id', authenticate, async (req, res) => {
   const client = await getClient();
@@ -205,10 +253,63 @@ router.get('/:gameKey/characters/:id', authenticate, async (req, res) => {
 
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
 
-    res.json({ character: result.rows[0] });
+    const { currentSector, connectedSectors } = await loadPilotLocation(client, req.params.id);
+
+    res.json({ character: result.rows[0], currentSector, connectedSectors });
   } catch (err) {
     console.error('Error loading character:', err);
     res.status(500).json({ message: 'Failed to load character' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/characters/:id/navigate
+ * Move the character's ship along a warp link. Body: { to_sector_id }.
+ * Rejects the move unless to_sector_id is actually linked from the
+ * character's current sector -- the client only ever offers linked sectors,
+ * but this is re-checked server-side rather than trusted.
+ */
+router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) => {
+  const toSectorId = parseInt(req.body.to_sector_id, 10);
+  if (!toSectorId) return res.status(400).json({ message: 'to_sector_id is required' });
+
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+
+    const pilotResult = await client.query(
+      'SELECT current_sector_id FROM haulonaut_pilots WHERE game_user_id = $1',
+      [req.params.id]
+    );
+    if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
+
+    const linkCheck = await client.query(
+      'SELECT 1 FROM haulonaut_sector_links WHERE from_sector_id = $1 AND to_sector_id = $2',
+      [pilotResult.rows[0].current_sector_id, toSectorId]
+    );
+    if (linkCheck.rowCount === 0) return res.status(400).json({ message: 'That sector is not reachable from here' });
+
+    await client.query(
+      'UPDATE haulonaut_pilots SET current_sector_id = $1 WHERE game_user_id = $2',
+      [toSectorId, req.params.id]
+    );
+    await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
+
+    const { currentSector, connectedSectors } = await loadPilotLocation(client, req.params.id);
+
+    res.json({ currentSector, connectedSectors });
+  } catch (err) {
+    console.error('Error navigating:', err);
+    res.status(500).json({ message: 'Failed to navigate' });
   } finally {
     client.release();
   }

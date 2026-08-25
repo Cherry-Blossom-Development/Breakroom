@@ -8,6 +8,11 @@ const router = useRouter()
 const loading = ref(true)
 const error = ref('')
 const character = ref(null)
+const currentSector = ref(null)
+const connectedSectors = ref([])
+const navigating = ref(false)
+const navError = ref('')
+const logLines = ref([])
 
 async function loadCharacter() {
   loading.value = true
@@ -17,10 +22,40 @@ async function loadCharacter() {
     if (!res.ok) throw new Error(res.status === 404 ? 'Character not found' : 'Failed to load')
     const data = await res.json()
     character.value = data.character
+    currentSector.value = data.currentSector
+    connectedSectors.value = data.connectedSectors || []
+    logLines.value = [
+      'DOCKING CONFIRMED',
+      data.currentSector ? `Currently in Sector ${data.currentSector.sector_number}.` : null,
+      'Your ship is fueled and ready. The universe awaits — gameplay coming soon.'
+    ].filter(Boolean)
   } catch (err) {
     error.value = err.message
   } finally {
     loading.value = false
+  }
+}
+
+async function navigateTo(sector) {
+  if (navigating.value) return
+  navigating.value = true
+  navError.value = ''
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/navigate`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to_sector_id: sector.id })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Navigation failed')
+    logLines.value.push(`Warping to Sector ${sector.sector_number}...`)
+    currentSector.value = data.currentSector
+    connectedSectors.value = data.connectedSectors || []
+  } catch (err) {
+    navError.value = err.message
+  } finally {
+    navigating.value = false
   }
 }
 
@@ -59,10 +94,34 @@ onUnmounted(() => {
             <div class="crt-scanlines" aria-hidden="true"></div>
             <div class="crt-glow" aria-hidden="true"></div>
             <div class="crt-content">
-              <p class="terminal-line">&gt;&gt;&gt; DOCKING CONFIRMED<span class="terminal-cursor" aria-hidden="true">_</span></p>
-              <h1 class="terminal-name">{{ character.display_name }}</h1>
-              <p class="terminal-line">Status: <span class="status-active">{{ character.status }}</span></p>
-              <p class="terminal-message">Your ship is fueled and ready. The universe awaits — gameplay coming soon.</p>
+              <div class="crt-log">
+                <h1 class="terminal-name">{{ character.display_name }}</h1>
+                <p class="terminal-line">Status: <span class="status-active">{{ character.status }}</span></p>
+                <p v-for="(line, i) in logLines" :key="i" class="terminal-message">&gt; {{ line }}</p>
+                <p v-if="navError" class="terminal-error">&gt; {{ navError }}</p>
+                <p class="terminal-line"><span class="terminal-cursor" aria-hidden="true">_</span></p>
+              </div>
+
+              <div class="crt-navbar">
+                <div class="navbar-location">
+                  SECTOR <span class="navbar-location-num">{{ currentSector ? currentSector.sector_number : '—' }}</span>
+                </div>
+                <div class="navbar-warps">
+                  <span class="navbar-label">WARP TO:</span>
+                  <template v-if="connectedSectors.length > 0">
+                    <button
+                      v-for="s in connectedSectors"
+                      :key="s.id"
+                      class="warp-btn"
+                      :disabled="navigating"
+                      @click="navigateTo(s)"
+                    >
+                      {{ s.sector_number }}
+                    </button>
+                  </template>
+                  <span v-else class="navbar-none">no warps available</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -190,11 +249,18 @@ onUnmounted(() => {
 .crt-content {
   position: relative;
   height: 100%;
-  overflow: auto;
   box-sizing: border-box;
-  padding: clamp(14px, 4%, 40px);
+  display: flex;
+  flex-direction: column;
   color: #4dff88;
   font-family: 'Courier New', Courier, monospace;
+}
+
+.crt-log {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: clamp(14px, 4%, 40px) clamp(14px, 4%, 40px) 8px;
 }
 
 .terminal-line {
@@ -229,9 +295,89 @@ onUnmounted(() => {
 }
 
 .terminal-message {
-  margin: 14px 0 0;
+  margin: 8px 0 0;
   color: #8fe6ab;
   line-height: 1.6;
+}
+
+.terminal-error {
+  margin: 8px 0 0;
+  color: #ff8a8a;
+  line-height: 1.6;
+}
+
+/* ---- Navigation bar ---- */
+.crt-navbar {
+  flex-shrink: 0;
+  border-top: 1px solid rgba(77, 255, 136, 0.3);
+  padding: clamp(10px, 2.5%, 20px) clamp(14px, 4%, 40px);
+  display: flex;
+  align-items: center;
+  gap: clamp(10px, 3%, 28px);
+  flex-wrap: wrap;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.navbar-location {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+  color: #8fe6ab;
+}
+
+.navbar-location-num {
+  color: #4dff88;
+  font-weight: 700;
+  font-size: 1rem;
+  text-shadow: 0 0 6px rgba(77, 255, 136, 0.6);
+}
+
+.navbar-warps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.navbar-label {
+  font-size: 0.75rem;
+  color: #5fae7c;
+  letter-spacing: 0.05em;
+  margin-right: 2px;
+}
+
+.navbar-none {
+  font-size: 0.8rem;
+  color: #5fae7c;
+  font-style: italic;
+}
+
+.warp-btn {
+  min-width: 34px;
+  background: rgba(77, 255, 136, 0.08);
+  border: 1px solid #2fd66e;
+  color: #baffcf;
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.warp-btn:hover:not(:disabled) {
+  background: #4dff88;
+  color: #05130a;
+}
+
+.warp-btn:focus-visible {
+  outline: 2px solid #baffcf;
+  outline-offset: 2px;
+}
+
+.warp-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ---- Controls ---- */
