@@ -4,14 +4,19 @@ import { ref, onMounted } from 'vue'
 const loading = ref(true)
 const error = ref('')
 const forbidden = ref(false)
-const instance = ref(null)
-const roster = ref([])
+const instances = ref([])
+
+const expandedId = ref(null)
+const rosters = ref({}) // instanceId -> roster array
+const loadingRoster = ref(false)
 
 const newUniverseName = ref('')
 const newUniverseSectors = ref(1000)
 const generating = ref(false)
 const generateError = ref('')
 const generateResult = ref('')
+
+const endingId = ref(null)
 
 async function loadOverview() {
   loading.value = true
@@ -22,8 +27,7 @@ async function loadOverview() {
     if (res.status === 403) { forbidden.value = true; return }
     if (!res.ok) throw new Error('Failed to load')
     const data = await res.json()
-    instance.value = data.instance
-    roster.value = data.roster || []
+    instances.value = data.instances || []
   } catch (err) {
     error.value = 'Failed to load universe overview.'
     console.error(err)
@@ -32,12 +36,39 @@ async function loadOverview() {
   }
 }
 
-async function generateUniverse() {
-  const label = instance.value
-    ? `This will end "${instance.value.name}" and generate a brand new universe. All players will need to start a new character. Continue?`
-    : 'Generate a new universe?'
-  if (!confirm(label)) return
+async function toggleRoster(instanceId) {
+  if (expandedId.value === instanceId) {
+    expandedId.value = null
+    return
+  }
+  expandedId.value = instanceId
+  if (rosters.value[instanceId]) return
 
+  loadingRoster.value = true
+  try {
+    const res = await fetch(`/api/games/haulonaut/admin/instances/${instanceId}/roster`, { credentials: 'include' })
+    const data = await res.json()
+    rosters.value = { ...rosters.value, [instanceId]: data.roster || [] }
+  } finally {
+    loadingRoster.value = false
+  }
+}
+
+async function endUniverse(inst) {
+  if (!confirm(`End "${inst.name}"? Its characters stay in history but won't be able to keep playing there.`)) return
+  endingId.value = inst.id
+  try {
+    const res = await fetch(`/api/games/haulonaut/admin/instances/${inst.id}/end`, {
+      method: 'POST',
+      credentials: 'include'
+    })
+    if (res.ok) await loadOverview()
+  } finally {
+    endingId.value = null
+  }
+}
+
+async function generateUniverse() {
   generating.value = true
   generateError.value = ''
   generateResult.value = ''
@@ -81,41 +112,63 @@ onMounted(loadOverview)
 
     <template v-else>
       <section class="admin-section">
-        <h2>Current Universe</h2>
-        <div v-if="instance" class="instance-card">
-          <div class="instance-row"><span class="label">Name</span><span>{{ instance.name }}</span></div>
-          <div class="instance-row"><span class="label">Sectors</span><span>{{ instance.sector_count }}</span></div>
-          <div class="instance-row"><span class="label">Started</span><span>{{ formatDate(instance.started_at) }}</span></div>
-        </div>
-        <div v-else class="empty-state">No active universe.</div>
-      </section>
+        <h2>Universes</h2>
+        <div v-if="instances.length === 0" class="empty-state">No universes yet.</div>
+        <div v-else class="instance-list">
+          <div v-for="inst in instances" :key="inst.id" class="instance-card">
+            <div class="instance-header">
+              <div class="instance-info">
+                <span class="instance-name">{{ inst.name }}</span>
+                <span class="instance-badge" :class="`badge-${inst.status}`">{{ inst.status }}</span>
+              </div>
+              <div class="instance-actions">
+                <button class="link-btn" @click="toggleRoster(inst.id)">
+                  {{ expandedId === inst.id ? 'Hide Roster' : 'View Roster' }} ({{ inst.player_count }})
+                </button>
+                <button
+                  v-if="inst.status === 'active'"
+                  class="btn-danger"
+                  :disabled="endingId === inst.id"
+                  @click="endUniverse(inst)"
+                >
+                  {{ endingId === inst.id ? 'Ending...' : 'End Universe' }}
+                </button>
+              </div>
+            </div>
+            <div class="instance-meta">
+              {{ inst.sector_count }} sectors · started {{ formatDate(inst.started_at) }}
+              <span v-if="inst.ended_at"> · ended {{ formatDate(inst.ended_at) }}</span>
+            </div>
 
-      <section class="admin-section">
-        <h2>Player Roster ({{ roster.length }})</h2>
-        <table v-if="roster.length > 0" class="roster-table">
-          <thead>
-            <tr>
-              <th>Character</th>
-              <th>Owner</th>
-              <th>Status</th>
-              <th>Last Played</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="c in roster" :key="c.id">
-              <td>{{ c.display_name }}</td>
-              <td>{{ c.owner_handle || '(guest)' }}</td>
-              <td class="status-cell" :class="`status-${c.status}`">{{ c.status }}</td>
-              <td>{{ formatDate(c.last_played_at) }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-else class="empty-state">No characters yet.</div>
+            <div v-if="expandedId === inst.id" class="roster-wrap">
+              <div v-if="loadingRoster && !rosters[inst.id]" class="empty-state">Loading roster...</div>
+              <table v-else-if="(rosters[inst.id] || []).length > 0" class="roster-table">
+                <thead>
+                  <tr>
+                    <th>Character</th>
+                    <th>Owner</th>
+                    <th>Status</th>
+                    <th>Last Played</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="c in rosters[inst.id]" :key="c.id">
+                    <td>{{ c.display_name }}</td>
+                    <td>{{ c.owner_handle || '(guest)' }}</td>
+                    <td class="status-cell" :class="`status-${c.status}`">{{ c.status }}</td>
+                    <td>{{ formatDate(c.last_played_at) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <div v-else class="empty-state">No characters yet.</div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section class="admin-section">
         <h2>Generate New Universe</h2>
-        <p class="warning-text">This ends the current universe and starts a fresh one. Existing characters stay in the old (ended) universe's history but can't keep playing in it.</p>
+        <p class="hint-text">Creates a new universe alongside any others currently running — nothing else is affected. End a universe explicitly from the list above if you want to retire it.</p>
         <div class="generate-form">
           <label>
             Name
@@ -146,7 +199,7 @@ h2 { color: var(--color-text); font-size: 1.1rem; margin: 0 0 12px; }
 
 .loading, .error-message, .empty-state {
   color: var(--color-text-muted);
-  padding: 20px 0;
+  padding: 12px 0;
 }
 
 .admin-section {
@@ -156,24 +209,74 @@ h2 { color: var(--color-text); font-size: 1.1rem; margin: 0 0 12px; }
   margin-bottom: 20px;
 }
 
-.instance-card {
+.instance-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 12px;
 }
 
-.instance-row {
+.instance-card {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.instance-header {
   display: flex;
-  gap: 10px;
-  font-size: 0.9rem;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.instance-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.instance-name {
+  font-weight: 600;
   color: var(--color-text);
 }
 
-.instance-row .label {
-  width: 90px;
-  flex-shrink: 0;
+.instance-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  text-transform: uppercase;
+}
+
+.badge-active { background: #d4edda; color: #155724; }
+.badge-ended { background: #e2e3e5; color: #383d41; }
+.badge-setup { background: #fff3cd; color: #856404; }
+
+.instance-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.instance-meta {
+  margin-top: 4px;
+  font-size: 0.8rem;
   color: var(--color-text-muted);
 }
+
+.roster-wrap {
+  margin-top: 12px;
+}
+
+.link-btn {
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-background-soft);
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.link-btn:hover { background: var(--color-background-hover); }
 
 .roster-table {
   width: 100%;
@@ -195,7 +298,7 @@ h2 { color: var(--color-text); font-size: 1.1rem; margin: 0 0 12px; }
 .status-dead { color: var(--color-error, #cc0000); }
 .status-abandoned { color: var(--color-text-light); }
 
-.warning-text {
+.hint-text {
   color: var(--color-text-muted);
   font-size: 0.85rem;
   margin: 0 0 14px;
@@ -229,7 +332,8 @@ h2 { color: var(--color-text); font-size: 1.1rem; margin: 0 0 12px; }
   width: 100px;
 }
 
-.generate-form button {
+.generate-form button,
+.instance-actions button {
   padding: 9px 16px;
   border: none;
   border-radius: 4px;
@@ -240,7 +344,11 @@ h2 { color: var(--color-text); font-size: 1.1rem; margin: 0 0 12px; }
 }
 
 .generate-form button:hover { background: var(--color-accent-hover); }
-.generate-form button:disabled { opacity: 0.5; cursor: not-allowed; }
+.generate-form button:disabled,
+.instance-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.instance-actions .btn-danger { background: var(--color-error, #dc3545); padding: 6px 12px; font-size: 0.8rem; }
+.instance-actions .btn-danger:hover:not(:disabled) { background: #c82333; }
 
 .error { color: var(--color-error); font-size: 0.85rem; margin-top: 10px; }
 .success { color: var(--color-success, #2e7d32); font-size: 0.85rem; margin-top: 10px; }

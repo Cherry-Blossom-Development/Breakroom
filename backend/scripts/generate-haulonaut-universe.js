@@ -12,8 +12,9 @@
 //
 // Insert sectors, then insert each undirected connection as two directed
 // rows (A->B and B->A) so "sectors reachable from here" is a single indexed
-// lookup. Ends any prior active instance for the game before activating the
-// new one, so there's never more than one active universe at a time.
+// lookup. Multiple instances can be active for the same game at once --
+// this script only ever adds one, alongside whatever else is running; end
+// an instance explicitly via the game-admin page if you want to retire it.
 
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env.local') });
 
@@ -60,11 +61,6 @@ async function main() {
     console.log(`Graph built: ${stats.edgeCount} connections, degree min=${stats.min} max=${stats.max} avg=${stats.avg.toFixed(2)}`);
 
     await conn.beginTransaction();
-
-    await conn.query(
-      "UPDATE game_instances SET status = 'ended', ended_at = NOW() WHERE game_id = ? AND status = 'active'",
-      [gameId]
-    );
 
     const [instanceResult] = await conn.query(
       'INSERT INTO game_instances (game_id, name, status) VALUES (?, ?, ?)',

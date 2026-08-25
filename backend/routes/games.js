@@ -79,9 +79,12 @@ function buildBulkInsertQuery(table, columns, rows) {
 
 /**
  * GET /api/games/:gameKey
- * Game info, its current active universe instance (if any), and the
- * requesting user's characters within that instance. One call covers
- * everything the Games landing page needs for a single game's ad card.
+ * Game info, every currently-active universe instance (a game can have
+ * several running concurrently), and the requesting user's characters
+ * across ALL instances of this game (including ended ones, so history
+ * isn't lost when a universe closes) -- each character carries its
+ * instance's name/status so the landing page can label which universe
+ * it's in.
  */
 router.get('/:gameKey', authenticate, async (req, res) => {
   const client = await getClient();
@@ -93,25 +96,26 @@ router.get('/:gameKey', authenticate, async (req, res) => {
     if (gameResult.rowCount === 0) return res.status(404).json({ message: 'Game not found' });
     const game = gameResult.rows[0];
 
-    const instanceResult = await client.query(
-      `SELECT gi.id, gi.name
+    const instancesResult = await client.query(
+      `SELECT gi.id, gi.name, gi.started_at,
+              (SELECT COUNT(*) FROM haulonaut_sectors hs WHERE hs.game_instance_id = gi.id) AS sector_count,
+              (SELECT COUNT(*) FROM game_users gu WHERE gu.game_instance_id = gi.id) AS player_count
        FROM game_instances gi
        WHERE gi.game_id = $1 AND gi.status = 'active'
-       ORDER BY gi.started_at DESC LIMIT 1`,
+       ORDER BY gi.started_at DESC`,
       [game.id]
     );
-    const instance = instanceResult.rowCount > 0 ? instanceResult.rows[0] : null;
+    const instances = instancesResult.rows;
 
-    let characters = [];
-    if (instance) {
-      const charactersResult = await client.query(
-        `SELECT id, display_name, status, created_at, last_played_at, died_at
-         FROM game_users WHERE game_instance_id = $1 AND user_id = $2
-         ORDER BY last_played_at DESC`,
-        [instance.id, req.user.id]
-      );
-      characters = charactersResult.rows;
-    }
+    const charactersResult = await client.query(
+      `SELECT gu.id, gu.display_name, gu.status, gu.created_at, gu.last_played_at, gu.died_at,
+              gi.id AS instance_id, gi.name AS instance_name, gi.status AS instance_status
+       FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       WHERE gi.game_id = $1 AND gu.user_id = $2
+       ORDER BY gu.last_played_at DESC`,
+      [game.id, req.user.id]
+    );
 
     const adminCheck = await client.query(
       `SELECT 1 FROM game_admins WHERE game_id = $1 AND user_id = $2
@@ -129,7 +133,7 @@ router.get('/:gameKey', authenticate, async (req, res) => {
     );
     const isAdmin = adminCheck.rowCount > 0;
 
-    res.json({ game, instance, characters, isAdmin });
+    res.json({ game, instances, characters: charactersResult.rows, isAdmin });
   } catch (err) {
     console.error('Error loading game:', err);
     res.status(500).json({ message: 'Failed to load game' });
@@ -140,32 +144,31 @@ router.get('/:gameKey', authenticate, async (req, res) => {
 
 /**
  * POST /api/games/:gameKey/characters
- * Create a new character in the current active instance of this game.
+ * Create a new character in a specific active instance of this game.
+ * Body: { display_name, instance_id }.
  */
 router.post('/:gameKey/characters', authenticate, async (req, res) => {
   const displayName = (req.body.display_name || '').trim();
+  const instanceId = parseInt(req.body.instance_id, 10);
   if (!displayName) return res.status(400).json({ message: 'display_name is required' });
   if (displayName.length > 64) return res.status(400).json({ message: 'display_name must be 64 characters or fewer' });
+  if (!instanceId) return res.status(400).json({ message: 'instance_id is required' });
 
   const client = await getClient();
   try {
-    const gameResult = await client.query(
-      'SELECT id FROM games WHERE game_key = $1 AND is_active = true',
-      [req.params.gameKey]
-    );
-    if (gameResult.rowCount === 0) return res.status(404).json({ message: 'Game not found' });
-
     const instanceResult = await client.query(
-      `SELECT id FROM game_instances WHERE game_id = $1 AND status = 'active' ORDER BY started_at DESC LIMIT 1`,
-      [gameResult.rows[0].id]
+      `SELECT gi.id FROM game_instances gi
+       JOIN games g ON g.id = gi.game_id
+       WHERE gi.id = $1 AND g.game_key = $2 AND gi.status = 'active'`,
+      [instanceId, req.params.gameKey]
     );
     if (instanceResult.rowCount === 0) {
-      return res.status(409).json({ message: 'No active universe for this game yet' });
+      return res.status(409).json({ message: 'That universe is not active' });
     }
 
     const insertResult = await client.query(
       `INSERT INTO game_users (game_instance_id, user_id, display_name, status) VALUES ($1, $2, $3, 'active')`,
-      [instanceResult.rows[0].id, req.user.id, displayName]
+      [instanceId, req.user.id, displayName]
     );
 
     const created = await client.query(
@@ -213,36 +216,26 @@ router.get('/:gameKey/characters/:id', authenticate, async (req, res) => {
 
 /**
  * GET /api/games/:gameKey/admin/overview
- * Game-admin only: current active instance details plus the full player
- * roster (every character in that instance, not just the caller's own).
+ * Game-admin only: every instance for this game (active and ended, most
+ * recent first) with basic stats. No roster here -- fetch that per-instance
+ * via /admin/instances/:instanceId/roster, since a game can now have several
+ * instances at once and pulling every roster up front doesn't scale.
  */
 router.get('/:gameKey/admin/overview', authenticate, requireGameAdmin, async (req, res) => {
   const client = await getClient();
   try {
-    const instanceResult = await client.query(
-      `SELECT gi.id, gi.name, gi.status, gi.started_at,
-              (SELECT COUNT(*) FROM haulonaut_sectors hs WHERE hs.game_instance_id = gi.id) AS sector_count
+    const instancesResult = await client.query(
+      `SELECT gi.id, gi.name, gi.status, gi.started_at, gi.ended_at,
+              (SELECT COUNT(*) FROM haulonaut_sectors hs WHERE hs.game_instance_id = gi.id) AS sector_count,
+              (SELECT COUNT(*) FROM game_users gu WHERE gu.game_instance_id = gi.id) AS player_count
        FROM game_instances gi
-       WHERE gi.game_id = $1 AND gi.status = 'active'
-       ORDER BY gi.started_at DESC LIMIT 1`,
+       WHERE gi.game_id = $1
+       ORDER BY gi.started_at DESC
+       LIMIT 25`,
       [req.gameId]
     );
-    const instance = instanceResult.rowCount > 0 ? instanceResult.rows[0] : null;
 
-    let roster = [];
-    if (instance) {
-      const rosterResult = await client.query(
-        `SELECT gu.id, gu.display_name, gu.status, gu.created_at, gu.last_played_at, u.handle AS owner_handle
-         FROM game_users gu
-         LEFT JOIN users u ON u.id = gu.user_id
-         WHERE gu.game_instance_id = $1
-         ORDER BY gu.last_played_at DESC`,
-        [instance.id]
-      );
-      roster = rosterResult.rows;
-    }
-
-    res.json({ instance, roster });
+    res.json({ instances: instancesResult.rows });
   } catch (err) {
     console.error('Error loading game admin overview:', err);
     res.status(500).json({ message: 'Failed to load overview' });
@@ -252,11 +245,68 @@ router.get('/:gameKey/admin/overview', authenticate, requireGameAdmin, async (re
 });
 
 /**
+ * GET /api/games/:gameKey/admin/instances/:instanceId/roster
+ * Game-admin only: full player roster for one instance of this game.
+ */
+router.get('/:gameKey/admin/instances/:instanceId/roster', authenticate, requireGameAdmin, async (req, res) => {
+  const client = await getClient();
+  try {
+    const instanceCheck = await client.query(
+      'SELECT id FROM game_instances WHERE id = $1 AND game_id = $2',
+      [req.params.instanceId, req.gameId]
+    );
+    if (instanceCheck.rowCount === 0) return res.status(404).json({ message: 'Instance not found' });
+
+    const rosterResult = await client.query(
+      `SELECT gu.id, gu.display_name, gu.status, gu.created_at, gu.last_played_at, u.handle AS owner_handle
+       FROM game_users gu
+       LEFT JOIN users u ON u.id = gu.user_id
+       WHERE gu.game_instance_id = $1
+       ORDER BY gu.last_played_at DESC`,
+      [req.params.instanceId]
+    );
+
+    res.json({ roster: rosterResult.rows });
+  } catch (err) {
+    console.error('Error loading instance roster:', err);
+    res.status(500).json({ message: 'Failed to load roster' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/admin/instances/:instanceId/end
+ * Game-admin only: explicitly end one active instance. Other instances for
+ * this game are unaffected -- multiple universes can run concurrently.
+ */
+router.post('/:gameKey/admin/instances/:instanceId/end', authenticate, requireGameAdmin, async (req, res) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      `UPDATE game_instances SET status = 'ended', ended_at = NOW()
+       WHERE id = $1 AND game_id = $2 AND status = 'active'`,
+      [req.params.instanceId, req.gameId]
+    );
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Active instance not found' });
+    }
+    res.json({ message: 'Universe ended' });
+  } catch (err) {
+    console.error('Error ending universe:', err);
+    res.status(500).json({ message: 'Failed to end universe' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
  * POST /api/games/:gameKey/admin/universe
- * Game-admin only: generate a fresh universe for this game, ending whatever
- * instance is currently active. Body: { name, sectors, min_links, max_links,
- * avg_degree } -- all optional, defaulting to the same values the CLI
- * generator script uses.
+ * Game-admin only: generate a fresh universe for this game, alongside any
+ * other instances currently active (does not end anything -- use
+ * /admin/instances/:instanceId/end for that separately). Body: { name,
+ * sectors, min_links, max_links, avg_degree } -- all optional, defaulting
+ * to the same values the CLI generator script uses.
  */
 router.post('/:gameKey/admin/universe', authenticate, requireGameAdmin, async (req, res) => {
   const name = (req.body.name || `Haulonaut Universe ${new Date().toISOString().slice(0, 19).replace('T', ' ')}`).trim();
@@ -279,11 +329,6 @@ router.post('/:gameKey/admin/universe', authenticate, requireGameAdmin, async (r
   const client = await getClient();
   try {
     await client.beginTransaction();
-
-    await client.query(
-      `UPDATE game_instances SET status = 'ended', ended_at = NOW() WHERE game_id = $1 AND status = 'active'`,
-      [req.gameId]
-    );
 
     const instanceResult = await client.query(
       `INSERT INTO game_instances (game_id, name, status) VALUES ($1, $2, 'setup')`,
