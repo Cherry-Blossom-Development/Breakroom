@@ -18,6 +18,17 @@ const logLines = ref([])
 const selectedIndex = ref(-1) // -1 = nothing highlighted; Left/Right move this, Enter confirms it
 const logEl = ref(null)
 const stars = ref([])
+const terminalInput = ref('')
+const terminalInputEl = ref(null)
+
+// Three-level keyboard hierarchy: 'inside' a box (typing/interacting with
+// its contents) -> 'box' (a box is highlighted, arrows/Tab move between
+// boxes) -> 'chrome' (the monitor bezel itself -- only the EXIT button
+// lives here). Escape always climbs one level; Enter descends one (or
+// activates EXIT at the chrome level). Starts 'inside' the terminal.
+const level = ref('inside')
+const activeBox = ref('terminal')
+const BOX_ORDER = ['viewport', 'scan', 'terminal', 'nav']
 
 const FEATURE_LABELS = { planet: 'PLANET', trading_outpost: 'OUTPOST' }
 
@@ -50,6 +61,55 @@ function scrollLogToBottom() {
 // One roughly-line-height nudge per arrow press, for keyboard scrolling.
 function scrollLog(direction) {
   if (logEl.value) logEl.value.scrollTop += direction * 24
+}
+
+// Real DOM focus follows the logical level/box so the terminal <input>
+// only actually captures keystrokes while the player is "inside" it --
+// otherwise Left/Right (elsewhere) or plain letters would land in the box
+// unexpectedly.
+function syncTerminalFocus() {
+  nextTick(() => {
+    if (level.value === 'inside' && activeBox.value === 'terminal') {
+      terminalInputEl.value?.focus()
+    } else {
+      terminalInputEl.value?.blur()
+    }
+  })
+}
+
+// Mouse-driven: clicking anywhere in a box makes it the active one for
+// keyboard purposes too, so switching between mouse and keyboard stays
+// coherent instead of the two tracking separate state.
+function focusBox(box) {
+  if (box !== activeBox.value) selectedIndex.value = -1
+  activeBox.value = box
+  level.value = 'inside'
+  syncTerminalFocus()
+}
+
+function cycleBox(direction) {
+  const idx = BOX_ORDER.indexOf(activeBox.value)
+  activeBox.value = BOX_ORDER[(idx + direction + BOX_ORDER.length) % BOX_ORDER.length]
+  selectedIndex.value = -1
+}
+
+// CSS class for a box's border/title depending on where it sits relative
+// to the current level -- 'box-selected' (level 2, highlighted but not
+// entered) vs 'box-active' (level 3, currently inside it).
+function boxStateClass(box) {
+  if (activeBox.value !== box) return {}
+  if (level.value === 'box') return { 'box-selected': true }
+  if (level.value === 'inside') return { 'box-active': true }
+  return {}
+}
+
+function submitTerminalCommand() {
+  const text = terminalInput.value.trim()
+  if (!text) return
+  logLines.value.push(text)
+  logLines.value.push('Command not recognized.')
+  terminalInput.value = ''
+  scrollLogToBottom()
 }
 
 async function loadCharacter() {
@@ -111,57 +171,106 @@ function backToGames() {
 }
 
 function onKeydown(e) {
+  // Escape always climbs one level, from wherever the player currently is.
   if (e.key === 'Escape') {
-    backToGames()
-    return
-  }
-  // Up/Down scroll the terminal regardless of warp state -- these aren't
-  // tied to whether there's anything to warp to.
-  if (e.key === 'ArrowUp') {
     e.preventDefault()
-    scrollLog(-1)
-    return
-  }
-  if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    scrollLog(1)
+    if (level.value === 'inside') {
+      level.value = 'box'
+      selectedIndex.value = -1
+      syncTerminalFocus()
+    } else if (level.value === 'box') {
+      level.value = 'chrome'
+    } else {
+      // Already at the outermost level -- back down to box level rather
+      // than a dead end; only Enter on EXIT from here actually leaves.
+      level.value = 'box'
+    }
     return
   }
 
-  if (navigating.value || connectedSectors.value.length === 0) return
-  const count = connectedSectors.value.length
+  // Chrome level: the only reachable thing is the EXIT button.
+  if (level.value === 'chrome') {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      backToGames()
+    }
+    return
+  }
 
-  switch (e.key) {
-    // Left/Right move the highlight along the warp row (wrapping).
-    case 'ArrowRight':
+  // Box level: arrows (any direction) or Tab cycle between boxes; Enter
+  // descends into the highlighted one.
+  if (level.value === 'box') {
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      cycleBox(e.shiftKey ? -1 : 1)
+      return
+    }
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      e.preventDefault()
+      cycleBox(1)
+      return
+    }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      cycleBox(-1)
+      return
+    }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      level.value = 'inside'
+      syncTerminalFocus()
+    }
+    return
+  }
+
+  // level === 'inside' -- behavior depends on which box.
+  if (activeBox.value === 'terminal') {
+    if (e.key === 'ArrowUp') { e.preventDefault(); scrollLog(-1); return }
+    if (e.key === 'ArrowDown') { e.preventDefault(); scrollLog(1); return }
+    if (e.key === 'Enter') { e.preventDefault(); submitTerminalCommand(); return }
+    return
+  }
+
+  if (activeBox.value === 'nav') {
+    if (navigating.value || connectedSectors.value.length === 0) return
+    const count = connectedSectors.value.length
+
+    if (e.key === 'ArrowRight' || e.key === 'Tab' && !e.shiftKey) {
       e.preventDefault()
       selectedIndex.value = selectedIndex.value === -1 ? 0 : (selectedIndex.value + 1) % count
       return
-    case 'ArrowLeft':
+    }
+    if (e.key === 'ArrowLeft' || e.key === 'Tab' && e.shiftKey) {
       e.preventDefault()
       selectedIndex.value = selectedIndex.value === -1 ? 0 : (selectedIndex.value - 1 + count) % count
       return
-    case 'Enter':
-    case ' ':
+    }
+    if (e.key === 'Enter' || e.key === ' ') {
       if (selectedIndex.value !== -1) {
         e.preventDefault()
         navigateTo(connectedSectors.value[selectedIndex.value])
       }
       return
+    }
+
+    // Number keys 1-6 are a direct fast path (jump straight to that button
+    // without needing to arrow over to it first) -- sectors can have at
+    // most 6 connections, so this always covers every option.
+    const hotkeyIndex = parseInt(e.key, 10) - 1
+    if (Number.isInteger(hotkeyIndex) && hotkeyIndex >= 0 && connectedSectors.value[hotkeyIndex]) {
+      selectedIndex.value = hotkeyIndex
+      navigateTo(connectedSectors.value[hotkeyIndex])
+    }
+    return
   }
 
-  // Number keys 1-6 are a direct fast path (jump straight to that button
-  // without needing to arrow over to it first) -- sectors can have at most
-  // 6 connections, so this always covers every option.
-  const hotkeyIndex = parseInt(e.key, 10) - 1
-  if (Number.isInteger(hotkeyIndex) && hotkeyIndex >= 0 && connectedSectors.value[hotkeyIndex]) {
-    selectedIndex.value = hotkeyIndex
-    navigateTo(connectedSectors.value[hotkeyIndex])
-  }
+  // viewport / scan: passive read-only boxes, nothing to do while inside
+  // them beyond Escape (handled above).
 }
 
-onMounted(() => {
-  loadCharacter()
+onMounted(async () => {
+  await loadCharacter()
+  syncTerminalFocus()
   window.addEventListener('keydown', onKeydown)
 })
 
@@ -194,8 +303,10 @@ onUnmounted(() => {
 
               <div class="crt-grid">
                 <!-- Viewport: what you'd see out the window -->
-                <div class="tui-panel panel-viewport">
-                  <span class="tui-panel-title">VIEWPORT</span>
+                <div class="tui-panel panel-viewport" :class="boxStateClass('viewport')" @click="focusBox('viewport')">
+                  <span class="tui-panel-title">
+                    <span v-if="activeBox === 'viewport' && level === 'inside'" aria-hidden="true">&#9658; </span><span v-if="activeBox === 'viewport' && level === 'box'" aria-hidden="true">[ </span>VIEWPORT<span v-if="activeBox === 'viewport' && level === 'box'" aria-hidden="true"> ]</span>
+                  </span>
                   <div class="tui-panel-body viewport-body">
                     <div class="starfield" aria-hidden="true">
                       <span
@@ -221,8 +332,10 @@ onUnmounted(() => {
                 </div>
 
                 <!-- Sector scan: structured "what's here" readout -->
-                <div class="tui-panel panel-scan">
-                  <span class="tui-panel-title">SECTOR SCAN</span>
+                <div class="tui-panel panel-scan" :class="boxStateClass('scan')" @click="focusBox('scan')">
+                  <span class="tui-panel-title">
+                    <span v-if="activeBox === 'scan' && level === 'inside'" aria-hidden="true">&#9658; </span><span v-if="activeBox === 'scan' && level === 'box'" aria-hidden="true">[ </span>SECTOR SCAN<span v-if="activeBox === 'scan' && level === 'box'" aria-hidden="true"> ]</span>
+                  </span>
                   <div class="tui-panel-body scan-body">
                     <p class="scan-row">SECTOR <strong>{{ currentSector ? currentSector.sector_number : '—' }}</strong></p>
                     <template v-if="sectorFeatures.length > 0">
@@ -236,19 +349,37 @@ onUnmounted(() => {
                   </div>
                 </div>
 
-                <!-- Log: chronological action history -->
-                <div class="tui-panel panel-log">
-                  <span class="tui-panel-title">TERMINAL</span>
+                <!-- Terminal: chronological action history + command input -->
+                <div class="tui-panel panel-log" :class="boxStateClass('terminal')" @click="focusBox('terminal')">
+                  <span class="tui-panel-title">
+                    <span v-if="activeBox === 'terminal' && level === 'inside'" aria-hidden="true">&#9658; </span><span v-if="activeBox === 'terminal' && level === 'box'" aria-hidden="true">[ </span>TERMINAL<span v-if="activeBox === 'terminal' && level === 'box'" aria-hidden="true"> ]</span>
+                  </span>
                   <div class="tui-panel-body log-body" ref="logEl">
                     <p v-for="(line, i) in logLines" :key="i" class="log-line">&gt; {{ line }}</p>
                     <p v-if="navError" class="log-line log-error">&gt; {{ navError }}</p>
-                    <p class="log-line"><span class="terminal-cursor" aria-hidden="true">_</span></p>
+                    <p class="log-line log-prompt">
+                      &gt;
+                      <input
+                        ref="terminalInputEl"
+                        v-model="terminalInput"
+                        class="terminal-input"
+                        type="text"
+                        maxlength="200"
+                        autocomplete="off"
+                        spellcheck="false"
+                        aria-label="Terminal command input"
+                        @keydown.enter.prevent="submitTerminalCommand"
+                      />
+                      <span class="terminal-cursor" aria-hidden="true">_</span>
+                    </p>
                   </div>
                 </div>
 
                 <!-- Navigation: current location + warp targets -->
-                <div class="tui-panel panel-nav">
-                  <span class="tui-panel-title">NAVIGATION</span>
+                <div class="tui-panel panel-nav" :class="boxStateClass('nav')" @click="focusBox('nav')">
+                  <span class="tui-panel-title">
+                    <span v-if="activeBox === 'nav' && level === 'inside'" aria-hidden="true">&#9658; </span><span v-if="activeBox === 'nav' && level === 'box'" aria-hidden="true">[ </span>NAVIGATION<span v-if="activeBox === 'nav' && level === 'box'" aria-hidden="true"> ]</span>
+                  </span>
                   <div class="tui-panel-body nav-body">
                     <div class="navbar-location">
                       SECTOR <span class="navbar-location-num">{{ currentSector ? currentSector.sector_number : '—' }}</span>
@@ -282,7 +413,7 @@ onUnmounted(() => {
           <span class="crt-led" aria-hidden="true"></span>
           <span class="crt-knob" aria-hidden="true"></span>
           <span class="crt-knob" aria-hidden="true"></span>
-          <button class="crt-exit-btn" @click="backToGames">&#9211; EXIT</button>
+          <button class="crt-exit-btn" :class="{ 'chrome-selected': level === 'chrome' }" @click="backToGames">&#9211; EXIT</button>
         </div>
       </div>
     </div>
@@ -496,6 +627,7 @@ onUnmounted(() => {
   border: 1px solid #2fd66e;
   display: flex;
   flex-direction: column;
+  cursor: pointer;
 }
 
 .tui-panel-title {
@@ -508,6 +640,38 @@ onUnmounted(() => {
   font-weight: 700;
   letter-spacing: 0.1em;
   color: #4dff88;
+}
+
+/* Box-level: this box is highlighted but not yet entered (keyboard
+   navigation between boxes). Amber, distinct from the "inside" green so
+   the two levels don't rely on brightness alone to tell apart. */
+.tui-panel.box-selected {
+  border-color: #ffcc55;
+  box-shadow: 0 0 8px 1px rgba(255, 204, 85, 0.5);
+}
+
+.tui-panel.box-selected .tui-panel-title {
+  color: #ffcc55;
+}
+
+/* Inside: keyboard input is currently routed to this box's own controls. */
+.tui-panel.box-active {
+  border-color: #baffcf;
+  box-shadow: 0 0 12px 2px rgba(77, 255, 136, 0.8);
+  animation: box-pulse 1.2s ease-in-out infinite;
+}
+
+.tui-panel.box-active .tui-panel-title {
+  color: #baffcf;
+}
+
+@keyframes box-pulse {
+  0%, 100% { box-shadow: 0 0 12px 2px rgba(77, 255, 136, 0.8); }
+  50% { box-shadow: 0 0 6px 1px rgba(77, 255, 136, 0.4); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tui-panel.box-active { animation: none; }
 }
 
 .tui-panel-body {
@@ -636,6 +800,26 @@ onUnmounted(() => {
 
 .log-error {
   color: #ff8a8a;
+}
+
+.log-prompt {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+}
+
+.terminal-input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  padding: 0;
+  color: #baffcf;
+  font-family: inherit;
+  font-size: inherit;
+  cursor: text;
 }
 
 /* ---- Navigation panel ---- */
@@ -819,6 +1003,17 @@ onUnmounted(() => {
 .crt-exit-btn:focus-visible {
   outline: 2px solid #05130a;
   outline-offset: 2px;
+}
+
+/* Chrome level: keyboard navigation has climbed all the way out to the
+   bezel -- EXIT is the only thing reachable here, and Enter activates it. */
+.crt-exit-btn.chrome-selected {
+  box-shadow: 0 0 0 2px #05130a, 0 0 10px 3px rgba(77, 255, 136, 0.8);
+  animation: warp-pulse 1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crt-exit-btn.chrome-selected { animation: none; }
 }
 
 /* Narrow viewports: let the bezel shrink further rather than clip */
