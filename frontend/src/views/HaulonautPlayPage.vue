@@ -1,5 +1,5 @@
 <script setup>
-import { ref, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
@@ -17,22 +17,28 @@ const navError = ref('')
 const logLines = ref([])
 const selectedIndex = ref(-1) // -1 = nothing highlighted; arrow keys move this, Enter confirms it
 const logEl = ref(null)
+const stars = ref([])
 
-const FEATURE_LABELS = { planet: 'a planet', trading_outpost: 'a trading outpost' }
+const FEATURE_LABELS = { planet: 'PLANET', trading_outpost: 'OUTPOST' }
 
-// Lines describing what's at a sector on arrival: its flavor text, what's
-// detected there (planets, outposts, ...), and who else is currently there.
-function arrivalLines(sector, features, players) {
-  const lines = []
-  if (sector?.description) lines.push(sector.description)
-  if (features.length > 0) {
-    const items = features.map(f => `${FEATURE_LABELS[f.feature_type] || f.feature_type} (${f.name})`)
-    lines.push(`Sensors detect: ${items.join(', ')}.`)
-  }
-  if (players.length > 0) {
-    lines.push(`Also here: ${players.map(p => p.display_name).join(', ')}.`)
-  }
-  return lines
+const planetFeature = computed(() => sectorFeatures.value.find(f => f.feature_type === 'planet') || null)
+const outpostFeature = computed(() => sectorFeatures.value.find(f => f.feature_type === 'trading_outpost') || null)
+
+// Deterministic-per-name hue so the same planet always renders the same
+// color when revisited, without needing to store a color anywhere.
+function hashHue(str) {
+  let hash = 0
+  for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) % 360
+  return hash
+}
+
+function regenerateStarfield() {
+  const count = 22 + Math.floor(Math.random() * 14)
+  stars.value = Array.from({ length: count }, () => ({
+    top: Math.random() * 100,
+    left: Math.random() * 100,
+    big: Math.random() < 0.15
+  }))
 }
 
 function scrollLogToBottom() {
@@ -53,11 +59,10 @@ async function loadCharacter() {
     connectedSectors.value = data.connectedSectors || []
     sectorFeatures.value = data.features || []
     playersHere.value = data.playersHere || []
+    regenerateStarfield()
     logLines.value = [
-      'DOCKING CONFIRMED',
-      data.currentSector ? `Currently in Sector ${data.currentSector.sector_number}.` : null,
-      ...arrivalLines(data.currentSector, sectorFeatures.value, playersHere.value),
-      'Use ←/→ to choose a warp target and ENTER to go, click a button, or press its number key.'
+      'Docking confirmed.',
+      data.currentSector ? `Arrived in Sector ${data.currentSector.sector_number}.` : null
     ].filter(Boolean)
     scrollLogToBottom()
   } catch (err) {
@@ -85,7 +90,8 @@ async function navigateTo(sector) {
     connectedSectors.value = data.connectedSectors || []
     sectorFeatures.value = data.features || []
     playersHere.value = data.playersHere || []
-    logLines.value.push(...arrivalLines(data.currentSector, sectorFeatures.value, playersHere.value))
+    regenerateStarfield()
+    logLines.value.push(`Arrived in Sector ${data.currentSector.sector_number}.`)
     selectedIndex.value = -1
     scrollLogToBottom()
   } catch (err) {
@@ -169,35 +175,91 @@ onUnmounted(() => {
             <div class="crt-scanlines" aria-hidden="true"></div>
             <div class="crt-glow" aria-hidden="true"></div>
             <div class="crt-content">
-              <div class="crt-log" ref="logEl">
-                <h1 class="terminal-name">{{ character.display_name }}</h1>
-                <p class="terminal-line">Status: <span class="status-active">{{ character.status }}</span></p>
-                <p v-for="(line, i) in logLines" :key="i" class="terminal-message">&gt; {{ line }}</p>
-                <p v-if="navError" class="terminal-error">&gt; {{ navError }}</p>
-                <p class="terminal-line"><span class="terminal-cursor" aria-hidden="true">_</span></p>
+              <div class="crt-header">
+                <span class="header-name">{{ character.display_name }}</span>
+                <span class="header-status">STATUS: <span class="status-active">{{ character.status.toUpperCase() }}</span></span>
               </div>
 
-              <div class="crt-navbar">
-                <div class="navbar-location">
-                  SECTOR <span class="navbar-location-num">{{ currentSector ? currentSector.sector_number : '—' }}</span>
+              <div class="crt-grid">
+                <!-- Viewport: what you'd see out the window -->
+                <div class="tui-panel panel-viewport">
+                  <span class="tui-panel-title">VIEWPORT</span>
+                  <div class="tui-panel-body viewport-body">
+                    <div class="starfield" aria-hidden="true">
+                      <span
+                        v-for="(star, i) in stars"
+                        :key="i"
+                        class="star"
+                        :class="{ big: star.big }"
+                        :style="{ top: star.top + '%', left: star.left + '%' }"
+                      ></span>
+                    </div>
+                    <div class="viewport-scene">
+                      <div v-if="planetFeature" class="viewport-object planet-object">
+                        <div class="planet-sphere" :style="{ background: `radial-gradient(circle at 35% 32%, hsl(${hashHue(planetFeature.name)},75%,68%), hsl(${hashHue(planetFeature.name)},60%,38%) 65%, hsl(${hashHue(planetFeature.name)},55%,18%) 100%)` }"></div>
+                        <span class="viewport-label">{{ planetFeature.name }}</span>
+                      </div>
+                      <div v-if="outpostFeature" class="viewport-object outpost-object">
+                        <div class="outpost-glyph" aria-hidden="true">&#9670;</div>
+                        <span class="viewport-label">{{ outpostFeature.name }}</span>
+                      </div>
+                    </div>
+                    <p v-if="currentSector?.description" class="viewport-caption">{{ currentSector.description }}</p>
+                  </div>
                 </div>
-                <div class="navbar-warps">
-                  <span class="navbar-label">WARP TO:</span>
-                  <template v-if="connectedSectors.length > 0">
-                    <button
-                      v-for="(s, i) in connectedSectors"
-                      :key="s.id"
-                      class="warp-btn"
-                      :class="{ selected: selectedIndex === i, visited: s.visited }"
-                      :disabled="navigating"
-                      :aria-label="`Warp to Sector ${s.sector_number} (key ${i + 1})${s.visited ? ', visited' : ', unexplored'}`"
-                      :aria-pressed="selectedIndex === i"
-                      @click="navigateTo(s)"
-                    >
-                      <span class="warp-cursor" aria-hidden="true">{{ selectedIndex === i ? '▶' : '' }}</span><span class="warp-hotkey" aria-hidden="true">{{ i + 1 }}</span>{{ s.sector_number }}<span v-if="s.visited" class="warp-visited-mark" aria-hidden="true">&middot;</span>
-                    </button>
-                  </template>
-                  <span v-else class="navbar-none">no warps available</span>
+
+                <!-- Sector scan: structured "what's here" readout -->
+                <div class="tui-panel panel-scan">
+                  <span class="tui-panel-title">SECTOR SCAN</span>
+                  <div class="tui-panel-body scan-body">
+                    <p class="scan-row">SECTOR <strong>{{ currentSector ? currentSector.sector_number : '—' }}</strong></p>
+                    <template v-if="sectorFeatures.length > 0">
+                      <p v-for="f in sectorFeatures" :key="f.id" class="scan-row">{{ FEATURE_LABELS[f.feature_type] || f.feature_type }}: {{ f.name }}</p>
+                    </template>
+                    <p v-else class="scan-row scan-empty">No contacts.</p>
+                    <template v-if="playersHere.length > 0">
+                      <p class="scan-row scan-divider">PILOTS:</p>
+                      <p v-for="p in playersHere" :key="p.id" class="scan-row">{{ p.display_name }}</p>
+                    </template>
+                  </div>
+                </div>
+
+                <!-- Log: chronological action history -->
+                <div class="tui-panel panel-log">
+                  <span class="tui-panel-title">LOG</span>
+                  <div class="tui-panel-body log-body" ref="logEl">
+                    <p v-for="(line, i) in logLines" :key="i" class="log-line">&gt; {{ line }}</p>
+                    <p v-if="navError" class="log-line log-error">&gt; {{ navError }}</p>
+                    <p class="log-line"><span class="terminal-cursor" aria-hidden="true">_</span></p>
+                  </div>
+                </div>
+
+                <!-- Navigation: current location + warp targets -->
+                <div class="tui-panel panel-nav">
+                  <span class="tui-panel-title">NAVIGATION</span>
+                  <div class="tui-panel-body nav-body">
+                    <div class="navbar-location">
+                      SECTOR <span class="navbar-location-num">{{ currentSector ? currentSector.sector_number : '—' }}</span>
+                    </div>
+                    <div class="navbar-warps">
+                      <span class="navbar-label">WARP TO:</span>
+                      <template v-if="connectedSectors.length > 0">
+                        <button
+                          v-for="(s, i) in connectedSectors"
+                          :key="s.id"
+                          class="warp-btn"
+                          :class="{ selected: selectedIndex === i, visited: s.visited }"
+                          :disabled="navigating"
+                          :aria-label="`Warp to Sector ${s.sector_number} (key ${i + 1})${s.visited ? ', visited' : ', unexplored'}`"
+                          :aria-pressed="selectedIndex === i"
+                          @click="navigateTo(s)"
+                        >
+                          <span class="warp-cursor" aria-hidden="true">{{ selectedIndex === i ? '▶' : '' }}</span><span class="warp-hotkey" aria-hidden="true">{{ i + 1 }}</span>{{ s.sector_number }}<span v-if="s.visited" class="warp-visited-mark" aria-hidden="true">&middot;</span>
+                        </button>
+                      </template>
+                      <span v-else class="navbar-none">no warps available</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -328,22 +390,12 @@ onUnmounted(() => {
   position: relative;
   height: 100%;
   box-sizing: border-box;
+  padding: clamp(8px, 2%, 16px);
   display: flex;
   flex-direction: column;
+  gap: clamp(6px, 1.5%, 12px);
   color: #4dff88;
   font-family: 'Courier New', Courier, monospace;
-}
-
-.crt-log {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: clamp(14px, 4%, 40px) clamp(14px, 4%, 40px) 8px;
-}
-
-.terminal-line {
-  margin: 0 0 10px;
-  color: #baffcf;
 }
 
 .terminal-cursor {
@@ -359,41 +411,218 @@ onUnmounted(() => {
   50%, 100% { opacity: 0; }
 }
 
-.terminal-name {
-  margin: 0 0 14px;
-  font-size: clamp(1.3rem, 4vw, 2rem);
-  letter-spacing: 0.05em;
-  text-shadow: 0 0 8px rgba(77, 255, 136, 0.6);
-}
-
 .status-active {
   color: #2fd66e;
   font-weight: 700;
-  text-transform: capitalize;
 }
 
-.terminal-message {
-  margin: 8px 0 0;
-  color: #8fe6ab;
-  line-height: 1.6;
-}
-
-.terminal-error {
-  margin: 8px 0 0;
-  color: #ff8a8a;
-  line-height: 1.6;
-}
-
-/* ---- Navigation bar ---- */
-.crt-navbar {
+/* ---- Header strip ---- */
+.crt-header {
   flex-shrink: 0;
-  border-top: 1px solid rgba(77, 255, 136, 0.3);
-  padding: clamp(10px, 2.5%, 20px) clamp(14px, 4%, 40px);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 2px;
+}
+
+.header-name {
+  font-size: clamp(0.9rem, 2.4vw, 1.2rem);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #baffcf;
+  text-shadow: 0 0 6px rgba(77, 255, 136, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header-status {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  color: #5fae7c;
+}
+
+/* ---- Panel grid ---- */
+.crt-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 190px;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 120px) auto;
+  grid-template-areas:
+    "viewport scan"
+    "log      log"
+    "nav      nav";
+  gap: clamp(6px, 1.5%, 12px);
+}
+
+.panel-viewport { grid-area: viewport; }
+.panel-scan { grid-area: scan; }
+.panel-log { grid-area: log; }
+.panel-nav { grid-area: nav; }
+
+@media (max-width: 560px) {
+  .crt-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(80px, 1fr) auto minmax(0, 80px) auto;
+    grid-template-areas:
+      "viewport"
+      "scan"
+      "log"
+      "nav";
+  }
+}
+
+/* ---- TUI panel chrome: a bordered box with its title cut into the
+   top edge, like text-mode "windows" from late-80s software ---- */
+.tui-panel {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid #2fd66e;
+  display: flex;
+  flex-direction: column;
+}
+
+.tui-panel-title {
+  position: absolute;
+  top: -8px;
+  left: 10px;
+  background: #05130a;
+  padding: 0 6px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #4dff88;
+}
+
+.tui-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 10px 8px;
+}
+
+/* ---- Viewport panel ---- */
+.viewport-body {
+  position: relative;
+  padding: 10px;
+}
+
+.starfield {
+  position: absolute;
+  inset: 0;
+}
+
+.star {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  background: #baffcf;
+  box-shadow: 0 0 2px 0.5px rgba(186, 255, 207, 0.8);
+}
+
+.star.big {
+  width: 2px;
+  height: 2px;
+  box-shadow: 0 0 3px 1px rgba(186, 255, 207, 0.9);
+}
+
+.viewport-scene {
+  position: relative;
+  height: calc(100% - 30px);
   display: flex;
   align-items: center;
-  gap: clamp(10px, 3%, 28px);
+  justify-content: center;
+  gap: 10%;
+}
+
+.viewport-object {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.planet-sphere {
+  width: clamp(46px, 14vw, 90px);
+  height: clamp(46px, 14vw, 90px);
+  border-radius: 50%;
+  box-shadow: 0 0 18px 2px rgba(255, 255, 255, 0.15), inset -6px -6px 14px rgba(0, 0, 0, 0.5);
+}
+
+.outpost-glyph {
+  font-size: clamp(22px, 6vw, 34px);
+  color: #baffcf;
+  text-shadow: 0 0 8px rgba(77, 255, 136, 0.7);
+}
+
+.viewport-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  color: #8fe6ab;
+  text-align: center;
+}
+
+.viewport-caption {
+  position: relative;
+  margin: 4px 0 0;
+  font-size: 0.72rem;
+  font-style: italic;
+  color: #6fbd8c;
+  text-align: center;
+}
+
+/* ---- Sector scan panel ---- */
+.scan-body {
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.scan-row {
+  margin: 0 0 4px;
+  color: #8fe6ab;
+}
+
+.scan-row strong {
+  color: #4dff88;
+}
+
+.scan-empty {
+  font-style: italic;
+  color: #5fae7c;
+}
+
+.scan-divider {
+  margin-top: 8px;
+  color: #5fae7c;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+}
+
+/* ---- Log panel ---- */
+.log-body {
+  font-size: 0.72rem;
+}
+
+.log-line {
+  margin: 0 0 6px;
+  color: #8fe6ab;
+  line-height: 1.5;
+}
+
+.log-error {
+  color: #ff8a8a;
+}
+
+/* ---- Navigation panel ---- */
+.nav-body {
+  display: flex;
+  align-items: center;
+  gap: clamp(10px, 3%, 24px);
   flex-wrap: wrap;
-  background: rgba(0, 0, 0, 0.25);
 }
 
 .navbar-location {
