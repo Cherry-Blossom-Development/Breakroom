@@ -1,14 +1,17 @@
 // Generates a new Haulonaut universe: creates a game_instances row, then
 // procedurally builds N sectors where every sector has between minLinks and
 // maxLinks connections to other sectors, with the whole map guaranteed
-// reachable from any sector (no isolated pockets). The graph algorithm
-// itself lives in utilities/haulonautUniverse.js, shared with the
-// game-admin "generate a new universe" API route -- this script just wires
-// it up for standalone CLI use.
+// reachable from any sector (no isolated pockets), each with a flavor
+// description and a randomized chance of holding a planet and/or trading
+// outpost. The graph algorithm and content generation live in
+// utilities/haulonautUniverse.js, shared with the game-admin "generate a
+// new universe" API route -- this script just wires it up for standalone
+// CLI use.
 //
 // Usage:
 //   node generate-haulonaut-universe.js [--name "Universe Name"] [--sectors 1000]
 //     [--min-links 1] [--max-links 6] [--avg-degree 3.5]
+//     [--planet-chance 0.05] [--outpost-chance 0.10]
 //
 // Insert sectors, then insert each undirected connection as two directed
 // rows (A->B and B->A) so "sectors reachable from here" is a single indexed
@@ -19,10 +22,13 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env.local') });
 
 const mysql = require('mysql2/promise');
-const { buildUniverseGraph } = require('../utilities/haulonautUniverse');
+const { buildUniverseGraph, generateSectorContent } = require('../utilities/haulonautUniverse');
 
 function parseArgs(argv) {
-  const args = { name: null, sectors: 1000, minLinks: 1, maxLinks: 6, avgDegree: 3.5 };
+  const args = {
+    name: null, sectors: 1000, minLinks: 1, maxLinks: 6, avgDegree: 3.5,
+    planetChance: 0.05, outpostChance: 0.10
+  };
   for (let i = 0; i < argv.length; i++) {
     switch (argv[i]) {
       case '--name': args.name = argv[++i]; break;
@@ -30,6 +36,8 @@ function parseArgs(argv) {
       case '--min-links': args.minLinks = parseInt(argv[++i], 10); break;
       case '--max-links': args.maxLinks = parseInt(argv[++i], 10); break;
       case '--avg-degree': args.avgDegree = parseFloat(argv[++i]); break;
+      case '--planet-chance': args.planetChance = parseFloat(argv[++i]); break;
+      case '--outpost-chance': args.outpostChance = parseFloat(argv[++i]); break;
       default: throw new Error(`Unknown argument: ${argv[i]}`);
     }
   }
@@ -60,6 +68,9 @@ async function main() {
     const { edges, stats } = buildUniverseGraph(args.sectors, args.minLinks, args.maxLinks, args.avgDegree);
     console.log(`Graph built: ${stats.edgeCount} connections, degree min=${stats.min} max=${stats.max} avg=${stats.avg.toFixed(2)}`);
 
+    console.log(`Rolling sector content: ${(args.planetChance * 100).toFixed(0)}% planet chance, ${(args.outpostChance * 100).toFixed(0)}% trading outpost chance...`);
+    const content = generateSectorContent(args.sectors, { planetChance: args.planetChance, outpostChance: args.outpostChance });
+
     await conn.beginTransaction();
 
     const [instanceResult] = await conn.query(
@@ -68,13 +79,13 @@ async function main() {
     );
     const instanceId = instanceResult.insertId;
 
-    // Insert sectors 1..N in batches.
+    // Insert sectors 1..N (with their flavor description) in batches.
     const sectorRows = [];
-    for (let n = 1; n <= args.sectors; n++) sectorRows.push([instanceId, n]);
+    for (let n = 1; n <= args.sectors; n++) sectorRows.push([instanceId, n, content[n - 1].description]);
     const SECTOR_BATCH = 500;
     for (let i = 0; i < sectorRows.length; i += SECTOR_BATCH) {
       const batch = sectorRows.slice(i, i + SECTOR_BATCH);
-      await conn.query('INSERT INTO haulonaut_sectors (game_instance_id, sector_number) VALUES ?', [batch]);
+      await conn.query('INSERT INTO haulonaut_sectors (game_instance_id, sector_number, description) VALUES ?', [batch]);
     }
 
     // Map sector_number (0-indexed in the graph) -> DB id.
@@ -99,6 +110,21 @@ async function main() {
       );
     }
 
+    // Every rolled feature (planet / trading outpost / ...) becomes a row.
+    const featureRows = [];
+    content.forEach((sc, i) => {
+      const sectorId = idByIndex[i];
+      for (const f of sc.features) featureRows.push([sectorId, f.feature_type, f.name, f.description]);
+    });
+    const FEATURE_BATCH = 500;
+    for (let i = 0; i < featureRows.length; i += FEATURE_BATCH) {
+      const batch = featureRows.slice(i, i + FEATURE_BATCH);
+      await conn.query(
+        'INSERT INTO haulonaut_sector_features (sector_id, feature_type, name, description) VALUES ?',
+        [batch]
+      );
+    }
+
     await conn.query(
       "UPDATE game_instances SET status = 'active', started_at = NOW() WHERE id = ?",
       [instanceId]
@@ -106,8 +132,12 @@ async function main() {
 
     await conn.commit();
 
+    const planetCount = featureRows.filter(r => r[1] === 'planet').length;
+    const outpostCount = featureRows.filter(r => r[1] === 'trading_outpost').length;
+
     console.log(`\nUniverse "${instanceName}" created: game_instances.id = ${instanceId}`);
     console.log(`${sectorRows.length} sectors, ${linkRows.length} directed links (${stats.edgeCount} undirected connections).`);
+    console.log(`${planetCount} planets, ${outpostCount} trading outposts.`);
   } catch (err) {
     await conn.rollback();
     console.error('Generation failed, rolled back:', err.message);

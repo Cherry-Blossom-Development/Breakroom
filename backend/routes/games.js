@@ -3,7 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
-const { buildUniverseGraph } = require('../utilities/haulonautUniverse');
+const { buildUniverseGraph, generateSectorContent } = require('../utilities/haulonautUniverse');
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -77,9 +77,11 @@ function buildBulkInsertQuery(table, columns, rows) {
   };
 }
 
-// Loads a character's current sector and every sector directly reachable
-// from it (haulonaut_sector_links stores both directions of each
-// connection, so this is a single indexed lookup). Shared by the
+// Loads a character's current sector (with its description), every sector
+// directly reachable from it (haulonaut_sector_links stores both
+// directions of each connection, so this is a single indexed lookup), what
+// features (planets, trading outposts, ...) are in the current sector, and
+// which other active characters are also there right now. Shared by the
 // character-fetch and navigate endpoints so both return the same shape.
 //
 // Self-healing: a character with no haulonaut_pilots row yet (spawned
@@ -88,7 +90,7 @@ function buildBulkInsertQuery(table, columns, rows) {
 // state to the player.
 async function loadPilotLocation(client, gameUserId) {
   let pilotResult = await client.query(
-    `SELECT hs.id, hs.sector_number
+    `SELECT hs.id, hs.sector_number, hs.description
      FROM haulonaut_pilots hp
      JOIN haulonaut_sectors hs ON hs.id = hp.current_sector_id
      WHERE hp.game_user_id = $1`,
@@ -97,7 +99,7 @@ async function loadPilotLocation(client, gameUserId) {
 
   if (pilotResult.rowCount === 0) {
     const spawned = await spawnPilotAtRandomSector(client, gameUserId);
-    if (!spawned) return { currentSector: null, connectedSectors: [] };
+    if (!spawned) return { currentSector: null, connectedSectors: [], features: [], playersHere: [] };
     pilotResult = { rows: [spawned] };
   }
 
@@ -112,18 +114,37 @@ async function loadPilotLocation(client, gameUserId) {
     [currentSector.id]
   );
 
-  return { currentSector, connectedSectors: linksResult.rows };
+  const featuresResult = await client.query(
+    'SELECT id, feature_type, name, description FROM haulonaut_sector_features WHERE sector_id = $1',
+    [currentSector.id]
+  );
+
+  const playersResult = await client.query(
+    `SELECT gu.id, gu.display_name
+     FROM game_users gu
+     JOIN haulonaut_pilots hp ON hp.game_user_id = gu.id
+     WHERE hp.current_sector_id = $1 AND gu.id != $2 AND gu.status = 'active'`,
+    [currentSector.id, gameUserId]
+  );
+
+  return {
+    currentSector,
+    connectedSectors: linksResult.rows,
+    features: featuresResult.rows,
+    playersHere: playersResult.rows
+  };
 }
 
 // Picks a random sector in the character's instance and creates their
-// haulonaut_pilots row there. Returns the sector { id, sector_number }, or
-// null if the character or its instance has no sectors at all.
+// haulonaut_pilots row there. Returns the sector { id, sector_number,
+// description }, or null if the character or its instance has no sectors
+// at all.
 async function spawnPilotAtRandomSector(client, gameUserId) {
   const gameUserResult = await client.query('SELECT game_instance_id FROM game_users WHERE id = $1', [gameUserId]);
   if (gameUserResult.rowCount === 0) return null;
 
   const randomSector = await client.query(
-    'SELECT id, sector_number FROM haulonaut_sectors WHERE game_instance_id = $1 ORDER BY RAND() LIMIT 1',
+    'SELECT id, sector_number, description FROM haulonaut_sectors WHERE game_instance_id = $1 ORDER BY RAND() LIMIT 1',
     [gameUserResult.rows[0].game_instance_id]
   );
   if (randomSector.rowCount === 0) return null;
@@ -285,9 +306,9 @@ router.get('/:gameKey/characters/:id', authenticate, async (req, res) => {
 
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
 
-    const { currentSector, connectedSectors } = await loadPilotLocation(client, req.params.id);
+    const { currentSector, connectedSectors, features, playersHere } = await loadPilotLocation(client, req.params.id);
 
-    res.json({ character: result.rows[0], currentSector, connectedSectors });
+    res.json({ character: result.rows[0], currentSector, connectedSectors, features, playersHere });
   } catch (err) {
     console.error('Error loading character:', err);
     res.status(500).json({ message: 'Failed to load character' });
@@ -336,9 +357,9 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
     );
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
 
-    const { currentSector, connectedSectors } = await loadPilotLocation(client, req.params.id);
+    const { currentSector, connectedSectors, features, playersHere } = await loadPilotLocation(client, req.params.id);
 
-    res.json({ currentSector, connectedSectors });
+    res.json({ currentSector, connectedSectors, features, playersHere });
   } catch (err) {
     console.error('Error navigating:', err);
     res.status(500).json({ message: 'Failed to navigate' });
@@ -438,8 +459,12 @@ router.post('/:gameKey/admin/instances/:instanceId/end', authenticate, requireGa
  * Game-admin only: generate a fresh universe for this game, alongside any
  * other instances currently active (does not end anything -- use
  * /admin/instances/:instanceId/end for that separately). Body: { name,
- * sectors, min_links, max_links, avg_degree } -- all optional, defaulting
- * to the same values the CLI generator script uses.
+ * sectors, min_links, max_links, avg_degree, planet_chance, outpost_chance }
+ * -- all optional, defaulting to the same values the CLI generator script
+ * uses. planet_chance/outpost_chance are per-sector independent
+ * probabilities (0-1) -- exposed here so a future admin UI for tuning them
+ * has somewhere to send values, even though today's form doesn't surface
+ * them yet.
  */
 router.post('/:gameKey/admin/universe', authenticate, requireGameAdmin, async (req, res) => {
   const name = (req.body.name || `Haulonaut Universe ${new Date().toISOString().slice(0, 19).replace('T', ' ')}`).trim();
@@ -447,14 +472,21 @@ router.post('/:gameKey/admin/universe', authenticate, requireGameAdmin, async (r
   const minLinks = parseInt(req.body.min_links, 10) || 1;
   const maxLinks = parseInt(req.body.max_links, 10) || 6;
   const avgDegree = parseFloat(req.body.avg_degree) || 3.5;
+  const planetChance = req.body.planet_chance !== undefined ? parseFloat(req.body.planet_chance) : 0.05;
+  const outpostChance = req.body.outpost_chance !== undefined ? parseFloat(req.body.outpost_chance) : 0.10;
 
   if (sectorCount < 10 || sectorCount > 5000) {
     return res.status(400).json({ message: 'sectors must be between 10 and 5000' });
   }
+  if (planetChance < 0 || planetChance > 1 || outpostChance < 0 || outpostChance > 1) {
+    return res.status(400).json({ message: 'planet_chance and outpost_chance must be between 0 and 1' });
+  }
 
   let graph;
+  let content;
   try {
     graph = buildUniverseGraph(sectorCount, minLinks, maxLinks, avgDegree);
+    content = generateSectorContent(sectorCount, { planetChance, outpostChance });
   } catch (err) {
     return res.status(400).json({ message: err.message });
   }
@@ -470,11 +502,11 @@ router.post('/:gameKey/admin/universe', authenticate, requireGameAdmin, async (r
     const instanceId = instanceResult.insertId;
 
     const sectorRows = [];
-    for (let n = 1; n <= sectorCount; n++) sectorRows.push([instanceId, n]);
+    for (let n = 1; n <= sectorCount; n++) sectorRows.push([instanceId, n, content[n - 1].description]);
     const SECTOR_BATCH = 500;
     for (let i = 0; i < sectorRows.length; i += SECTOR_BATCH) {
       const { sql, params } = buildBulkInsertQuery(
-        'haulonaut_sectors', ['game_instance_id', 'sector_number'], sectorRows.slice(i, i + SECTOR_BATCH)
+        'haulonaut_sectors', ['game_instance_id', 'sector_number', 'description'], sectorRows.slice(i, i + SECTOR_BATCH)
       );
       await client.query(sql, params);
     }
@@ -498,6 +530,19 @@ router.post('/:gameKey/admin/universe', authenticate, requireGameAdmin, async (r
       await client.query(sql, params);
     }
 
+    const featureRows = [];
+    content.forEach((sc, i) => {
+      const sectorId = idByIndex[i];
+      for (const f of sc.features) featureRows.push([sectorId, f.feature_type, f.name, f.description]);
+    });
+    const FEATURE_BATCH = 300;
+    for (let i = 0; i < featureRows.length; i += FEATURE_BATCH) {
+      const { sql, params } = buildBulkInsertQuery(
+        'haulonaut_sector_features', ['sector_id', 'feature_type', 'name', 'description'], featureRows.slice(i, i + FEATURE_BATCH)
+      );
+      await client.query(sql, params);
+    }
+
     await client.query(`UPDATE game_instances SET status = 'active', started_at = NOW() WHERE id = $1`, [instanceId]);
 
     await client.commit();
@@ -506,6 +551,8 @@ router.post('/:gameKey/admin/universe', authenticate, requireGameAdmin, async (r
       instance: { id: instanceId, name },
       sectorCount: sectorRows.length,
       linkCount: linkRows.length,
+      planetCount: featureRows.filter(r => r[1] === 'planet').length,
+      outpostCount: featureRows.filter(r => r[1] === 'trading_outpost').length,
       degreeStats: graph.stats
     });
   } catch (err) {

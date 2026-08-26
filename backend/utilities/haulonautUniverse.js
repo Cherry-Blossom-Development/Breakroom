@@ -120,4 +120,80 @@ function buildUniverseGraph(sectorCount, minLinks, maxLinks, avgDegree) {
   return { edges: allEdges, degree, stats: { min, max, avg, edgeCount: allEdges.length } };
 }
 
-module.exports = { buildUniverseGraph };
+// ---------------------------------------------------------------------
+// Sector content: flavor description + what's-here features (planets,
+// trading outposts, ...). Independent random rolls per sector -- a sector
+// can have a planet, an outpost, both, or neither.
+// ---------------------------------------------------------------------
+
+const SECTOR_DESCRIPTIONS = [
+  'A quiet stretch of open space, stars scattered thin.',
+  'Faint static crackles across your sensors -- old wreckage, long cold.',
+  'A slow-drifting field of ice fragments catches the starlight.',
+  'Empty space. Nothing registers on your scopes.',
+  'A dim red dwarf smolders in the distance.',
+  'Your instruments pick up faint gravitational echoes from something long gone.',
+  'A thin haze of ionized gas gives this sector a faint green glow.',
+  'The wreck of an old freighter tumbles slowly, stripped bare.',
+  'Silence. Even the background radiation feels quiet here.',
+  'A cluster of asteroids drifts in a lazy, ancient orbit.',
+  'Sensor ghosts flicker at the edge of your display -- probably nothing.',
+  'A faint subspace hum suggests a warp lane once ran through here.',
+  'Micrometeorites patter softly against the hull.',
+  'The stars here burn unusually bright.',
+  'Nothing but the hum of your own engines breaks the quiet.',
+  'A pocket of unusually warm space -- your hull temperature ticks up slightly.',
+  'An old distress beacon repeats on a dead channel, no response.',
+  'Cosmic dust catches your running lights like falling snow.'
+];
+
+const PLANET_PREFIXES = ['Xy', 'Ker', 'Vor', 'Tha', 'Nex', 'Or', 'Mal', 'Zan', 'Cor', 'Il', 'Dra', 'Sel'];
+const PLANET_SUFFIXES = ['os', 'ar', 'is', 'oth', 'une', 'ax', 'endor', 'ara', 'ion', 'yra', 'esh', 'oria'];
+
+const OUTPOST_NAMES = [
+  'Trading Outpost', 'Way Station', 'Supply Depot', 'Free Port', 'Exchange Post',
+  'Cargo Hub', 'Waypoint Market', 'Border Post', 'Relay Station', 'Trading Hub'
+];
+const OUTPOST_DESIGNATORS = ['Alpha', 'Beta', 'Gamma', 'Delta', 'Epsilon', 'Prime', 'Nine', 'Seven', 'Two', 'Zero'];
+
+function pick(list) {
+  return list[Math.floor(Math.random() * list.length)];
+}
+
+function randomSectorDescription() {
+  return pick(SECTOR_DESCRIPTIONS);
+}
+
+function randomPlanetName() {
+  return pick(PLANET_PREFIXES) + pick(PLANET_SUFFIXES);
+}
+
+function randomOutpostName() {
+  return `${pick(OUTPOST_NAMES)} ${pick(OUTPOST_DESIGNATORS)}`;
+}
+
+// Generates per-sector flavor description + a features list, independently
+// rolled per sector. Returns an array indexed the same way as
+// buildUniverseGraph's sectors (0..sectorCount-1):
+//   [{ description, features: [{ feature_type, name, description }] }, ...]
+//
+// planetChance/outpostChance default to the "1 in 20" / "2 in 20" starting
+// point from the original request. Exposed as parameters (not hardcoded)
+// so a future admin-configurable-parameters UI has something to plug into
+// without changing this function.
+function generateSectorContent(sectorCount, { planetChance = 0.05, outpostChance = 0.10 } = {}) {
+  const content = [];
+  for (let i = 0; i < sectorCount; i++) {
+    const features = [];
+    if (Math.random() < planetChance) {
+      features.push({ feature_type: 'planet', name: randomPlanetName(), description: null });
+    }
+    if (Math.random() < outpostChance) {
+      features.push({ feature_type: 'trading_outpost', name: randomOutpostName(), description: null });
+    }
+    content.push({ description: randomSectorDescription(), features });
+  }
+  return content;
+}
+
+module.exports = { buildUniverseGraph, generateSectorContent };

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
@@ -10,10 +10,36 @@ const error = ref('')
 const character = ref(null)
 const currentSector = ref(null)
 const connectedSectors = ref([])
+const sectorFeatures = ref([])
+const playersHere = ref([])
 const navigating = ref(false)
 const navError = ref('')
 const logLines = ref([])
 const selectedIndex = ref(-1) // -1 = nothing highlighted; arrow keys move this, Enter confirms it
+const logEl = ref(null)
+
+const FEATURE_LABELS = { planet: 'a planet', trading_outpost: 'a trading outpost' }
+
+// Lines describing what's at a sector on arrival: its flavor text, what's
+// detected there (planets, outposts, ...), and who else is currently there.
+function arrivalLines(sector, features, players) {
+  const lines = []
+  if (sector?.description) lines.push(sector.description)
+  if (features.length > 0) {
+    const items = features.map(f => `${FEATURE_LABELS[f.feature_type] || f.feature_type} (${f.name})`)
+    lines.push(`Sensors detect: ${items.join(', ')}.`)
+  }
+  if (players.length > 0) {
+    lines.push(`Also here: ${players.map(p => p.display_name).join(', ')}.`)
+  }
+  return lines
+}
+
+function scrollLogToBottom() {
+  nextTick(() => {
+    if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight
+  })
+}
 
 async function loadCharacter() {
   loading.value = true
@@ -25,12 +51,15 @@ async function loadCharacter() {
     character.value = data.character
     currentSector.value = data.currentSector
     connectedSectors.value = data.connectedSectors || []
+    sectorFeatures.value = data.features || []
+    playersHere.value = data.playersHere || []
     logLines.value = [
       'DOCKING CONFIRMED',
       data.currentSector ? `Currently in Sector ${data.currentSector.sector_number}.` : null,
-      'Your ship is fueled and ready. The universe awaits — gameplay coming soon.',
+      ...arrivalLines(data.currentSector, sectorFeatures.value, playersHere.value),
       'Use ←/→ to choose a warp target and ENTER to go, click a button, or press its number key.'
     ].filter(Boolean)
+    scrollLogToBottom()
   } catch (err) {
     error.value = err.message
   } finally {
@@ -54,7 +83,11 @@ async function navigateTo(sector) {
     logLines.value.push(`Warping to Sector ${sector.sector_number}...`)
     currentSector.value = data.currentSector
     connectedSectors.value = data.connectedSectors || []
+    sectorFeatures.value = data.features || []
+    playersHere.value = data.playersHere || []
+    logLines.value.push(...arrivalLines(data.currentSector, sectorFeatures.value, playersHere.value))
     selectedIndex.value = -1
+    scrollLogToBottom()
   } catch (err) {
     navError.value = err.message
   } finally {
@@ -136,7 +169,7 @@ onUnmounted(() => {
             <div class="crt-scanlines" aria-hidden="true"></div>
             <div class="crt-glow" aria-hidden="true"></div>
             <div class="crt-content">
-              <div class="crt-log">
+              <div class="crt-log" ref="logEl">
                 <h1 class="terminal-name">{{ character.display_name }}</h1>
                 <p class="terminal-line">Status: <span class="status-active">{{ character.status }}</span></p>
                 <p v-for="(line, i) in logLines" :key="i" class="terminal-message">&gt; {{ line }}</p>
