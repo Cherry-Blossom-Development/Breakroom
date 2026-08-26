@@ -15,7 +15,7 @@ const playersHere = ref([])
 const navigating = ref(false)
 const navError = ref('')
 const logLines = ref([])
-const selectedIndex = ref(-1) // -1 = nothing highlighted; arrow keys move this, Enter confirms it
+const selectedIndex = ref(-1) // -1 = nothing highlighted; Left/Right move this, Enter confirms it
 const logEl = ref(null)
 const stars = ref([])
 
@@ -45,6 +45,11 @@ function scrollLogToBottom() {
   nextTick(() => {
     if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight
   })
+}
+
+// One roughly-line-height nudge per arrow press, for keyboard scrolling.
+function scrollLog(direction) {
+  if (logEl.value) logEl.value.scrollTop += direction * 24
 }
 
 async function loadCharacter() {
@@ -110,13 +115,24 @@ function onKeydown(e) {
     backToGames()
     return
   }
+  // Up/Down scroll the terminal regardless of warp state -- these aren't
+  // tied to whether there's anything to warp to.
+  if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    scrollLog(-1)
+    return
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    scrollLog(1)
+    return
+  }
+
   if (navigating.value || connectedSectors.value.length === 0) return
   const count = connectedSectors.value.length
 
   switch (e.key) {
-    // Down (or Right) enters/advances the highlight along the warp row;
-    // Up backs it back out to "nothing selected".
-    case 'ArrowDown':
+    // Left/Right move the highlight along the warp row (wrapping).
     case 'ArrowRight':
       e.preventDefault()
       selectedIndex.value = selectedIndex.value === -1 ? 0 : (selectedIndex.value + 1) % count
@@ -124,10 +140,6 @@ function onKeydown(e) {
     case 'ArrowLeft':
       e.preventDefault()
       selectedIndex.value = selectedIndex.value === -1 ? 0 : (selectedIndex.value - 1 + count) % count
-      return
-    case 'ArrowUp':
-      e.preventDefault()
-      selectedIndex.value = -1
       return
     case 'Enter':
     case ' ':
@@ -226,7 +238,7 @@ onUnmounted(() => {
 
                 <!-- Log: chronological action history -->
                 <div class="tui-panel panel-log">
-                  <span class="tui-panel-title">LOG</span>
+                  <span class="tui-panel-title">TERMINAL</span>
                   <div class="tui-panel-body log-body" ref="logEl">
                     <p v-for="(line, i) in logLines" :key="i" class="log-line">&gt; {{ line }}</p>
                     <p v-if="navError" class="log-line log-error">&gt; {{ navError }}</p>
@@ -503,6 +515,15 @@ onUnmounted(() => {
   min-height: 0;
   overflow: auto;
   padding: 12px 10px 8px;
+  /* Scroll wheel and keyboard scrolling still work -- only the visible
+     scrollbar track/thumb is hidden, since scrollbars didn't exist on the
+     computers this is meant to evoke. */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* legacy Edge/IE */
+}
+
+.tui-panel-body::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, modern Edge */
 }
 
 /* ---- Viewport panel ---- */
