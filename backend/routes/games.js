@@ -127,12 +127,30 @@ async function loadPilotLocation(client, gameUserId) {
     [currentSector.id, gameUserId]
   );
 
+  const visitedResult = await client.query(
+    'SELECT sector_id FROM haulonaut_visited_sectors WHERE game_user_id = $1',
+    [gameUserId]
+  );
+  const visitedIds = new Set(visitedResult.rows.map(r => r.sector_id));
+  const connectedSectors = linksResult.rows.map(s => ({ ...s, visited: visitedIds.has(s.id) }));
+
   return {
     currentSector,
-    connectedSectors: linksResult.rows,
+    connectedSectors,
     features: featuresResult.rows,
     playersHere: playersResult.rows
   };
+}
+
+// Records that a character has been to a sector (first visit creates the
+// row; later visits just bump last_visited_at). Drives the "you've been
+// here before" highlight on the warp buttons.
+async function markSectorVisited(client, gameUserId, sectorId) {
+  await client.query(
+    `INSERT INTO haulonaut_visited_sectors (game_user_id, sector_id) VALUES ($1, $2)
+     ON DUPLICATE KEY UPDATE last_visited_at = NOW()`,
+    [gameUserId, sectorId]
+  );
 }
 
 // Picks a random sector in the character's instance and creates their
@@ -153,6 +171,7 @@ async function spawnPilotAtRandomSector(client, gameUserId) {
     'INSERT IGNORE INTO haulonaut_pilots (game_user_id, current_sector_id) VALUES ($1, $2)',
     [gameUserId, randomSector.rows[0].id]
   );
+  await markSectorVisited(client, gameUserId, randomSector.rows[0].id);
 
   return randomSector.rows[0];
 }
@@ -266,6 +285,7 @@ router.post('/:gameKey/characters', authenticate, async (req, res) => {
       'INSERT INTO haulonaut_pilots (game_user_id, current_sector_id) VALUES ($1, $2)',
       [insertResult.insertId, startSector.rows[0].id]
     );
+    await markSectorVisited(client, insertResult.insertId, startSector.rows[0].id);
 
     await client.commit();
 
@@ -355,6 +375,7 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
       'UPDATE haulonaut_pilots SET current_sector_id = $1 WHERE game_user_id = $2',
       [toSectorId, req.params.id]
     );
+    await markSectorVisited(client, req.params.id, toSectorId);
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
 
     const { currentSector, connectedSectors, features, playersHere } = await loadPilotLocation(client, req.params.id);

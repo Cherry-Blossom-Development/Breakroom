@@ -188,13 +188,13 @@ onUnmounted(() => {
                       v-for="(s, i) in connectedSectors"
                       :key="s.id"
                       class="warp-btn"
-                      :class="{ selected: selectedIndex === i }"
+                      :class="{ selected: selectedIndex === i, visited: s.visited }"
                       :disabled="navigating"
-                      :aria-label="`Warp to Sector ${s.sector_number} (key ${i + 1})`"
+                      :aria-label="`Warp to Sector ${s.sector_number} (key ${i + 1})${s.visited ? ', visited' : ', unexplored'}`"
                       :aria-pressed="selectedIndex === i"
                       @click="navigateTo(s)"
                     >
-                      <span class="warp-cursor" aria-hidden="true">{{ selectedIndex === i ? '▶' : '' }}</span><span class="warp-hotkey" aria-hidden="true">{{ i + 1 }}</span>{{ s.sector_number }}
+                      <span class="warp-cursor" aria-hidden="true">{{ selectedIndex === i ? '▶' : '' }}</span><span class="warp-hotkey" aria-hidden="true">{{ i + 1 }}</span>{{ s.sector_number }}<span v-if="s.visited" class="warp-visited-mark" aria-hidden="true">&middot;</span>
                     </button>
                   </template>
                   <span v-else class="navbar-none">no warps available</span>
@@ -450,6 +450,20 @@ onUnmounted(() => {
   display: inline-block;
   width: 9px;
   text-align: center;
+  color: #05130a;
+}
+
+.warp-btn.visited {
+  background: rgba(77, 255, 136, 0.22);
+}
+
+.warp-visited-mark {
+  color: #8fe6ab;
+  font-weight: 900;
+  margin-left: 1px;
+}
+
+.warp-btn.selected .warp-visited-mark {
   color: #05130a;
 }
 
