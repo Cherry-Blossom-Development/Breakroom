@@ -158,6 +158,21 @@ async function loadPilotLocation(client, gameUserId) {
   };
 }
 
+// Every non-zero-quantity item a character currently owns, joined against
+// the catalog for display. Rations deliberately never appear here -- see
+// the comment on the 'rations' special-case in the /purchase route.
+async function loadInventory(client, gameUserId) {
+  const result = await client.query(
+    `SELECT i.item_key, i.name, i.category, hi.quantity
+     FROM haulonaut_pilot_inventory hi
+     JOIN haulonaut_items i ON i.id = hi.item_id
+     WHERE hi.game_user_id = $1 AND hi.quantity > 0
+     ORDER BY i.category, i.name`,
+    [gameUserId]
+  );
+  return result.rows;
+}
+
 // Records that a character has been to a sector (first visit creates the
 // row; later visits just bump last_visited_at). Drives the "you've been
 // here before" highlight on the warp buttons.
@@ -346,8 +361,9 @@ router.get('/:gameKey/characters/:id', authenticate, async (req, res) => {
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
 
     const { currentSector, connectedSectors, features, playersHere, credits, rations } = await loadPilotLocation(client, req.params.id);
+    const inventory = await loadInventory(client, req.params.id);
 
-    res.json({ character: result.rows[0], currentSector, connectedSectors, features, playersHere, credits, rations });
+    res.json({ character: result.rows[0], currentSector, connectedSectors, features, playersHere, credits, rations, inventory });
   } catch (err) {
     console.error('Error loading character:', err);
     res.status(500).json({ message: 'Failed to load character' });
@@ -409,6 +425,116 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
   } catch (err) {
     console.error('Error navigating:', err);
     res.status(500).json({ message: 'Failed to navigate' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * GET /api/games/:gameKey/items
+ * The full item catalog -- global to the game, not per-instance or
+ * per-outpost (see migration 060). Any authenticated user can read it,
+ * same as game info itself; it's not tied to a specific character.
+ */
+router.get('/:gameKey/items', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const gameResult = await client.query('SELECT id FROM games WHERE game_key = $1', [req.params.gameKey]);
+    if (gameResult.rowCount === 0) return res.status(404).json({ message: 'Game not found' });
+
+    const itemsResult = await client.query(
+      'SELECT id, item_key, name, category, description, base_price FROM haulonaut_items ORDER BY category, base_price'
+    );
+    res.json({ items: itemsResult.rows });
+  } catch (err) {
+    console.error('Error loading items:', err);
+    res.status(500).json({ message: 'Failed to load items' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/characters/:id/purchase
+ * Buy one item from whatever outpost is in the character's current
+ * sector. Body: { item_key, quantity } -- quantity optional, defaults to
+ * 1, clamped to 1-99. Rejects the purchase unless the character is
+ * actually standing in a sector with a trading_outpost feature (re-checked
+ * server-side, not trusted from the client), and unless they can afford
+ * base_price * quantity in credits.
+ *
+ * 'rations' is a special case: it adds straight to haulonaut_pilots.rations
+ * instead of becoming an inventory row, since rations are already a
+ * top-level pilot stat shown in the HUD -- see migration 060's comment.
+ * Every other item goes into haulonaut_pilot_inventory.
+ */
+router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) => {
+  const itemKey = (req.body.item_key || '').trim();
+  const quantity = Math.min(99, Math.max(1, parseInt(req.body.quantity, 10) || 1));
+  if (!itemKey) return res.status(400).json({ message: 'item_key is required' });
+
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+
+    const pilotResult = await client.query(
+      'SELECT current_sector_id, credits FROM haulonaut_pilots WHERE game_user_id = $1',
+      [req.params.id]
+    );
+    if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
+
+    const outpostCheck = await client.query(
+      `SELECT 1 FROM haulonaut_sector_features WHERE sector_id = $1 AND feature_type = 'trading_outpost'`,
+      [pilotResult.rows[0].current_sector_id]
+    );
+    if (outpostCheck.rowCount === 0) return res.status(409).json({ message: 'No outpost in this sector' });
+
+    const itemResult = await client.query(
+      'SELECT id, item_key, name, base_price FROM haulonaut_items WHERE item_key = $1',
+      [itemKey]
+    );
+    if (itemResult.rowCount === 0) return res.status(404).json({ message: 'Item not found' });
+    const item = itemResult.rows[0];
+
+    const totalCost = item.base_price * quantity;
+    if (pilotResult.rows[0].credits < totalCost) return res.status(400).json({ message: 'Not enough credits' });
+
+    await client.beginTransaction();
+
+    await client.query('UPDATE haulonaut_pilots SET credits = credits - $1 WHERE game_user_id = $2', [totalCost, req.params.id]);
+
+    if (item.item_key === 'rations') {
+      await client.query('UPDATE haulonaut_pilots SET rations = rations + $1 WHERE game_user_id = $2', [quantity, req.params.id]);
+    } else {
+      await client.query(
+        `INSERT INTO haulonaut_pilot_inventory (game_user_id, item_id, quantity) VALUES ($1, $2, $3)
+         ON DUPLICATE KEY UPDATE quantity = quantity + $3`,
+        [req.params.id, item.id, quantity]
+      );
+    }
+
+    await client.commit();
+
+    const pilotAfter = await client.query('SELECT credits, rations FROM haulonaut_pilots WHERE game_user_id = $1', [req.params.id]);
+    const inventory = await loadInventory(client, req.params.id);
+
+    res.json({
+      message: `Purchased ${quantity} ${item.name}`,
+      credits: pilotAfter.rows[0].credits,
+      rations: pilotAfter.rows[0].rations,
+      inventory
+    });
+  } catch (err) {
+    await client.rollback();
+    console.error('Error purchasing item:', err);
+    res.status(500).json({ message: 'Failed to purchase item' });
   } finally {
     client.release();
   }

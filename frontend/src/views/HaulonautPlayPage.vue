@@ -14,6 +14,11 @@ const sectorFeatures = ref([])
 const playersHere = ref([])
 const credits = ref(0)
 const rations = ref(0)
+const inventory = ref([])
+const itemsCatalog = ref([])
+const viewportMode = ref('space') // 'space' (starfield/planet view) or 'outpost' (browsing what's for sale)
+const purchasing = ref(false)
+const purchaseError = ref('')
 const navigating = ref(false)
 const navError = ref('')
 const logLines = ref([])
@@ -45,6 +50,18 @@ const actionItems = computed(() => {
   if (planetFeature.value) items.push({ key: 'planet_overview', label: 'Planet Overview' })
   return items
 })
+
+// The catalog plus a trailing "leave" entry, so the outpost view's list
+// uses the same 1-based hotkey/arrow-cycle convention as the nav and
+// actions boxes without a separate special case for leaving.
+const outpostMenuItems = computed(() => [
+  ...itemsCatalog.value,
+  { item_key: '__leave', name: 'Leave Outpost', base_price: null }
+])
+
+function inventoryQuantity(itemKey) {
+  return inventory.value.find(i => i.item_key === itemKey)?.quantity || 0
+}
 
 // Deterministic-per-name hue so the same planet always renders the same
 // color when revisited, without needing to store a color anywhere.
@@ -114,15 +131,60 @@ function boxStateClass(box) {
   return {}
 }
 
-// Actions are placeholders until outposts/planets have real systems behind
-// them -- logs a stub notice to the terminal rather than doing nothing.
+// "Visit Outpost" switches the viewport into outpost mode (everything else
+// on screen stays the same); "Planet Overview" has no real system behind
+// it yet, so it just logs a stub notice.
 function performAction(item) {
   if (item.key === 'visit_outpost') {
-    logLines.value.push('Outpost docking is not available yet.')
+    viewportMode.value = 'outpost'
+    purchaseError.value = ''
+    selectedIndex.value = -1
+    logLines.value.push(`Docking at ${outpostFeature.value ? outpostFeature.value.name : 'the outpost'}.`)
   } else if (item.key === 'planet_overview') {
     logLines.value.push('Planetary survey systems are not available yet.')
   }
   scrollLogToBottom()
+}
+
+function leaveOutpost() {
+  viewportMode.value = 'space'
+  selectedIndex.value = -1
+  purchaseError.value = ''
+  logLines.value.push('Departing the outpost.')
+  scrollLogToBottom()
+}
+
+async function purchaseItem(entry) {
+  if (purchasing.value) return
+  purchasing.value = true
+  purchaseError.value = ''
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/purchase`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item_key: entry.item_key, quantity: 1 })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Purchase failed')
+    credits.value = data.credits
+    rations.value = data.rations
+    inventory.value = data.inventory || []
+    logLines.value.push(`Purchased 1 ${entry.name}. (-${entry.base_price} Credits)`)
+    scrollLogToBottom()
+  } catch (err) {
+    purchaseError.value = err.message
+  } finally {
+    purchasing.value = false
+  }
+}
+
+function activateOutpostItem(entry) {
+  if (entry.item_key === '__leave') {
+    leaveOutpost()
+  } else {
+    purchaseItem(entry)
+  }
 }
 
 function submitTerminalCommand() {
@@ -148,6 +210,7 @@ async function loadCharacter() {
     playersHere.value = data.playersHere || []
     credits.value = data.credits || 0
     rations.value = data.rations || 0
+    inventory.value = data.inventory || []
     regenerateStarfield()
     logLines.value = [
       'Docking confirmed.',
@@ -158,6 +221,17 @@ async function loadCharacter() {
     error.value = err.message
   } finally {
     loading.value = false
+  }
+}
+
+async function loadItemsCatalog() {
+  try {
+    const res = await fetch('/api/games/haulonaut/items', { credentials: 'include' })
+    if (!res.ok) return
+    const data = await res.json()
+    itemsCatalog.value = data.items || []
+  } catch {
+    // Non-fatal -- the outpost view just shows nothing for sale if this fails.
   }
 }
 
@@ -181,6 +255,7 @@ async function navigateTo(sector) {
     playersHere.value = data.playersHere || []
     credits.value = data.credits || 0
     rations.value = data.rations || 0
+    viewportMode.value = 'space'
     regenerateStarfield()
     logLines.value.push(`Arrived in Sector ${data.currentSector.sector_number}.`)
     selectedIndex.value = -1
@@ -321,12 +396,46 @@ function onKeydown(e) {
     return
   }
 
-  // viewport / scan: passive read-only boxes, nothing to do while inside
-  // them beyond Escape (handled above).
+  if (activeBox.value === 'viewport') {
+    // Space view is passive/read-only; only outpost mode has anything to
+    // navigate, mirroring the actions/nav boxes' own arrow+hotkey pattern.
+    if (viewportMode.value !== 'outpost') return
+    const items = outpostMenuItems.value
+    if (items.length === 0) return
+    const count = items.length
+
+    if (e.key === 'ArrowDown' || e.key === 'Tab' && !e.shiftKey) {
+      e.preventDefault()
+      selectedIndex.value = selectedIndex.value === -1 ? 0 : (selectedIndex.value + 1) % count
+      return
+    }
+    if (e.key === 'ArrowUp' || e.key === 'Tab' && e.shiftKey) {
+      e.preventDefault()
+      selectedIndex.value = selectedIndex.value === -1 ? 0 : (selectedIndex.value - 1 + count) % count
+      return
+    }
+    if (e.key === 'Enter' || e.key === ' ') {
+      if (selectedIndex.value !== -1) {
+        e.preventDefault()
+        activateOutpostItem(items[selectedIndex.value])
+      }
+      return
+    }
+
+    const hotkeyIndex = parseInt(e.key, 10) - 1
+    if (Number.isInteger(hotkeyIndex) && hotkeyIndex >= 0 && items[hotkeyIndex]) {
+      selectedIndex.value = hotkeyIndex
+      activateOutpostItem(items[hotkeyIndex])
+    }
+    return
+  }
+
+  // scan: a passive read-only box, nothing to do while inside it beyond
+  // Escape (handled above).
 }
 
 onMounted(async () => {
-  await loadCharacter()
+  await Promise.all([loadCharacter(), loadItemsCatalog()])
   syncTerminalFocus()
   window.addEventListener('keydown', onKeydown)
 })
@@ -372,7 +481,28 @@ onUnmounted(() => {
                   <span class="tui-panel-title">
                     <span v-if="activeBox === 'viewport' && level === 'inside'" aria-hidden="true">&#9658; </span><span v-if="activeBox === 'viewport' && level === 'box'" aria-hidden="true">[ </span>VIEWPORT<span v-if="activeBox === 'viewport' && level === 'box'" aria-hidden="true"> ]</span>
                   </span>
-                  <div class="tui-panel-body viewport-body">
+                  <div v-if="viewportMode === 'outpost'" class="tui-panel-body outpost-body">
+                    <p class="outpost-heading">{{ outpostFeature ? outpostFeature.name.toUpperCase() : 'TRADING OUTPOST' }}</p>
+                    <div class="outpost-items">
+                      <button
+                        v-for="(entry, i) in outpostMenuItems"
+                        :key="entry.item_key"
+                        class="outpost-item-btn"
+                        :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.item_key === '__leave' }"
+                        :disabled="purchasing"
+                        :aria-pressed="selectedIndex === i"
+                        @click="activateOutpostItem(entry)"
+                      >
+                        <span class="outpost-item-hotkey" aria-hidden="true">{{ i + 1 }}</span>
+                        <span class="outpost-item-name">{{ entry.name }}</span>
+                        <span v-if="entry.item_key !== '__leave' && inventoryQuantity(entry.item_key) > 0" class="outpost-item-owned">owned {{ inventoryQuantity(entry.item_key) }}</span>
+                        <span v-if="entry.base_price !== null" class="outpost-item-price" aria-hidden="true">&#164;{{ entry.base_price }}</span>
+                      </button>
+                    </div>
+                    <p v-if="purchaseError" class="outpost-error">{{ purchaseError }}</p>
+                  </div>
+
+                  <div v-else class="tui-panel-body viewport-body">
                     <div class="starfield" aria-hidden="true">
                       <span
                         v-for="(star, i) in stars"
@@ -883,6 +1013,123 @@ onUnmounted(() => {
   font-style: italic;
   color: #6fbd8c;
   text-align: center;
+}
+
+/* ---- Viewport panel: outpost mode -- replaces the starfield/planet
+   scene entirely while browsing what an outpost has for sale ---- */
+.outpost-body {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.outpost-heading {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #baffcf;
+  text-shadow: 0 0 6px rgba(77, 255, 136, 0.5);
+}
+
+.outpost-items {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.outpost-item-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(77, 255, 136, 0.08);
+  border: 1px solid #2fd66e;
+  color: #baffcf;
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.outpost-item-hotkey {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  background: rgba(186, 255, 207, 0.15);
+  color: #8fe6ab;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.outpost-item-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.outpost-item-owned {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 400;
+  font-style: italic;
+  color: #8fe6ab;
+}
+
+.outpost-item-price {
+  flex-shrink: 0;
+}
+
+.outpost-item-btn:hover:not(:disabled) {
+  background: #4dff88;
+  color: #05130a;
+}
+
+.outpost-item-btn:hover:not(:disabled) .outpost-item-hotkey {
+  background: rgba(5, 19, 10, 0.25);
+  color: #05130a;
+}
+
+.outpost-item-btn:focus-visible {
+  outline: 2px solid #baffcf;
+  outline-offset: 2px;
+}
+
+.outpost-item-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.outpost-item-btn.selected {
+  background: #4dff88;
+  color: #05130a;
+  border-color: #baffcf;
+  box-shadow: 0 0 10px 2px rgba(77, 255, 136, 0.7);
+  animation: warp-pulse 1s ease-in-out infinite;
+}
+
+.outpost-item-btn.selected .outpost-item-hotkey {
+  background: rgba(5, 19, 10, 0.25);
+  color: #05130a;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .outpost-item-btn.selected { animation: none; }
+}
+
+.outpost-item-btn.outpost-leave-btn {
+  border-style: dashed;
+  color: #8fe6ab;
+}
+
+.outpost-error {
+  font-size: 0.75rem;
+  color: #ff8a8a;
 }
 
 /* ---- Sector scan panel ---- */
