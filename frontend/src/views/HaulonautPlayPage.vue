@@ -35,7 +35,7 @@ const terminalInputEl = ref(null)
 // activates EXIT at the chrome level). Starts 'inside' the terminal.
 const level = ref('inside')
 const activeBox = ref('terminal')
-const BOX_ORDER = ['viewport', 'scan', 'actions', 'terminal', 'nav']
+const BOX_ORDER = ['viewport', 'scan', 'actions', 'terminal', 'nav', 'cargo']
 
 const FEATURE_LABELS = { planet: 'PLANET', trading_outpost: 'OUTPOST' }
 
@@ -430,8 +430,8 @@ function onKeydown(e) {
     return
   }
 
-  // scan: a passive read-only box, nothing to do while inside it beyond
-  // Escape (handled above).
+  // scan / cargo: passive read-only boxes, nothing to do while inside
+  // them beyond Escape (handled above).
 }
 
 onMounted(async () => {
@@ -620,6 +620,21 @@ onUnmounted(() => {
                       </template>
                       <span v-else class="navbar-none">no warps available</span>
                     </div>
+                  </div>
+                </div>
+
+                <!-- Cargo: everything owned beyond the ship's ambient credits/rations -->
+                <div class="tui-panel panel-cargo" :class="boxStateClass('cargo')" @click="focusBox('cargo')">
+                  <span class="tui-panel-title">
+                    <span v-if="activeBox === 'cargo' && level === 'inside'" aria-hidden="true">&#9658; </span><span v-if="activeBox === 'cargo' && level === 'box'" aria-hidden="true">[ </span>CARGO<span v-if="activeBox === 'cargo' && level === 'box'" aria-hidden="true"> ]</span>
+                  </span>
+                  <div class="tui-panel-body cargo-body">
+                    <template v-if="inventory.length > 0">
+                      <span v-for="entry in inventory" :key="entry.item_key" class="cargo-chip">
+                        {{ entry.name }} <span class="cargo-chip-qty">&times;{{ entry.quantity }}</span>
+                      </span>
+                    </template>
+                    <span v-else class="cargo-empty">Cargo hold is empty.</span>
                   </div>
                 </div>
               </div>
@@ -845,12 +860,13 @@ onUnmounted(() => {
   min-height: 0;
   display: grid;
   grid-template-columns: 1fr 190px;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 96px) minmax(0, 120px) auto;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 96px) minmax(0, 120px) auto auto;
   grid-template-areas:
     "viewport scan"
     "viewport actions"
     "log      log"
-    "nav      nav";
+    "nav      nav"
+    "cargo    cargo";
   gap: clamp(6px, 1.5%, 12px);
 }
 
@@ -859,17 +875,19 @@ onUnmounted(() => {
 .panel-actions { grid-area: actions; }
 .panel-log { grid-area: log; }
 .panel-nav { grid-area: nav; }
+.panel-cargo { grid-area: cargo; }
 
 @media (max-width: 560px) {
   .crt-grid {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(80px, 1fr) auto auto minmax(0, 80px) auto;
+    grid-template-rows: minmax(80px, 1fr) auto auto minmax(0, 80px) auto auto;
     grid-template-areas:
       "viewport"
       "scan"
       "actions"
       "log"
-      "nav";
+      "nav"
+      "cargo";
   }
 }
 
@@ -1401,6 +1419,38 @@ onUnmounted(() => {
 .warp-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ---- Cargo panel ---- */
+.cargo-body {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cargo-empty {
+  font-size: 0.8rem;
+  color: #5fae7c;
+  font-style: italic;
+}
+
+.cargo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(77, 255, 136, 0.08);
+  border: 1px solid #2fd66e;
+  color: #baffcf;
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.cargo-chip-qty {
+  color: #8fe6ab;
+  font-weight: 400;
 }
 
 /* ---- Controls ---- */
