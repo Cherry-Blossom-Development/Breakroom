@@ -232,6 +232,12 @@ const router = createRouter({
       meta: { requiresAuth: true, requiresFeature: 'games' },
     },
     {
+      path: '/games/haulonaut/admin/universes/:instanceId/delete',
+      name: 'haulonautDeleteUniverse',
+      component: () => import('../views/HaulonautDeleteUniversePage.vue'),
+      meta: { requiresAuth: true, requiresFeature: 'games' },
+    },
+    {
       path: '/friends',
       name: 'friends',
       component: () => import('../views/FriendsPage.vue'),

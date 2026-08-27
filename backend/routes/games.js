@@ -476,6 +476,53 @@ router.post('/:gameKey/admin/instances/:instanceId/end', authenticate, requireGa
 });
 
 /**
+ * DELETE /api/games/:gameKey/admin/instances/:instanceId
+ * Game-admin only: permanently delete a universe -- unlike /end, this
+ * removes the game_instances row outright. Every Haulonaut table FKs to it
+ * (directly or transitively) with ON DELETE CASCADE, so this single delete
+ * also removes the instance's sectors, sector links, sector features,
+ * every character (game_users) created in it, and those characters' pilot
+ * locations, visited-sector history, and settings. There is no undo.
+ *
+ * Requires the caller to echo the instance's exact name back in the body
+ * as `confirmName` -- a second, server-side check behind whatever
+ * confirmation the admin UI already made them type, so this endpoint can't
+ * be triggered by a bare click/replay without knowing which universe it's
+ * destroying.
+ */
+router.delete('/:gameKey/admin/instances/:instanceId', authenticate, requireGameAdmin, async (req, res) => {
+  const client = await getClient();
+  try {
+    const instanceResult = await client.query(
+      `SELECT gi.id, gi.name,
+              (SELECT COUNT(*) FROM haulonaut_sectors hs WHERE hs.game_instance_id = gi.id) AS sector_count,
+              (SELECT COUNT(*) FROM game_users gu WHERE gu.game_instance_id = gi.id) AS player_count
+       FROM game_instances gi
+       WHERE gi.id = $1 AND gi.game_id = $2`,
+      [req.params.instanceId, req.gameId]
+    );
+    if (instanceResult.rowCount === 0) return res.status(404).json({ message: 'Instance not found' });
+    const instance = instanceResult.rows[0];
+
+    if ((req.body.confirmName || '').trim() !== instance.name) {
+      return res.status(400).json({ message: 'Confirmation name does not match' });
+    }
+
+    await client.query('DELETE FROM game_instances WHERE id = $1', [instance.id]);
+
+    res.json({
+      message: 'Universe deleted',
+      deleted: { name: instance.name, sectorCount: instance.sector_count, playerCount: instance.player_count }
+    });
+  } catch (err) {
+    console.error('Error deleting universe:', err);
+    res.status(500).json({ message: 'Failed to delete universe' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
  * POST /api/games/:gameKey/admin/universe
  * Game-admin only: generate a fresh universe for this game, alongside any
  * other instances currently active (does not end anything -- use

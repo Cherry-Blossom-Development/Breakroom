@@ -133,6 +133,12 @@ onMounted(loadOverview)
                 >
                   {{ endingId === inst.id ? 'Ending...' : 'End Universe' }}
                 </button>
+                <router-link
+                  class="btn-danger btn-delete"
+                  :to="{ name: 'haulonautDeleteUniverse', params: { instanceId: inst.id } }"
+                >
+                  Delete Universe
+                </router-link>
               </div>
             </div>
             <div class="instance-meta">
@@ -349,6 +355,14 @@ h2 { color: var(--color-text); font-size: 1.1rem; margin: 0 0 12px; }
 
 .instance-actions .btn-danger { background: var(--color-error, #dc3545); padding: 6px 12px; font-size: 0.8rem; }
 .instance-actions .btn-danger:hover:not(:disabled) { background: #c82333; }
+
+.btn-delete {
+  display: inline-block;
+  border-radius: 4px;
+  text-decoration: none;
+  color: white;
+}
+.btn-delete:hover { background: #c82333; }
 
 .error { color: var(--color-error); font-size: 0.85rem; margin-top: 10px; }
 .success { color: var(--color-success, #2e7d32); font-size: 0.85rem; margin-top: 10px; }
