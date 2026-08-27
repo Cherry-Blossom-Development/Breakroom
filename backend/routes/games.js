@@ -12,12 +12,14 @@ const SECRET_KEY = process.env.SECRET_KEY;
 // in sync with the haulonaut_pilots column defaults in migration 059, since
 // both the self-heal spawn path and character creation insert a pilot row
 // without specifying credits/rations and rely on those defaults matching
-// these numbers. Both resources only ever go down for now (clamped at 0 in
-// the /navigate UPDATE) -- ways to replenish either are a separate
-// follow-up.
+// these numbers. Only rations drain on warp (a ship needs to feed its crew
+// regardless of distance); credits aren't touched by movement at all --
+// they'll only ever be spent on something the player actually chooses to
+// buy, once trading exists. Rations are clamped at 0 in the /navigate
+// UPDATE rather than going negative -- ways to replenish either resource
+// are a separate follow-up.
 const STARTING_CREDITS = 1000;
 const STARTING_RATIONS = 100;
-const WARP_CREDITS_COST = 5;
 const WARP_RATIONS_COST = 1;
 
 const authenticate = async (req, res, next) => {
@@ -388,15 +390,15 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
     );
     if (linkCheck.rowCount === 0) return res.status(400).json({ message: 'That sector is not reachable from here' });
 
-    // Every warp costs a small, fixed amount of both resources, clamped at
-    // 0 rather than going negative -- there's no "can't afford to warp"
-    // failure state yet, just depletion. Replenishing either is a separate
-    // follow-up.
+    // Every warp costs a small, fixed amount of rations (clamped at 0
+    // rather than going negative) -- credits aren't touched by movement,
+    // only by whatever the player chooses to spend them on later. There's
+    // no "can't afford to warp" failure state yet, just depletion.
     await client.query(
       `UPDATE haulonaut_pilots
-       SET current_sector_id = $1, credits = GREATEST(0, credits - $2), rations = GREATEST(0, rations - $3)
-       WHERE game_user_id = $4`,
-      [toSectorId, WARP_CREDITS_COST, WARP_RATIONS_COST, req.params.id]
+       SET current_sector_id = $1, rations = GREATEST(0, rations - $2)
+       WHERE game_user_id = $3`,
+      [toSectorId, WARP_RATIONS_COST, req.params.id]
     );
     await markSectorVisited(client, req.params.id, toSectorId);
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);

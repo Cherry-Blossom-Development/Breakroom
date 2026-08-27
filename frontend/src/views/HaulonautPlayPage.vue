@@ -30,12 +30,21 @@ const terminalInputEl = ref(null)
 // activates EXIT at the chrome level). Starts 'inside' the terminal.
 const level = ref('inside')
 const activeBox = ref('terminal')
-const BOX_ORDER = ['viewport', 'scan', 'terminal', 'nav']
+const BOX_ORDER = ['viewport', 'scan', 'actions', 'terminal', 'nav']
 
 const FEATURE_LABELS = { planet: 'PLANET', trading_outpost: 'OUTPOST' }
 
 const planetFeature = computed(() => sectorFeatures.value.find(f => f.feature_type === 'planet') || null)
 const outpostFeature = computed(() => sectorFeatures.value.find(f => f.feature_type === 'trading_outpost') || null)
+
+// What's available to do in the current sector -- grows as more sector
+// content types get real interactions; empty for a sector with no features.
+const actionItems = computed(() => {
+  const items = []
+  if (outpostFeature.value) items.push({ key: 'visit_outpost', label: 'Visit Outpost' })
+  if (planetFeature.value) items.push({ key: 'planet_overview', label: 'Planet Overview' })
+  return items
+})
 
 // Deterministic-per-name hue so the same planet always renders the same
 // color when revisited, without needing to store a color anywhere.
@@ -103,6 +112,17 @@ function boxStateClass(box) {
   if (level.value === 'box') return { 'box-selected': true }
   if (level.value === 'inside') return { 'box-active': true }
   return {}
+}
+
+// Actions are placeholders until outposts/planets have real systems behind
+// them -- logs a stub notice to the terminal rather than doing nothing.
+function performAction(item) {
+  if (item.key === 'visit_outpost') {
+    logLines.value.push('Outpost docking is not available yet.')
+  } else if (item.key === 'planet_overview') {
+    logLines.value.push('Planetary survey systems are not available yet.')
+  }
+  scrollLogToBottom()
 }
 
 function submitTerminalCommand() {
@@ -270,6 +290,37 @@ function onKeydown(e) {
     return
   }
 
+  if (activeBox.value === 'actions') {
+    if (actionItems.value.length === 0) return
+    const count = actionItems.value.length
+
+    if (e.key === 'ArrowDown' || e.key === 'Tab' && !e.shiftKey) {
+      e.preventDefault()
+      selectedIndex.value = selectedIndex.value === -1 ? 0 : (selectedIndex.value + 1) % count
+      return
+    }
+    if (e.key === 'ArrowUp' || e.key === 'Tab' && e.shiftKey) {
+      e.preventDefault()
+      selectedIndex.value = selectedIndex.value === -1 ? 0 : (selectedIndex.value - 1 + count) % count
+      return
+    }
+    if (e.key === 'Enter' || e.key === ' ') {
+      if (selectedIndex.value !== -1) {
+        e.preventDefault()
+        performAction(actionItems.value[selectedIndex.value])
+      }
+      return
+    }
+
+    // Number-key fast path, same idea as the nav box's 1-6 hotkeys.
+    const hotkeyIndex = parseInt(e.key, 10) - 1
+    if (Number.isInteger(hotkeyIndex) && hotkeyIndex >= 0 && actionItems.value[hotkeyIndex]) {
+      selectedIndex.value = hotkeyIndex
+      performAction(actionItems.value[hotkeyIndex])
+    }
+    return
+  }
+
   // viewport / scan: passive read-only boxes, nothing to do while inside
   // them beyond Escape (handled above).
 }
@@ -306,10 +357,10 @@ onUnmounted(() => {
                 <span class="header-name">{{ character.display_name }}</span>
                 <div class="header-resources">
                   <span class="resource-stat" :class="{ 'resource-empty': credits <= 0 }">
-                    <span class="resource-icon" aria-hidden="true">&#164;</span>{{ credits.toLocaleString() }} <span class="resource-unit">CR</span>
+                    <span class="resource-icon" aria-hidden="true">&#164;</span>{{ credits.toLocaleString() }} <span class="resource-unit">Credits</span>
                   </span>
                   <span class="resource-stat" :class="{ 'resource-empty': rations <= 0 }">
-                    <span class="resource-icon" aria-hidden="true">&#8801;</span>{{ rations.toLocaleString() }} <span class="resource-unit">RTN</span>
+                    <span class="resource-icon" aria-hidden="true">&#8801;</span>{{ rations.toLocaleString() }} <span class="resource-unit">Rations</span>
                   </span>
                 </div>
                 <span class="header-status">STATUS: <span class="status-active">{{ character.status.toUpperCase() }}</span></span>
@@ -360,6 +411,29 @@ onUnmounted(() => {
                       <p class="scan-row scan-divider">PILOTS:</p>
                       <p v-for="p in playersHere" :key="p.id" class="scan-row">{{ p.display_name }}</p>
                     </template>
+                  </div>
+                </div>
+
+                <!-- Actions: context-sensitive things to do in this sector -->
+                <div class="tui-panel panel-actions" :class="boxStateClass('actions')" @click="focusBox('actions')">
+                  <span class="tui-panel-title">
+                    <span v-if="activeBox === 'actions' && level === 'inside'" aria-hidden="true">&#9658; </span><span v-if="activeBox === 'actions' && level === 'box'" aria-hidden="true">[ </span>ACTIONS<span v-if="activeBox === 'actions' && level === 'box'" aria-hidden="true"> ]</span>
+                  </span>
+                  <div class="tui-panel-body actions-body">
+                    <template v-if="actionItems.length > 0">
+                      <button
+                        v-for="(item, i) in actionItems"
+                        :key="item.key"
+                        class="action-btn"
+                        :class="{ selected: selectedIndex === i }"
+                        :aria-label="`${item.label} (key ${i + 1})`"
+                        :aria-pressed="selectedIndex === i"
+                        @click="performAction(item)"
+                      >
+                        <span class="action-hotkey" aria-hidden="true">{{ i + 1 }}</span>{{ item.label }}
+                      </button>
+                    </template>
+                    <p v-else class="actions-empty">No actions available.</p>
                   </div>
                 </div>
 
@@ -641,9 +715,10 @@ onUnmounted(() => {
   min-height: 0;
   display: grid;
   grid-template-columns: 1fr 190px;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 120px) auto;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 96px) minmax(0, 120px) auto;
   grid-template-areas:
     "viewport scan"
+    "viewport actions"
     "log      log"
     "nav      nav";
   gap: clamp(6px, 1.5%, 12px);
@@ -651,16 +726,18 @@ onUnmounted(() => {
 
 .panel-viewport { grid-area: viewport; }
 .panel-scan { grid-area: scan; }
+.panel-actions { grid-area: actions; }
 .panel-log { grid-area: log; }
 .panel-nav { grid-area: nav; }
 
 @media (max-width: 560px) {
   .crt-grid {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(80px, 1fr) auto minmax(0, 80px) auto;
+    grid-template-rows: minmax(80px, 1fr) auto auto minmax(0, 80px) auto;
     grid-template-areas:
       "viewport"
       "scan"
+      "actions"
       "log"
       "nav";
   }
@@ -833,6 +910,81 @@ onUnmounted(() => {
   color: #5fae7c;
   font-size: 0.65rem;
   letter-spacing: 0.08em;
+}
+
+/* ---- Actions panel ---- */
+.actions-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.actions-empty {
+  font-size: 0.75rem;
+  font-style: italic;
+  color: #5fae7c;
+}
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(77, 255, 136, 0.08);
+  border: 1px solid #2fd66e;
+  color: #baffcf;
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.action-hotkey {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  background: rgba(186, 255, 207, 0.15);
+  color: #8fe6ab;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.action-btn:hover .action-hotkey {
+  background: rgba(5, 19, 10, 0.25);
+  color: #05130a;
+}
+
+.action-btn:hover {
+  background: #4dff88;
+  color: #05130a;
+}
+
+.action-btn:focus-visible {
+  outline: 2px solid #baffcf;
+  outline-offset: 2px;
+}
+
+.action-btn.selected {
+  background: #4dff88;
+  color: #05130a;
+  border-color: #baffcf;
+  box-shadow: 0 0 10px 2px rgba(77, 255, 136, 0.7);
+  animation: warp-pulse 1s ease-in-out infinite;
+}
+
+.action-btn.selected .action-hotkey {
+  background: rgba(5, 19, 10, 0.25);
+  color: #05130a;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .action-btn.selected { animation: none; }
 }
 
 /* ---- Log panel ---- */
