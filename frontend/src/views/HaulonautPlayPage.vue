@@ -12,6 +12,8 @@ const currentSector = ref(null)
 const connectedSectors = ref([])
 const sectorFeatures = ref([])
 const playersHere = ref([])
+const credits = ref(0)
+const rations = ref(0)
 const navigating = ref(false)
 const navError = ref('')
 const logLines = ref([])
@@ -124,6 +126,8 @@ async function loadCharacter() {
     connectedSectors.value = data.connectedSectors || []
     sectorFeatures.value = data.features || []
     playersHere.value = data.playersHere || []
+    credits.value = data.credits || 0
+    rations.value = data.rations || 0
     regenerateStarfield()
     logLines.value = [
       'Docking confirmed.',
@@ -155,6 +159,8 @@ async function navigateTo(sector) {
     connectedSectors.value = data.connectedSectors || []
     sectorFeatures.value = data.features || []
     playersHere.value = data.playersHere || []
+    credits.value = data.credits || 0
+    rations.value = data.rations || 0
     regenerateStarfield()
     logLines.value.push(`Arrived in Sector ${data.currentSector.sector_number}.`)
     selectedIndex.value = -1
@@ -298,6 +304,14 @@ onUnmounted(() => {
             <div class="crt-content">
               <div class="crt-header">
                 <span class="header-name">{{ character.display_name }}</span>
+                <div class="header-resources">
+                  <span class="resource-stat" :class="{ 'resource-empty': credits <= 0 }">
+                    <span class="resource-icon" aria-hidden="true">&#164;</span>{{ credits.toLocaleString() }} <span class="resource-unit">CR</span>
+                  </span>
+                  <span class="resource-stat" :class="{ 'resource-empty': rations <= 0 }">
+                    <span class="resource-icon" aria-hidden="true">&#8801;</span>{{ rations.toLocaleString() }} <span class="resource-unit">RTN</span>
+                  </span>
+                </div>
                 <span class="header-status">STATUS: <span class="status-active">{{ character.status.toUpperCase() }}</span></span>
               </div>
 
@@ -585,6 +599,40 @@ onUnmounted(() => {
   font-size: 0.7rem;
   letter-spacing: 0.05em;
   color: #5fae7c;
+}
+
+.header-resources {
+  display: flex;
+  align-items: baseline;
+  gap: clamp(8px, 2vw, 18px);
+  font-size: 0.75rem;
+  color: #baffcf;
+}
+
+.resource-stat {
+  white-space: nowrap;
+}
+
+.resource-icon {
+  margin-right: 2px;
+  color: #8fe6ab;
+}
+
+.resource-unit {
+  font-size: 0.65rem;
+  color: #5fae7c;
+  letter-spacing: 0.05em;
+}
+
+/* Depleted: the number itself already says "0" -- this is a supplementary
+   cue, not the only signal, so it's safe to lean on color here. */
+.resource-stat.resource-empty {
+  color: #ff8a8a;
+}
+
+.resource-stat.resource-empty .resource-icon,
+.resource-stat.resource-empty .resource-unit {
+  color: #ff8a8a;
 }
 
 /* ---- Panel grid ---- */
@@ -1021,5 +1069,6 @@ onUnmounted(() => {
   .crt-fullscreen { padding: 8px; }
   .crt-bezel { padding: 14px 16px 10px; border-radius: 14px; }
   .crt-brand { font-size: 0.6rem; }
+  .crt-header { flex-wrap: wrap; row-gap: 2px; }
 }
 </style>

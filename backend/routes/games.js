@@ -8,6 +8,18 @@ require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
 
+// A new pilot's starting stake, and what a single warp costs -- must stay
+// in sync with the haulonaut_pilots column defaults in migration 059, since
+// both the self-heal spawn path and character creation insert a pilot row
+// without specifying credits/rations and rely on those defaults matching
+// these numbers. Both resources only ever go down for now (clamped at 0 in
+// the /navigate UPDATE) -- ways to replenish either are a separate
+// follow-up.
+const STARTING_CREDITS = 1000;
+const STARTING_RATIONS = 100;
+const WARP_CREDITS_COST = 5;
+const WARP_RATIONS_COST = 1;
+
 const authenticate = async (req, res, next) => {
   try {
     const token = extractToken(req);
@@ -90,7 +102,7 @@ function buildBulkInsertQuery(table, columns, rows) {
 // state to the player.
 async function loadPilotLocation(client, gameUserId) {
   let pilotResult = await client.query(
-    `SELECT hs.id, hs.sector_number, hs.description
+    `SELECT hs.id, hs.sector_number, hs.description, hp.credits, hp.rations
      FROM haulonaut_pilots hp
      JOIN haulonaut_sectors hs ON hs.id = hp.current_sector_id
      WHERE hp.game_user_id = $1`,
@@ -99,11 +111,11 @@ async function loadPilotLocation(client, gameUserId) {
 
   if (pilotResult.rowCount === 0) {
     const spawned = await spawnPilotAtRandomSector(client, gameUserId);
-    if (!spawned) return { currentSector: null, connectedSectors: [], features: [], playersHere: [] };
+    if (!spawned) return { currentSector: null, connectedSectors: [], features: [], playersHere: [], credits: 0, rations: 0 };
     pilotResult = { rows: [spawned] };
   }
 
-  const currentSector = pilotResult.rows[0];
+  const { credits, rations, ...currentSector } = pilotResult.rows[0];
 
   const linksResult = await client.query(
     `SELECT hs.id, hs.sector_number
@@ -138,7 +150,9 @@ async function loadPilotLocation(client, gameUserId) {
     currentSector,
     connectedSectors,
     features: featuresResult.rows,
-    playersHere: playersResult.rows
+    playersHere: playersResult.rows,
+    credits,
+    rations
   };
 }
 
@@ -173,7 +187,10 @@ async function spawnPilotAtRandomSector(client, gameUserId) {
   );
   await markSectorVisited(client, gameUserId, randomSector.rows[0].id);
 
-  return randomSector.rows[0];
+  // credits/rations aren't re-fetched here -- a just-inserted pilot always
+  // has the column defaults, which match these constants (see the comment
+  // by their declaration).
+  return { ...randomSector.rows[0], credits: STARTING_CREDITS, rations: STARTING_RATIONS };
 }
 
 /**
@@ -326,9 +343,9 @@ router.get('/:gameKey/characters/:id', authenticate, async (req, res) => {
 
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
 
-    const { currentSector, connectedSectors, features, playersHere } = await loadPilotLocation(client, req.params.id);
+    const { currentSector, connectedSectors, features, playersHere, credits, rations } = await loadPilotLocation(client, req.params.id);
 
-    res.json({ character: result.rows[0], currentSector, connectedSectors, features, playersHere });
+    res.json({ character: result.rows[0], currentSector, connectedSectors, features, playersHere, credits, rations });
   } catch (err) {
     console.error('Error loading character:', err);
     res.status(500).json({ message: 'Failed to load character' });
@@ -371,16 +388,22 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
     );
     if (linkCheck.rowCount === 0) return res.status(400).json({ message: 'That sector is not reachable from here' });
 
+    // Every warp costs a small, fixed amount of both resources, clamped at
+    // 0 rather than going negative -- there's no "can't afford to warp"
+    // failure state yet, just depletion. Replenishing either is a separate
+    // follow-up.
     await client.query(
-      'UPDATE haulonaut_pilots SET current_sector_id = $1 WHERE game_user_id = $2',
-      [toSectorId, req.params.id]
+      `UPDATE haulonaut_pilots
+       SET current_sector_id = $1, credits = GREATEST(0, credits - $2), rations = GREATEST(0, rations - $3)
+       WHERE game_user_id = $4`,
+      [toSectorId, WARP_CREDITS_COST, WARP_RATIONS_COST, req.params.id]
     );
     await markSectorVisited(client, req.params.id, toSectorId);
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
 
-    const { currentSector, connectedSectors, features, playersHere } = await loadPilotLocation(client, req.params.id);
+    const { currentSector, connectedSectors, features, playersHere, credits, rations } = await loadPilotLocation(client, req.params.id);
 
-    res.json({ currentSector, connectedSectors, features, playersHere });
+    res.json({ currentSector, connectedSectors, features, playersHere, credits, rations });
   } catch (err) {
     console.error('Error navigating:', err);
     res.status(500).json({ message: 'Failed to navigate' });
