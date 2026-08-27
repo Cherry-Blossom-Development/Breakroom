@@ -16,7 +16,7 @@ const credits = ref(0)
 const rations = ref(0)
 const inventory = ref([])
 const itemsCatalog = ref([])
-const viewportMode = ref('space') // 'space' (starfield/planet view) or 'outpost' (browsing what's for sale)
+const viewportMode = ref('space') // 'space' (starfield/planet view), 'outpost' (browsing what's for sale), or 'cargo' (owned inventory)
 const purchasing = ref(false)
 const purchaseError = ref('')
 const navigating = ref(false)
@@ -35,19 +35,21 @@ const terminalInputEl = ref(null)
 // activates EXIT at the chrome level). Starts 'inside' the terminal.
 const level = ref('inside')
 const activeBox = ref('terminal')
-const BOX_ORDER = ['viewport', 'scan', 'actions', 'terminal', 'nav', 'cargo']
+const BOX_ORDER = ['viewport', 'scan', 'actions', 'terminal', 'nav']
 
 const FEATURE_LABELS = { planet: 'PLANET', trading_outpost: 'OUTPOST' }
 
 const planetFeature = computed(() => sectorFeatures.value.find(f => f.feature_type === 'planet') || null)
 const outpostFeature = computed(() => sectorFeatures.value.find(f => f.feature_type === 'trading_outpost') || null)
 
-// What's available to do in the current sector -- grows as more sector
-// content types get real interactions; empty for a sector with no features.
+// What's available to do -- some entries are sector-dependent (grows as
+// more sector content types get real interactions), but Cargo is always
+// available since it's about the player's own ship, not the sector.
 const actionItems = computed(() => {
   const items = []
   if (outpostFeature.value) items.push({ key: 'visit_outpost', label: 'Visit Outpost' })
   if (planetFeature.value) items.push({ key: 'planet_overview', label: 'Planet Overview' })
+  items.push({ key: 'view_cargo', label: 'Cargo' })
   return items
 })
 
@@ -58,6 +60,16 @@ const outpostMenuItems = computed(() => [
   ...itemsCatalog.value,
   { item_key: '__leave', name: 'Leave Outpost', base_price: null }
 ])
+
+// What the viewport box's keyboard handling should treat as "the current
+// list" -- depends on which overlay (if any) is showing. Cargo's own view
+// is otherwise static (just a read-only list), so its only interactive
+// entry is the one that closes it.
+const viewportMenuItems = computed(() => {
+  if (viewportMode.value === 'outpost') return outpostMenuItems.value
+  if (viewportMode.value === 'cargo') return [{ item_key: '__leave', name: 'Close Cargo' }]
+  return []
+})
 
 function inventoryQuantity(itemKey) {
   return inventory.value.find(i => i.item_key === itemKey)?.quantity || 0
@@ -131,9 +143,9 @@ function boxStateClass(box) {
   return {}
 }
 
-// "Visit Outpost" switches the viewport into outpost mode (everything else
-// on screen stays the same); "Planet Overview" has no real system behind
-// it yet, so it just logs a stub notice.
+// "Visit Outpost" and "Cargo" both switch the viewport into an overlay mode
+// (everything else on screen stays the same); "Planet Overview" has no
+// real system behind it yet, so it just logs a stub notice.
 function performAction(item) {
   if (item.key === 'visit_outpost') {
     viewportMode.value = 'outpost'
@@ -142,15 +154,20 @@ function performAction(item) {
     logLines.value.push(`Docking at ${outpostFeature.value ? outpostFeature.value.name : 'the outpost'}.`)
   } else if (item.key === 'planet_overview') {
     logLines.value.push('Planetary survey systems are not available yet.')
+  } else if (item.key === 'view_cargo') {
+    viewportMode.value = 'cargo'
+    selectedIndex.value = -1
+    logLines.value.push('Pulling up the cargo manifest.')
   }
   scrollLogToBottom()
 }
 
-function leaveOutpost() {
+function exitViewportOverlay() {
+  const message = viewportMode.value === 'outpost' ? 'Departing the outpost.' : 'Closing the cargo manifest.'
   viewportMode.value = 'space'
   selectedIndex.value = -1
   purchaseError.value = ''
-  logLines.value.push('Departing the outpost.')
+  logLines.value.push(message)
   scrollLogToBottom()
 }
 
@@ -179,9 +196,9 @@ async function purchaseItem(entry) {
   }
 }
 
-function activateOutpostItem(entry) {
+function activateViewportMenuItem(entry) {
   if (entry.item_key === '__leave') {
-    leaveOutpost()
+    exitViewportOverlay()
   } else {
     purchaseItem(entry)
   }
@@ -397,10 +414,11 @@ function onKeydown(e) {
   }
 
   if (activeBox.value === 'viewport') {
-    // Space view is passive/read-only; only outpost mode has anything to
-    // navigate, mirroring the actions/nav boxes' own arrow+hotkey pattern.
-    if (viewportMode.value !== 'outpost') return
-    const items = outpostMenuItems.value
+    // Space view is passive/read-only; outpost and cargo overlays both
+    // have something to navigate, mirroring the actions/nav boxes' own
+    // arrow+hotkey pattern.
+    if (viewportMode.value === 'space') return
+    const items = viewportMenuItems.value
     if (items.length === 0) return
     const count = items.length
 
@@ -417,7 +435,7 @@ function onKeydown(e) {
     if (e.key === 'Enter' || e.key === ' ') {
       if (selectedIndex.value !== -1) {
         e.preventDefault()
-        activateOutpostItem(items[selectedIndex.value])
+        activateViewportMenuItem(items[selectedIndex.value])
       }
       return
     }
@@ -425,13 +443,13 @@ function onKeydown(e) {
     const hotkeyIndex = parseInt(e.key, 10) - 1
     if (Number.isInteger(hotkeyIndex) && hotkeyIndex >= 0 && items[hotkeyIndex]) {
       selectedIndex.value = hotkeyIndex
-      activateOutpostItem(items[hotkeyIndex])
+      activateViewportMenuItem(items[hotkeyIndex])
     }
     return
   }
 
-  // scan / cargo: passive read-only boxes, nothing to do while inside
-  // them beyond Escape (handled above).
+  // scan: a passive read-only box, nothing to do while inside it beyond
+  // Escape (handled above).
 }
 
 onMounted(async () => {
@@ -491,7 +509,7 @@ onUnmounted(() => {
                         :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.item_key === '__leave' }"
                         :disabled="purchasing"
                         :aria-pressed="selectedIndex === i"
-                        @click="activateOutpostItem(entry)"
+                        @click="activateViewportMenuItem(entry)"
                       >
                         <span class="outpost-item-hotkey" aria-hidden="true">{{ i + 1 }}</span>
                         <span class="outpost-item-name">{{ entry.name }}</span>
@@ -500,6 +518,27 @@ onUnmounted(() => {
                       </button>
                     </div>
                     <p v-if="purchaseError" class="outpost-error">{{ purchaseError }}</p>
+                  </div>
+
+                  <div v-else-if="viewportMode === 'cargo'" class="tui-panel-body outpost-body">
+                    <p class="outpost-heading">CARGO MANIFEST</p>
+                    <div v-if="inventory.length > 0" class="cargo-list">
+                      <p v-for="entry in inventory" :key="entry.item_key" class="cargo-list-row">
+                        {{ entry.name }} <span class="cargo-list-qty">&times;{{ entry.quantity }}</span>
+                      </p>
+                    </div>
+                    <p v-else class="cargo-empty">Cargo hold is empty.</p>
+                    <div class="outpost-items">
+                      <button
+                        class="outpost-item-btn outpost-leave-btn"
+                        :class="{ selected: selectedIndex === 0 }"
+                        :aria-pressed="selectedIndex === 0"
+                        @click="exitViewportOverlay()"
+                      >
+                        <span class="outpost-item-hotkey" aria-hidden="true">1</span>
+                        <span class="outpost-item-name">Close Cargo</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div v-else class="tui-panel-body viewport-body">
@@ -620,21 +659,6 @@ onUnmounted(() => {
                       </template>
                       <span v-else class="navbar-none">no warps available</span>
                     </div>
-                  </div>
-                </div>
-
-                <!-- Cargo: everything owned beyond the ship's ambient credits/rations -->
-                <div class="tui-panel panel-cargo" :class="boxStateClass('cargo')" @click="focusBox('cargo')">
-                  <span class="tui-panel-title">
-                    <span v-if="activeBox === 'cargo' && level === 'inside'" aria-hidden="true">&#9658; </span><span v-if="activeBox === 'cargo' && level === 'box'" aria-hidden="true">[ </span>CARGO<span v-if="activeBox === 'cargo' && level === 'box'" aria-hidden="true"> ]</span>
-                  </span>
-                  <div class="tui-panel-body cargo-body">
-                    <template v-if="inventory.length > 0">
-                      <span v-for="entry in inventory" :key="entry.item_key" class="cargo-chip">
-                        {{ entry.name }} <span class="cargo-chip-qty">&times;{{ entry.quantity }}</span>
-                      </span>
-                    </template>
-                    <span v-else class="cargo-empty">Cargo hold is empty.</span>
                   </div>
                 </div>
               </div>
@@ -860,13 +884,12 @@ onUnmounted(() => {
   min-height: 0;
   display: grid;
   grid-template-columns: 1fr 190px;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 96px) minmax(0, 120px) auto auto;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 118px) minmax(0, 120px) auto;
   grid-template-areas:
     "viewport scan"
     "viewport actions"
     "log      log"
-    "nav      nav"
-    "cargo    cargo";
+    "nav      nav";
   gap: clamp(6px, 1.5%, 12px);
 }
 
@@ -875,19 +898,17 @@ onUnmounted(() => {
 .panel-actions { grid-area: actions; }
 .panel-log { grid-area: log; }
 .panel-nav { grid-area: nav; }
-.panel-cargo { grid-area: cargo; }
 
 @media (max-width: 560px) {
   .crt-grid {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(80px, 1fr) auto auto minmax(0, 80px) auto auto;
+    grid-template-rows: minmax(80px, 1fr) auto auto minmax(0, 80px) auto;
     grid-template-areas:
       "viewport"
       "scan"
       "actions"
       "log"
-      "nav"
-      "cargo";
+      "nav";
   }
 }
 
@@ -1143,6 +1164,13 @@ onUnmounted(() => {
 .outpost-item-btn.outpost-leave-btn {
   border-style: dashed;
   color: #8fe6ab;
+}
+
+/* Higher specificity than either single-class rule above, so a selected
+   leave/close button keeps the readable dark-on-bright-green text instead
+   of source order deciding it (which left it nearly invisible). */
+.outpost-item-btn.outpost-leave-btn.selected {
+  color: #05130a;
 }
 
 .outpost-error {
@@ -1421,36 +1449,29 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-/* ---- Cargo panel ---- */
-.cargo-body {
+/* ---- Viewport panel: cargo mode -- a read-only inventory listing plus
+   the one interactive "Close Cargo" row (styled via .outpost-item-btn,
+   shared with the outpost overlay). ---- */
+.cargo-list {
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cargo-list-row {
+  font-size: 0.8rem;
+  color: #baffcf;
+}
+
+.cargo-list-qty {
+  color: #8fe6ab;
+  font-weight: 700;
 }
 
 .cargo-empty {
   font-size: 0.8rem;
   color: #5fae7c;
   font-style: italic;
-}
-
-.cargo-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  background: rgba(77, 255, 136, 0.08);
-  border: 1px solid #2fd66e;
-  color: #baffcf;
-  border-radius: 4px;
-  padding: 4px 8px;
-  font-size: 0.8rem;
-  font-weight: 700;
-}
-
-.cargo-chip-qty {
-  color: #8fe6ab;
-  font-weight: 400;
 }
 
 /* ---- Controls ---- */
