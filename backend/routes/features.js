@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getClient } = require('../utilities/db');
+const { extractToken } = require('../utilities/auth');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
@@ -8,7 +9,7 @@ const SECRET_KEY = process.env.SECRET_KEY;
 
 // Authentication middleware
 const authenticate = async (req, res, next) => {
-  const token = req.cookies.jwtToken;
+  const token = extractToken(req);
   if (!token) return res.status(401).json({ message: 'Not authenticated' });
   try {
     const payload = jwt.verify(token, SECRET_KEY);
