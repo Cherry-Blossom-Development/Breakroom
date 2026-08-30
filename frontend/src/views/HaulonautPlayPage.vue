@@ -16,9 +16,12 @@ const credits = ref(0)
 const rations = ref(0)
 const inventory = ref([])
 const itemsCatalog = ref([])
-const viewportMode = ref('space') // 'space' (starfield/planet view), 'outpost' (browsing what's for sale), or 'cargo' (owned inventory)
+const knownLocations = ref([])
+const viewportMode = ref('space') // 'space', 'outpost' (browsing what's for sale), 'cargo' (owned inventory), or 'charts' (known planets/outposts)
 const purchasing = ref(false)
 const purchaseError = ref('')
+const chartsError = ref('')
+const traveling = ref(false) // true while an autopilot course is being flown hop-by-hop
 const navigating = ref(false)
 const navError = ref('')
 const logLines = ref([])
@@ -43,22 +46,35 @@ const planetFeature = computed(() => sectorFeatures.value.find(f => f.feature_ty
 const outpostFeature = computed(() => sectorFeatures.value.find(f => f.feature_type === 'trading_outpost') || null)
 
 // What's available to do -- some entries are sector-dependent (grows as
-// more sector content types get real interactions), but Cargo is always
-// available since it's about the player's own ship, not the sector.
+// more sector content types get real interactions), but Cargo and Star
+// Charts are always available since they're about the player's own ship
+// and knowledge, not the current sector.
 const actionItems = computed(() => {
   const items = []
   if (outpostFeature.value) items.push({ key: 'visit_outpost', label: 'Visit Outpost' })
   if (planetFeature.value) items.push({ key: 'planet_overview', label: 'Planet Overview' })
   items.push({ key: 'view_cargo', label: 'Cargo' })
+  items.push({ key: 'view_charts', label: 'Star Charts' })
   return items
 })
 
 // The catalog plus a trailing "leave" entry, so the outpost view's list
 // uses the same 1-based hotkey/arrow-cycle convention as the nav and
-// actions boxes without a separate special case for leaving.
+// actions boxes without a separate special case for leaving. __leave is a
+// plain marker (not an item_key) shared across every overlay's "close/leave"
+// row -- see activateViewportMenuItem.
 const outpostMenuItems = computed(() => [
   ...itemsCatalog.value,
-  { item_key: '__leave', name: 'Leave Outpost', base_price: null }
+  { __leave: true, name: 'Leave Outpost', base_price: null }
+])
+
+// Known locations reachable from here (distance > 0) plus the trailing
+// close row. Sectors the character is already standing in (distance 0)
+// are shown separately in the template as static "(here)" rows -- nothing
+// to plot a course to when you've already arrived.
+const chartsMenuItems = computed(() => [
+  ...knownLocations.value.filter(l => l.distance > 0),
+  { __leave: true, name: 'Close Star Charts' }
 ])
 
 // What the viewport box's keyboard handling should treat as "the current
@@ -67,7 +83,8 @@ const outpostMenuItems = computed(() => [
 // entry is the one that closes it.
 const viewportMenuItems = computed(() => {
   if (viewportMode.value === 'outpost') return outpostMenuItems.value
-  if (viewportMode.value === 'cargo') return [{ item_key: '__leave', name: 'Close Cargo' }]
+  if (viewportMode.value === 'cargo') return [{ __leave: true, name: 'Close Cargo' }]
+  if (viewportMode.value === 'charts') return chartsMenuItems.value
   return []
 })
 
@@ -143,9 +160,10 @@ function boxStateClass(box) {
   return {}
 }
 
-// "Visit Outpost" and "Cargo" both switch the viewport into an overlay mode
-// (everything else on screen stays the same); "Planet Overview" has no
-// real system behind it yet, so it just logs a stub notice.
+// "Visit Outpost", "Cargo", and "Star Charts" all switch the viewport into
+// an overlay mode (everything else on screen stays the same); "Planet
+// Overview" has no real system behind it yet, so it just logs a stub
+// notice.
 function performAction(item) {
   if (item.key === 'visit_outpost') {
     viewportMode.value = 'outpost'
@@ -158,15 +176,28 @@ function performAction(item) {
     viewportMode.value = 'cargo'
     selectedIndex.value = -1
     logLines.value.push('Pulling up the cargo manifest.')
+  } else if (item.key === 'view_charts') {
+    viewportMode.value = 'charts'
+    selectedIndex.value = -1
+    chartsError.value = ''
+    logLines.value.push('Pulling up star charts.')
+    loadKnownLocations()
   }
   scrollLogToBottom()
 }
 
+const OVERLAY_CLOSE_MESSAGES = {
+  outpost: 'Departing the outpost.',
+  cargo: 'Closing the cargo manifest.',
+  charts: 'Closing star charts.'
+}
+
 function exitViewportOverlay() {
-  const message = viewportMode.value === 'outpost' ? 'Departing the outpost.' : 'Closing the cargo manifest.'
+  const message = OVERLAY_CLOSE_MESSAGES[viewportMode.value] || 'Closing.'
   viewportMode.value = 'space'
   selectedIndex.value = -1
   purchaseError.value = ''
+  chartsError.value = ''
   logLines.value.push(message)
   scrollLogToBottom()
 }
@@ -197,10 +228,12 @@ async function purchaseItem(entry) {
 }
 
 function activateViewportMenuItem(entry) {
-  if (entry.item_key === '__leave') {
+  if (entry.__leave) {
     exitViewportOverlay()
-  } else {
+  } else if (viewportMode.value === 'outpost') {
     purchaseItem(entry)
+  } else if (viewportMode.value === 'charts') {
+    setCourse(entry)
   }
 }
 
@@ -252,8 +285,22 @@ async function loadItemsCatalog() {
   }
 }
 
+async function loadKnownLocations() {
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/known-locations`, { credentials: 'include' })
+    if (!res.ok) return
+    const data = await res.json()
+    knownLocations.value = data.locations || []
+  } catch {
+    knownLocations.value = []
+  }
+}
+
+// Returns true/false rather than throwing, so travelAlongPath can tell a
+// failed hop apart from a successful one and stop the course instead of
+// blindly continuing.
 async function navigateTo(sector) {
-  if (navigating.value) return
+  if (navigating.value) return false
   navigating.value = true
   navError.value = ''
   try {
@@ -277,10 +324,66 @@ async function navigateTo(sector) {
     logLines.value.push(`Arrived in Sector ${data.currentSector.sector_number}.`)
     selectedIndex.value = -1
     scrollLogToBottom()
+    return true
   } catch (err) {
     navError.value = err.message
+    return false
   } finally {
     navigating.value = false
+  }
+}
+
+// A direct player-initiated warp (click or keyboard on the nav box) always
+// takes precedence over an in-progress autopilot course -- cancels it
+// before the manual warp goes through.
+function manualNavigateTo(sector) {
+  if (traveling.value) traveling.value = false
+  navigateTo(sector)
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+// Flies the character along a precomputed path (path[0] is the current
+// sector, skipped) one hop at a time via the same navigateTo() a manual
+// warp uses -- rations still drain and each link is still re-validated
+// server-side, exactly like clicking each warp button in sequence. Runs in
+// the background (not awaited by its caller); traveling.value is both the
+// "is it running" flag and the cancellation switch -- setting it false
+// from anywhere (Escape, a manual warp) stops the loop before its next hop.
+async function travelAlongPath(path) {
+  traveling.value = true
+  let completed = true
+  for (let i = 1; i < path.length; i++) {
+    if (!traveling.value) { completed = false; break }
+    const ok = await navigateTo(path[i])
+    if (!ok) { completed = false; break }
+    if (traveling.value && i < path.length - 1) await sleep(600)
+  }
+  if (completed && traveling.value) {
+    logLines.value.push('Course complete.')
+    scrollLogToBottom()
+  }
+  traveling.value = false
+}
+
+async function setCourse(location) {
+  if (traveling.value) return
+  chartsError.value = ''
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/route/${location.sector_id}`, { credentials: 'include' })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Failed to plot course')
+    const path = data.path || []
+    if (path.length <= 1) return
+    const hops = path.length - 1
+    logLines.value.push(`Course plotted to ${location.name} (${hops} hop${hops === 1 ? '' : 's'}).`)
+    logLines.value.push('Autopilot engaged.')
+    scrollLogToBottom()
+    travelAlongPath(path)
+  } catch (err) {
+    chartsError.value = err.message
   }
 }
 
@@ -289,6 +392,14 @@ function backToGames() {
 }
 
 function onKeydown(e) {
+  // Escape always stops an in-progress autopilot course first, in addition
+  // to (not instead of) its usual level-climbing below.
+  if (e.key === 'Escape' && traveling.value) {
+    traveling.value = false
+    logLines.value.push('Autopilot disengaged.')
+    scrollLogToBottom()
+  }
+
   // Escape always climbs one level, from wherever the player currently is.
   if (e.key === 'Escape') {
     e.preventDefault()
@@ -366,7 +477,7 @@ function onKeydown(e) {
     if (e.key === 'Enter' || e.key === ' ') {
       if (selectedIndex.value !== -1) {
         e.preventDefault()
-        navigateTo(connectedSectors.value[selectedIndex.value])
+        manualNavigateTo(connectedSectors.value[selectedIndex.value])
       }
       return
     }
@@ -377,13 +488,13 @@ function onKeydown(e) {
     const hotkeyIndex = parseInt(e.key, 10) - 1
     if (Number.isInteger(hotkeyIndex) && hotkeyIndex >= 0 && connectedSectors.value[hotkeyIndex]) {
       selectedIndex.value = hotkeyIndex
-      navigateTo(connectedSectors.value[hotkeyIndex])
+      manualNavigateTo(connectedSectors.value[hotkeyIndex])
     }
     return
   }
 
   if (activeBox.value === 'actions') {
-    if (actionItems.value.length === 0) return
+    if (traveling.value || actionItems.value.length === 0) return
     const count = actionItems.value.length
 
     if (e.key === 'ArrowDown' || e.key === 'Tab' && !e.shiftKey) {
@@ -414,10 +525,10 @@ function onKeydown(e) {
   }
 
   if (activeBox.value === 'viewport') {
-    // Space view is passive/read-only; outpost and cargo overlays both
-    // have something to navigate, mirroring the actions/nav boxes' own
-    // arrow+hotkey pattern.
-    if (viewportMode.value === 'space') return
+    // Space view is passive/read-only; outpost, cargo, and charts overlays
+    // all have something to navigate, mirroring the actions/nav boxes' own
+    // arrow+hotkey pattern. Blocked entirely mid-autopilot.
+    if (traveling.value || viewportMode.value === 'space') return
     const items = viewportMenuItems.value
     if (items.length === 0) return
     const count = items.length
@@ -504,17 +615,17 @@ onUnmounted(() => {
                     <div class="outpost-items">
                       <button
                         v-for="(entry, i) in outpostMenuItems"
-                        :key="entry.item_key"
+                        :key="entry.__leave ? '__leave' : entry.item_key"
                         class="outpost-item-btn"
-                        :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.item_key === '__leave' }"
+                        :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.__leave }"
                         :disabled="purchasing"
                         :aria-pressed="selectedIndex === i"
                         @click="activateViewportMenuItem(entry)"
                       >
                         <span class="outpost-item-hotkey" aria-hidden="true">{{ i + 1 }}</span>
                         <span class="outpost-item-name">{{ entry.name }}</span>
-                        <span v-if="entry.item_key !== '__leave' && inventoryQuantity(entry.item_key) > 0" class="outpost-item-owned">owned {{ inventoryQuantity(entry.item_key) }}</span>
-                        <span v-if="entry.base_price !== null" class="outpost-item-price" aria-hidden="true">&#164;{{ entry.base_price }}</span>
+                        <span v-if="!entry.__leave && inventoryQuantity(entry.item_key) > 0" class="outpost-item-owned">owned {{ inventoryQuantity(entry.item_key) }}</span>
+                        <span v-if="entry.base_price !== null && entry.base_price !== undefined" class="outpost-item-price" aria-hidden="true">&#164;{{ entry.base_price }}</span>
                       </button>
                     </div>
                     <p v-if="purchaseError" class="outpost-error">{{ purchaseError }}</p>
@@ -539,6 +650,37 @@ onUnmounted(() => {
                         <span class="outpost-item-name">Close Cargo</span>
                       </button>
                     </div>
+                  </div>
+
+                  <div v-else-if="viewportMode === 'charts'" class="tui-panel-body outpost-body">
+                    <p class="outpost-heading">STAR CHARTS</p>
+                    <div v-if="knownLocations.length === 0" class="cargo-empty">No known locations yet -- explore more sectors.</div>
+                    <template v-else>
+                      <div v-if="knownLocations.some(l => l.distance === 0)" class="cargo-list">
+                        <p v-for="loc in knownLocations.filter(l => l.distance === 0)" :key="loc.id" class="cargo-list-row">
+                          {{ loc.name }} <span class="chart-type-tag">({{ FEATURE_LABELS[loc.feature_type] || loc.feature_type }})</span> <span class="chart-here-tag">HERE</span>
+                        </p>
+                      </div>
+                      <div class="outpost-items">
+                        <button
+                          v-for="(entry, i) in chartsMenuItems"
+                          :key="entry.__leave ? '__leave' : entry.id"
+                          class="outpost-item-btn"
+                          :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.__leave }"
+                          :disabled="traveling"
+                          :aria-pressed="selectedIndex === i"
+                          @click="activateViewportMenuItem(entry)"
+                        >
+                          <span class="outpost-item-hotkey" aria-hidden="true">{{ i + 1 }}</span>
+                          <span class="outpost-item-name">
+                            <template v-if="!entry.__leave">{{ entry.name }} <span class="chart-type-tag">({{ FEATURE_LABELS[entry.feature_type] || entry.feature_type }})</span></template>
+                            <template v-else>{{ entry.name }}</template>
+                          </span>
+                          <span v-if="!entry.__leave" class="chart-distance" aria-hidden="true">Sector {{ entry.sector_number }} &middot; {{ entry.distance }} hop{{ entry.distance === 1 ? '' : 's' }}</span>
+                        </button>
+                      </div>
+                    </template>
+                    <p v-if="chartsError" class="outpost-error">{{ chartsError }}</p>
                   </div>
 
                   <div v-else class="tui-panel-body viewport-body">
@@ -595,6 +737,7 @@ onUnmounted(() => {
                         :key="item.key"
                         class="action-btn"
                         :class="{ selected: selectedIndex === i }"
+                        :disabled="traveling"
                         :aria-label="`${item.label} (key ${i + 1})`"
                         :aria-pressed="selectedIndex === i"
                         @click="performAction(item)"
@@ -652,7 +795,7 @@ onUnmounted(() => {
                           :disabled="navigating"
                           :aria-label="`Warp to Sector ${s.sector_number} (key ${i + 1})${s.visited ? ', visited' : ', unexplored'}`"
                           :aria-pressed="selectedIndex === i"
-                          @click="navigateTo(s)"
+                          @click="manualNavigateTo(s)"
                         >
                           <span class="warp-cursor" aria-hidden="true">{{ selectedIndex === i ? '▶' : '' }}</span><span class="warp-hotkey" aria-hidden="true">{{ i + 1 }}</span>{{ s.sector_number }}<span v-if="s.visited" class="warp-visited-mark" aria-hidden="true">&middot;</span>
                         </button>
@@ -884,7 +1027,7 @@ onUnmounted(() => {
   min-height: 0;
   display: grid;
   grid-template-columns: 1fr 190px;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 118px) minmax(0, 120px) auto;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 148px) minmax(0, 120px) auto;
   grid-template-areas:
     "viewport scan"
     "viewport actions"
@@ -1472,6 +1615,28 @@ onUnmounted(() => {
   font-size: 0.8rem;
   color: #5fae7c;
   font-style: italic;
+}
+
+/* ---- Viewport panel: charts mode -- known locations (styled with
+   .outpost-item-btn, shared with the outpost overlay) plus the read-only
+   "already here" rows (.cargo-list, shared with the cargo overlay). ---- */
+.chart-type-tag {
+  color: #5fae7c;
+  font-weight: 400;
+}
+
+.chart-here-tag {
+  color: #4dff88;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.chart-distance {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: inherit;
+  opacity: 0.85;
 }
 
 /* ---- Controls ---- */

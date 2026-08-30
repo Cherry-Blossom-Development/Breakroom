@@ -173,6 +173,38 @@ async function loadInventory(client, gameUserId) {
   return result.rows;
 }
 
+// Breadth-first search over one instance's sector graph from startSectorId.
+// Every warp costs the same (unweighted edges), so BFS gives true shortest
+// hop-count paths. Returns Map<sectorId, { distance, prevSectorId }> for
+// every sector reachable from the start -- shared by /known-locations
+// (annotates each discovered feature's distance) and /route/:sectorId
+// (reconstructs the actual path by walking prevSectorId back to the start).
+async function computeSectorDistances(client, instanceId, startSectorId) {
+  const linksResult = await client.query(
+    'SELECT from_sector_id, to_sector_id FROM haulonaut_sector_links WHERE game_instance_id = $1',
+    [instanceId]
+  );
+  const adjacency = new Map();
+  for (const link of linksResult.rows) {
+    if (!adjacency.has(link.from_sector_id)) adjacency.set(link.from_sector_id, []);
+    adjacency.get(link.from_sector_id).push(link.to_sector_id);
+  }
+
+  const distances = new Map([[startSectorId, { distance: 0, prevSectorId: null }]]);
+  const queue = [startSectorId];
+  for (let head = 0; head < queue.length; head++) {
+    const current = queue[head];
+    const currentDistance = distances.get(current).distance;
+    for (const next of adjacency.get(current) || []) {
+      if (!distances.has(next)) {
+        distances.set(next, { distance: currentDistance + 1, prevSectorId: current });
+        queue.push(next);
+      }
+    }
+  }
+  return distances;
+}
+
 // Records that a character has been to a sector (first visit creates the
 // row; later visits just bump last_visited_at). Drives the "you've been
 // here before" highlight on the warp buttons.
@@ -535,6 +567,131 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
     await client.rollback();
     console.error('Error purchasing item:', err);
     res.status(500).json({ message: 'Failed to purchase item' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * GET /api/games/:gameKey/characters/:id/known-locations
+ * Every sector feature (planet, trading_outpost, and whatever future types
+ * get added) sitting in a sector this character has actually visited --
+ * derived from haulonaut_visited_sectors rather than a separate
+ * "discovered features" table, since visiting a sector already means its
+ * contents were seen (Sector Scan shows them on arrival). Each entry is
+ * annotated with its hop-distance from the character's CURRENT sector via
+ * BFS, so the list can be sorted nearest-first and the client doesn't need
+ * to compute distances itself.
+ */
+router.get('/:gameKey/characters/:id/known-locations', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id, gu.game_instance_id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+    const instanceId = ownerCheck.rows[0].game_instance_id;
+
+    const pilotResult = await client.query(
+      'SELECT current_sector_id FROM haulonaut_pilots WHERE game_user_id = $1',
+      [req.params.id]
+    );
+    if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
+
+    const featuresResult = await client.query(
+      `SELECT sf.id, sf.feature_type, sf.name, sf.description, hs.id AS sector_id, hs.sector_number
+       FROM haulonaut_sector_features sf
+       JOIN haulonaut_sectors hs ON hs.id = sf.sector_id
+       JOIN haulonaut_visited_sectors hvs ON hvs.sector_id = hs.id AND hvs.game_user_id = $1
+       WHERE hs.game_instance_id = $2`,
+      [req.params.id, instanceId]
+    );
+
+    const distances = await computeSectorDistances(client, instanceId, pilotResult.rows[0].current_sector_id);
+
+    const locations = featuresResult.rows
+      .map(f => ({
+        id: f.id,
+        feature_type: f.feature_type,
+        name: f.name,
+        description: f.description,
+        sector_id: f.sector_id,
+        sector_number: f.sector_number,
+        distance: distances.has(f.sector_id) ? distances.get(f.sector_id).distance : null
+      }))
+      .sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity) || a.name.localeCompare(b.name));
+
+    res.json({ locations });
+  } catch (err) {
+    console.error('Error loading known locations:', err);
+    res.status(500).json({ message: 'Failed to load known locations' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * GET /api/games/:gameKey/characters/:id/route/:sectorId
+ * The shortest hop-by-hop path from the character's current sector to
+ * sectorId, as an ordered list of { id, sector_number } (path[0] is the
+ * current sector itself). Read-only -- doesn't move the character or spend
+ * anything; the client warps along the returned path one hop at a time via
+ * the existing /navigate route, so rations still drain and links are still
+ * re-validated exactly like a manual warp.
+ */
+router.get('/:gameKey/characters/:id/route/:sectorId', authenticate, async (req, res) => {
+  const targetSectorId = parseInt(req.params.sectorId, 10);
+  if (!targetSectorId) return res.status(400).json({ message: 'Invalid sector' });
+
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id, gu.game_instance_id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+    const instanceId = ownerCheck.rows[0].game_instance_id;
+
+    const pilotResult = await client.query(
+      'SELECT current_sector_id FROM haulonaut_pilots WHERE game_user_id = $1',
+      [req.params.id]
+    );
+    if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
+
+    // Confirm the destination actually belongs to this instance -- a
+    // sector id from another universe should never leak a route.
+    const targetCheck = await client.query(
+      'SELECT id FROM haulonaut_sectors WHERE id = $1 AND game_instance_id = $2',
+      [targetSectorId, instanceId]
+    );
+    if (targetCheck.rowCount === 0) return res.status(404).json({ message: 'Sector not found' });
+
+    const distances = await computeSectorDistances(client, instanceId, pilotResult.rows[0].current_sector_id);
+    if (!distances.has(targetSectorId)) return res.status(404).json({ message: 'No route to that sector' });
+
+    const pathIds = [];
+    for (let step = targetSectorId; step !== null; step = distances.get(step).prevSectorId) {
+      pathIds.unshift(step);
+    }
+
+    const sectorsResult = await client.query(
+      `SELECT id, sector_number FROM haulonaut_sectors WHERE id IN (${pathIds.map((_, i) => `$${i + 1}`).join(',')})`,
+      pathIds
+    );
+    const numberById = new Map(sectorsResult.rows.map(r => [r.id, r.sector_number]));
+    const path = pathIds.map(id => ({ id, sector_number: numberById.get(id) }));
+
+    res.json({ path });
+  } catch (err) {
+    console.error('Error computing route:', err);
+    res.status(500).json({ message: 'Failed to compute route' });
   } finally {
     client.release();
   }
