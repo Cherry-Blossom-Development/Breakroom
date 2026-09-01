@@ -482,6 +482,98 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
 });
 
 /**
+ * POST /api/games/:gameKey/characters/:id/drift
+ * Moves the character exactly one hop toward the nearest planet in the
+ * instance (falling back to the nearest trading outpost, then a random
+ * adjacent sector, if no planet exists anywhere reachable) -- doesn't
+ * touch credits/rations/fuel, since this represents uncontrolled momentum
+ * while stranded, not a piloted warp. Rejected if fuel is above 0 (drift
+ * only applies while actually out) or the character is already sitting on
+ * a planet (nothing left to drift toward).
+ *
+ * Called once per drift-variance threshold crossing, paced entirely by
+ * the client (HaulonautPlayPage.vue), which only ticks that variance
+ * while the tab is visible -- there's no server-side scheduler making
+ * this happen on its own, matching the requirement that drift movement
+ * only occurs while someone is actually watching.
+ */
+router.post('/:gameKey/characters/:id/drift', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id, gu.game_instance_id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+    const instanceId = ownerCheck.rows[0].game_instance_id;
+
+    const pilotResult = await client.query(
+      'SELECT current_sector_id, fuel FROM haulonaut_pilots WHERE game_user_id = $1',
+      [req.params.id]
+    );
+    if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
+    if (pilotResult.rows[0].fuel > 0) return res.status(409).json({ message: 'Not out of fuel' });
+    const currentSectorId = pilotResult.rows[0].current_sector_id;
+
+    const featuresResult = await client.query(
+      `SELECT sf.feature_type, hs.id AS sector_id
+       FROM haulonaut_sector_features sf
+       JOIN haulonaut_sectors hs ON hs.id = sf.sector_id
+       WHERE hs.game_instance_id = $1`,
+      [instanceId]
+    );
+    if (featuresResult.rows.some(f => f.sector_id === currentSectorId && f.feature_type === 'planet')) {
+      return res.status(409).json({ message: 'Already at a planet' });
+    }
+
+    const distances = await computeSectorDistances(client, instanceId, currentSectorId);
+
+    let target = null;
+    for (const type of ['planet', 'trading_outpost']) {
+      for (const f of featuresResult.rows) {
+        if (f.feature_type !== type || f.sector_id === currentSectorId) continue;
+        const d = distances.get(f.sector_id);
+        if (d && (!target || d.distance < target.distance)) target = { sectorId: f.sector_id, distance: d.distance };
+      }
+      if (target) break;
+    }
+    if (!target) {
+      const adjacentResult = await client.query(
+        'SELECT to_sector_id FROM haulonaut_sector_links WHERE from_sector_id = $1 ORDER BY RAND() LIMIT 1',
+        [currentSectorId]
+      );
+      if (adjacentResult.rowCount === 0) return res.status(409).json({ message: 'Nowhere to drift' });
+      target = { sectorId: adjacentResult.rows[0].to_sector_id };
+    }
+
+    // Reconstruct the shortest path back to the current sector and take
+    // just the first step -- same walk-back-via-prevSectorId pattern as
+    // /route/:sectorId, but only one hop is actually applied here.
+    const pathIds = [];
+    for (let step = target.sectorId; step !== null; step = distances.get(step).prevSectorId) {
+      pathIds.unshift(step);
+    }
+    const nextSectorId = pathIds.length > 1 ? pathIds[1] : pathIds[0];
+
+    await client.query('UPDATE haulonaut_pilots SET current_sector_id = $1 WHERE game_user_id = $2', [nextSectorId, req.params.id]);
+    await markSectorVisited(client, req.params.id, nextSectorId);
+    await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
+
+    const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel } = await loadPilotLocation(client, req.params.id);
+
+    res.json({ currentSector, connectedSectors, features, playersHere, credits, rations, fuel });
+  } catch (err) {
+    console.error('Error drifting:', err);
+    res.status(500).json({ message: 'Failed to drift' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
  * GET /api/games/:gameKey/items
  * The full item catalog -- global to the game, not per-instance or
  * per-outpost (see migration 060). Any authenticated user can read it,

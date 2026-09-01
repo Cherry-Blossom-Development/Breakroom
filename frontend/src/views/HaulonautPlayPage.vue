@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
@@ -23,6 +23,8 @@ const purchasing = ref(false)
 const purchaseError = ref('')
 const chartsError = ref('')
 const traveling = ref(false) // true while an autopilot course is being flown hop-by-hop
+const driftVariance = ref(0)
+const drifting = ref(false) // true while a drift hop's own API call is in flight
 const navigating = ref(false)
 const navError = ref('')
 const logLines = ref([])
@@ -45,6 +47,13 @@ const FEATURE_LABELS = { planet: 'PLANET', trading_outpost: 'OUTPOST' }
 
 const planetFeature = computed(() => sectorFeatures.value.find(f => f.feature_type === 'planet') || null)
 const outpostFeature = computed(() => sectorFeatures.value.find(f => f.feature_type === 'trading_outpost') || null)
+
+// The ship should be drifting: out of fuel, and not already sitting
+// somewhere that resolves the crisis. Once true, the drift ticker (near
+// onMounted) starts climbing driftVariance and eventually calls
+// performDrift(); once false (refueled, or arrived at a planet), it
+// freezes/resets instead.
+const driftEligible = computed(() => fuel.value <= 0 && !planetFeature.value)
 
 // What's available to do -- some entries are sector-dependent (grows as
 // more sector content types get real interactions), but Cargo and Star
@@ -391,6 +400,76 @@ async function setCourse(location) {
   }
 }
 
+const DRIFT_THRESHOLD = 30
+
+// Fires once per second (see the interval in onMounted) but only ever
+// does anything while the tab is actually visible -- both the variance
+// climb AND the resulting drift hop are gated on document.visibilityState,
+// per the requirement that drift movement only happens while someone is
+// watching. A backgrounded tab is frozen in place, not silently racking
+// up drifts to unleash all at once when it regains focus.
+function driftTick() {
+  if (document.visibilityState !== 'visible') return
+  if (!driftEligible.value) {
+    if (driftVariance.value !== 0) driftVariance.value = 0
+    return
+  }
+  if (drifting.value || traveling.value) return
+  driftVariance.value += 1 + Math.floor(Math.random() * 3)
+  if (driftVariance.value >= DRIFT_THRESHOLD) {
+    performDrift()
+  }
+}
+
+// One hop toward the nearest planet (server-computed) -- doesn't touch
+// credits/rations/fuel, since this is uncontrolled momentum, not a
+// piloted warp. Resets driftVariance on success so the climb starts over
+// for the next hop.
+async function performDrift() {
+  if (drifting.value) return
+  drifting.value = true
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/drift`, {
+      method: 'POST',
+      credentials: 'include'
+    })
+    const data = await res.json()
+    if (!res.ok) return // e.g. fuel was restored or a planet reached between ticks -- next tick resolves it
+    currentSector.value = data.currentSector
+    connectedSectors.value = data.connectedSectors || []
+    sectorFeatures.value = data.features || []
+    playersHere.value = data.playersHere || []
+    credits.value = data.credits || 0
+    rations.value = data.rations || 0
+    fuel.value = data.fuel || 0
+    viewportMode.value = 'space'
+    selectedIndex.value = -1
+    regenerateStarfield()
+    logLines.value.push(`DRIFT: hull carried into Sector ${data.currentSector.sector_number}.`)
+    if (planetFeature.value) {
+      logLines.value.push('A planetary body is in range. Drift variance stabilizing.')
+    }
+    scrollLogToBottom()
+    driftVariance.value = 0
+  } finally {
+    drifting.value = false
+  }
+}
+
+// Logs the crisis starting/ending exactly once, right as fuel crosses 0
+// in either direction -- driftEligible itself is a computed and doesn't
+// distinguish "just happened" from "still true", so this needs its own
+// watcher.
+watch(fuel, (newFuel, oldFuel) => {
+  if (newFuel <= 0 && oldFuel > 0) {
+    logLines.value.push('WARNING: Fuel depleted. Hull drifting, uncontrolled.')
+    scrollLogToBottom()
+  } else if (newFuel > 0 && oldFuel <= 0) {
+    logLines.value.push('Fuel restored. Drift variance stabilizing.')
+    scrollLogToBottom()
+  }
+})
+
 function backToGames() {
   router.push('/games')
 }
@@ -567,14 +646,18 @@ function onKeydown(e) {
   // Escape (handled above).
 }
 
+let driftIntervalId = null
+
 onMounted(async () => {
   await Promise.all([loadCharacter(), loadItemsCatalog()])
   syncTerminalFocus()
   window.addEventListener('keydown', onKeydown)
+  driftIntervalId = setInterval(driftTick, 1000)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
+  if (driftIntervalId) clearInterval(driftIntervalId)
 })
 </script>
 
@@ -606,6 +689,9 @@ onUnmounted(() => {
                   </span>
                   <span class="resource-stat" :class="{ 'resource-empty': fuel <= 0 }">
                     <span class="resource-icon" aria-hidden="true">&#9636;</span>{{ fuel.toLocaleString() }} <span class="resource-unit">Fuel</span>
+                  </span>
+                  <span v-if="driftEligible" class="resource-stat drift-stat">
+                    <span class="resource-icon" aria-hidden="true">&#9650;</span>{{ driftVariance }} <span class="resource-unit">Drift Variance</span>
                   </span>
                 </div>
                 <span class="header-status">STATUS: <span class="status-active">{{ character.status.toUpperCase() }}</span></span>
@@ -1026,6 +1112,27 @@ onUnmounted(() => {
 .resource-stat.resource-empty .resource-icon,
 .resource-stat.resource-empty .resource-unit {
   color: #ff8a8a;
+}
+
+/* Drift Variance: only ever shown while driftEligible -- the label text
+   and the blink are the primary cues, with the bright red as emphasis on
+   top rather than the only signal. */
+.drift-stat,
+.drift-stat .resource-icon,
+.drift-stat .resource-unit {
+  color: #ff3b3b;
+}
+
+.drift-stat {
+  animation: drift-blink 1s step-start infinite;
+}
+
+@keyframes drift-blink {
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drift-stat { animation: none; }
 }
 
 /* ---- Panel grid ---- */
