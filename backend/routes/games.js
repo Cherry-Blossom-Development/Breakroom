@@ -9,18 +9,20 @@ require('dotenv').config();
 const SECRET_KEY = process.env.SECRET_KEY;
 
 // A new pilot's starting stake, and what a single warp costs -- must stay
-// in sync with the haulonaut_pilots column defaults in migration 059, since
-// both the self-heal spawn path and character creation insert a pilot row
-// without specifying credits/rations and rely on those defaults matching
-// these numbers. Only rations drain on warp (a ship needs to feed its crew
-// regardless of distance); credits aren't touched by movement at all --
-// they'll only ever be spent on something the player actually chooses to
-// buy, once trading exists. Rations are clamped at 0 in the /navigate
-// UPDATE rather than going negative -- ways to replenish either resource
-// are a separate follow-up.
+// in sync with the haulonaut_pilots column defaults in migrations 059 and
+// 061, since both the self-heal spawn path and character creation insert a
+// pilot row without specifying credits/rations/fuel and rely on those
+// defaults matching these numbers. Rations and fuel both drain on warp (a
+// ship needs to feed its crew and burn reaction mass regardless of
+// distance); credits aren't touched by movement at all -- they'll only
+// ever be spent on something the player actually chooses to buy. Rations
+// and fuel are clamped at 0 in the /navigate UPDATE rather than going
+// negative -- ways to replenish them are a separate follow-up.
 const STARTING_CREDITS = 1000;
 const STARTING_RATIONS = 100;
+const STARTING_FUEL = 100;
 const WARP_RATIONS_COST = 1;
+const WARP_FUEL_COST = 1;
 
 const authenticate = async (req, res, next) => {
   try {
@@ -104,7 +106,7 @@ function buildBulkInsertQuery(table, columns, rows) {
 // state to the player.
 async function loadPilotLocation(client, gameUserId) {
   let pilotResult = await client.query(
-    `SELECT hs.id, hs.sector_number, hs.description, hp.credits, hp.rations
+    `SELECT hs.id, hs.sector_number, hs.description, hp.credits, hp.rations, hp.fuel
      FROM haulonaut_pilots hp
      JOIN haulonaut_sectors hs ON hs.id = hp.current_sector_id
      WHERE hp.game_user_id = $1`,
@@ -113,11 +115,11 @@ async function loadPilotLocation(client, gameUserId) {
 
   if (pilotResult.rowCount === 0) {
     const spawned = await spawnPilotAtRandomSector(client, gameUserId);
-    if (!spawned) return { currentSector: null, connectedSectors: [], features: [], playersHere: [], credits: 0, rations: 0 };
+    if (!spawned) return { currentSector: null, connectedSectors: [], features: [], playersHere: [], credits: 0, rations: 0, fuel: 0 };
     pilotResult = { rows: [spawned] };
   }
 
-  const { credits, rations, ...currentSector } = pilotResult.rows[0];
+  const { credits, rations, fuel, ...currentSector } = pilotResult.rows[0];
 
   const linksResult = await client.query(
     `SELECT hs.id, hs.sector_number
@@ -154,13 +156,14 @@ async function loadPilotLocation(client, gameUserId) {
     features: featuresResult.rows,
     playersHere: playersResult.rows,
     credits,
-    rations
+    rations,
+    fuel
   };
 }
 
 // Every non-zero-quantity item a character currently owns, joined against
-// the catalog for display. Rations deliberately never appear here -- see
-// the comment on the 'rations' special-case in the /purchase route.
+// the catalog for display. Rations and fuel deliberately never appear here
+// -- see the comment on their special-cases in the /purchase route.
 async function loadInventory(client, gameUserId) {
   const result = await client.query(
     `SELECT i.item_key, i.name, i.category, hi.quantity
@@ -236,10 +239,10 @@ async function spawnPilotAtRandomSector(client, gameUserId) {
   );
   await markSectorVisited(client, gameUserId, randomSector.rows[0].id);
 
-  // credits/rations aren't re-fetched here -- a just-inserted pilot always
-  // has the column defaults, which match these constants (see the comment
-  // by their declaration).
-  return { ...randomSector.rows[0], credits: STARTING_CREDITS, rations: STARTING_RATIONS };
+  // credits/rations/fuel aren't re-fetched here -- a just-inserted pilot
+  // always has the column defaults, which match these constants (see the
+  // comment by their declaration).
+  return { ...randomSector.rows[0], credits: STARTING_CREDITS, rations: STARTING_RATIONS, fuel: STARTING_FUEL };
 }
 
 /**
@@ -392,10 +395,10 @@ router.get('/:gameKey/characters/:id', authenticate, async (req, res) => {
 
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
 
-    const { currentSector, connectedSectors, features, playersHere, credits, rations } = await loadPilotLocation(client, req.params.id);
+    const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel } = await loadPilotLocation(client, req.params.id);
     const inventory = await loadInventory(client, req.params.id);
 
-    res.json({ character: result.rows[0], currentSector, connectedSectors, features, playersHere, credits, rations, inventory });
+    res.json({ character: result.rows[0], currentSector, connectedSectors, features, playersHere, credits, rations, fuel, inventory });
   } catch (err) {
     console.error('Error loading character:', err);
     res.status(500).json({ message: 'Failed to load character' });
@@ -438,22 +441,23 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
     );
     if (linkCheck.rowCount === 0) return res.status(400).json({ message: 'That sector is not reachable from here' });
 
-    // Every warp costs a small, fixed amount of rations (clamped at 0
-    // rather than going negative) -- credits aren't touched by movement,
-    // only by whatever the player chooses to spend them on later. There's
-    // no "can't afford to warp" failure state yet, just depletion.
+    // Every warp costs a small, fixed amount of rations and fuel (clamped
+    // at 0 rather than going negative) -- credits aren't touched by
+    // movement, only by whatever the player chooses to spend them on
+    // later. There's no "can't afford to warp" failure state yet, just
+    // depletion.
     await client.query(
       `UPDATE haulonaut_pilots
-       SET current_sector_id = $1, rations = GREATEST(0, rations - $2)
-       WHERE game_user_id = $3`,
-      [toSectorId, WARP_RATIONS_COST, req.params.id]
+       SET current_sector_id = $1, rations = GREATEST(0, rations - $2), fuel = GREATEST(0, fuel - $3)
+       WHERE game_user_id = $4`,
+      [toSectorId, WARP_RATIONS_COST, WARP_FUEL_COST, req.params.id]
     );
     await markSectorVisited(client, req.params.id, toSectorId);
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
 
-    const { currentSector, connectedSectors, features, playersHere, credits, rations } = await loadPilotLocation(client, req.params.id);
+    const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel } = await loadPilotLocation(client, req.params.id);
 
-    res.json({ currentSector, connectedSectors, features, playersHere, credits, rations });
+    res.json({ currentSector, connectedSectors, features, playersHere, credits, rations, fuel });
   } catch (err) {
     console.error('Error navigating:', err);
     res.status(500).json({ message: 'Failed to navigate' });
@@ -495,10 +499,11 @@ router.get('/:gameKey/items', authenticate, async (req, res) => {
  * server-side, not trusted from the client), and unless they can afford
  * base_price * quantity in credits.
  *
- * 'rations' is a special case: it adds straight to haulonaut_pilots.rations
- * instead of becoming an inventory row, since rations are already a
- * top-level pilot stat shown in the HUD -- see migration 060's comment.
- * Every other item goes into haulonaut_pilot_inventory.
+ * 'rations' and 'fuel' are special cases: they add straight to
+ * haulonaut_pilots.rations / .fuel instead of becoming an inventory row,
+ * since both are already top-level pilot stats shown in the HUD -- see
+ * migrations 060 and 061. Every other item goes into
+ * haulonaut_pilot_inventory.
  */
 router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) => {
   const itemKey = (req.body.item_key || '').trim();
@@ -544,6 +549,8 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
 
     if (item.item_key === 'rations') {
       await client.query('UPDATE haulonaut_pilots SET rations = rations + $1 WHERE game_user_id = $2', [quantity, req.params.id]);
+    } else if (item.item_key === 'fuel') {
+      await client.query('UPDATE haulonaut_pilots SET fuel = fuel + $1 WHERE game_user_id = $2', [quantity, req.params.id]);
     } else {
       await client.query(
         `INSERT INTO haulonaut_pilot_inventory (game_user_id, item_id, quantity) VALUES ($1, $2, $3)
@@ -554,13 +561,14 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
 
     await client.commit();
 
-    const pilotAfter = await client.query('SELECT credits, rations FROM haulonaut_pilots WHERE game_user_id = $1', [req.params.id]);
+    const pilotAfter = await client.query('SELECT credits, rations, fuel FROM haulonaut_pilots WHERE game_user_id = $1', [req.params.id]);
     const inventory = await loadInventory(client, req.params.id);
 
     res.json({
       message: `Purchased ${quantity} ${item.name}`,
       credits: pilotAfter.rows[0].credits,
       rations: pilotAfter.rows[0].rations,
+      fuel: pilotAfter.rows[0].fuel,
       inventory
     });
   } catch (err) {

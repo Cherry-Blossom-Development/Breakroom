@@ -14,6 +14,7 @@ const sectorFeatures = ref([])
 const playersHere = ref([])
 const credits = ref(0)
 const rations = ref(0)
+const fuel = ref(0)
 const inventory = ref([])
 const itemsCatalog = ref([])
 const knownLocations = ref([])
@@ -217,6 +218,7 @@ async function purchaseItem(entry) {
     if (!res.ok) throw new Error(data.message || 'Purchase failed')
     credits.value = data.credits
     rations.value = data.rations
+    fuel.value = data.fuel
     inventory.value = data.inventory || []
     logLines.value.push(`Purchased 1 ${entry.name}. (-${entry.base_price} Credits)`)
     scrollLogToBottom()
@@ -260,6 +262,7 @@ async function loadCharacter() {
     playersHere.value = data.playersHere || []
     credits.value = data.credits || 0
     rations.value = data.rations || 0
+    fuel.value = data.fuel || 0
     inventory.value = data.inventory || []
     regenerateStarfield()
     logLines.value = [
@@ -319,6 +322,7 @@ async function navigateTo(sector) {
     playersHere.value = data.playersHere || []
     credits.value = data.credits || 0
     rations.value = data.rations || 0
+    fuel.value = data.fuel || 0
     viewportMode.value = 'space'
     regenerateStarfield()
     logLines.value.push(`Arrived in Sector ${data.currentSector.sector_number}.`)
@@ -599,6 +603,9 @@ onUnmounted(() => {
                   </span>
                   <span class="resource-stat" :class="{ 'resource-empty': rations <= 0 }">
                     <span class="resource-icon" aria-hidden="true">&#8801;</span>{{ rations.toLocaleString() }} <span class="resource-unit">Rations</span>
+                  </span>
+                  <span class="resource-stat" :class="{ 'resource-empty': fuel <= 0 }">
+                    <span class="resource-icon" aria-hidden="true">&#9636;</span>{{ fuel.toLocaleString() }} <span class="resource-unit">Fuel</span>
                   </span>
                 </div>
                 <span class="header-status">STATUS: <span class="status-active">{{ character.status.toUpperCase() }}</span></span>
