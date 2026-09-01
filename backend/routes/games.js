@@ -430,22 +430,37 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
     if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
 
     const pilotResult = await client.query(
-      'SELECT current_sector_id FROM haulonaut_pilots WHERE game_user_id = $1',
+      'SELECT current_sector_id, rations, fuel FROM haulonaut_pilots WHERE game_user_id = $1',
       [req.params.id]
     );
     if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
+    const pilot = pilotResult.rows[0];
 
     const linkCheck = await client.query(
       'SELECT 1 FROM haulonaut_sector_links WHERE from_sector_id = $1 AND to_sector_id = $2',
-      [pilotResult.rows[0].current_sector_id, toSectorId]
+      [pilot.current_sector_id, toSectorId]
     );
     if (linkCheck.rowCount === 0) return res.status(400).json({ message: 'That sector is not reachable from here' });
+
+    // A warp can't be afforded once either resource has actually hit 0 --
+    // checked against the cost (not just > 0) so this stays correct if
+    // either cost is ever tuned above 1. The hop that brings a resource
+    // down TO 0 is still allowed; it's the next one, starting from 0,
+    // that gets rejected here.
+    const outOfRations = pilot.rations < WARP_RATIONS_COST;
+    const outOfFuel = pilot.fuel < WARP_FUEL_COST;
+    if (outOfRations && outOfFuel) {
+      return res.status(409).json({ message: 'Out of rations and fuel -- cannot warp' });
+    } else if (outOfRations) {
+      return res.status(409).json({ message: 'Out of rations -- cannot warp' });
+    } else if (outOfFuel) {
+      return res.status(409).json({ message: 'Out of fuel -- cannot warp' });
+    }
 
     // Every warp costs a small, fixed amount of rations and fuel (clamped
     // at 0 rather than going negative) -- credits aren't touched by
     // movement, only by whatever the player chooses to spend them on
-    // later. There's no "can't afford to warp" failure state yet, just
-    // depletion.
+    // later.
     await client.query(
       `UPDATE haulonaut_pilots
        SET current_sector_id = $1, rations = GREATEST(0, rations - $2), fuel = GREATEST(0, fuel - $3)
