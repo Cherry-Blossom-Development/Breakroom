@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { buildUniverseGraph, generateSectorContent } = require('../utilities/haulonautUniverse');
+const { rollLandingEvent } = require('../utilities/haulonautLandingEvents');
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -599,10 +600,12 @@ router.get('/:gameKey/items', authenticate, async (req, res) => {
 
 /**
  * POST /api/games/:gameKey/characters/:id/purchase
- * Buy one item from whatever outpost is in the character's current
- * sector. Body: { item_key, quantity } -- quantity optional, defaults to
- * 1, clamped to 1-99. Rejects the purchase unless the character is
- * actually standing in a sector with a trading_outpost feature (re-checked
+ * Buy one item from whatever trading_outpost or planet is in the
+ * character's current sector -- planets trade too (see the Planet
+ * Overview "Trade" option), same catalog and prices as an outpost, no
+ * separate inventory. Body: { item_key, quantity } -- quantity optional,
+ * defaults to 1, clamped to 1-99. Rejects the purchase unless the
+ * character is actually standing somewhere tradeable (re-checked
  * server-side, not trusted from the client), and unless they can afford
  * base_price * quantity in credits.
  *
@@ -634,11 +637,11 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
     );
     if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
 
-    const outpostCheck = await client.query(
-      `SELECT 1 FROM haulonaut_sector_features WHERE sector_id = $1 AND feature_type = 'trading_outpost'`,
+    const tradeCheck = await client.query(
+      `SELECT 1 FROM haulonaut_sector_features WHERE sector_id = $1 AND feature_type IN ('trading_outpost', 'planet')`,
       [pilotResult.rows[0].current_sector_id]
     );
-    if (outpostCheck.rowCount === 0) return res.status(409).json({ message: 'No outpost in this sector' });
+    if (tradeCheck.rowCount === 0) return res.status(409).json({ message: 'Nowhere to trade in this sector' });
 
     const itemResult = await client.query(
       'SELECT id, item_key, name, base_price FROM haulonaut_items WHERE item_key = $1',
@@ -682,6 +685,71 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
     await client.rollback();
     console.error('Error purchasing item:', err);
     res.status(500).json({ message: 'Failed to purchase item' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/characters/:id/land
+ * Rolls one random surface-expedition event (see
+ * utilities/haulonautLandingEvents.js) and applies its credits/rations/fuel
+ * delta straight to the pilot -- no new stats, no multi-turn expedition
+ * state, just one narrated outcome per call. Rejected unless the character
+ * is actually standing in a sector with a planet feature (re-checked
+ * server-side). Deltas are clamped at 0 same as everywhere else on
+ * haulonaut_pilots; there's no upper cap.
+ */
+router.post('/:gameKey/characters/:id/land', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+
+    const pilotResult = await client.query(
+      'SELECT current_sector_id FROM haulonaut_pilots WHERE game_user_id = $1',
+      [req.params.id]
+    );
+    if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
+
+    const planetCheck = await client.query(
+      `SELECT 1 FROM haulonaut_sector_features WHERE sector_id = $1 AND feature_type = 'planet'`,
+      [pilotResult.rows[0].current_sector_id]
+    );
+    if (planetCheck.rowCount === 0) return res.status(409).json({ message: 'No planet in this sector' });
+
+    const { narration, effects } = rollLandingEvent();
+
+    await client.query(
+      `UPDATE haulonaut_pilots
+       SET credits = GREATEST(0, credits + $1),
+           rations = GREATEST(0, rations + $2),
+           fuel = GREATEST(0, fuel + $3)
+       WHERE game_user_id = $4`,
+      [effects.credits || 0, effects.rations || 0, effects.fuel || 0, req.params.id]
+    );
+
+    const pilotAfter = await client.query(
+      'SELECT credits, rations, fuel FROM haulonaut_pilots WHERE game_user_id = $1',
+      [req.params.id]
+    );
+
+    res.json({
+      narration,
+      effects,
+      credits: pilotAfter.rows[0].credits,
+      rations: pilotAfter.rows[0].rations,
+      fuel: pilotAfter.rows[0].fuel
+    });
+  } catch (err) {
+    console.error('Error landing:', err);
+    res.status(500).json({ message: 'Failed to land' });
   } finally {
     client.release();
   }

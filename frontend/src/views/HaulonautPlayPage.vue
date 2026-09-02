@@ -18,10 +18,12 @@ const fuel = ref(0)
 const inventory = ref([])
 const itemsCatalog = ref([])
 const knownLocations = ref([])
-const viewportMode = ref('space') // 'space', 'outpost' (browsing what's for sale), 'cargo' (owned inventory), or 'charts' (known planets/outposts)
+const viewportMode = ref('space') // 'space', 'outpost' (browsing what's for sale), 'cargo' (owned inventory), 'charts' (known planets/outposts), 'planet' (overview menu), or 'landing' (surface expedition)
 const purchasing = ref(false)
 const purchaseError = ref('')
 const chartsError = ref('')
+const landing = ref(false) // true while a surface-expedition roll's own API call is in flight
+const landingError = ref('')
 const traveling = ref(false) // true while an autopilot course is being flown hop-by-hop
 const driftVariance = ref(0)
 const drifting = ref(false) // true while a drift hop's own API call is in flight
@@ -87,6 +89,20 @@ const chartsMenuItems = computed(() => [
   { __leave: true, name: 'Close Star Charts' }
 ])
 
+// Planet Overview's top-level menu: trade (reuses the outpost view/flow
+// entirely -- planets sell the same catalog, see the /purchase route) or
+// land for a randomized surface-expedition roll.
+const planetMenuItems = computed(() => [
+  { key: 'trade', name: 'Trade' },
+  { key: 'land', name: 'Land' },
+  { __leave: true, name: 'Leave Planet Overview' }
+])
+
+const landingMenuItems = computed(() => [
+  { key: 'explore', name: 'Explore Surface' },
+  { __leave: true, name: 'Return to Ship' }
+])
+
 // What the viewport box's keyboard handling should treat as "the current
 // list" -- depends on which overlay (if any) is showing. Cargo's own view
 // is otherwise static (just a read-only list), so its only interactive
@@ -95,6 +111,8 @@ const viewportMenuItems = computed(() => {
   if (viewportMode.value === 'outpost') return outpostMenuItems.value
   if (viewportMode.value === 'cargo') return [{ __leave: true, name: 'Close Cargo' }]
   if (viewportMode.value === 'charts') return chartsMenuItems.value
+  if (viewportMode.value === 'planet') return planetMenuItems.value
+  if (viewportMode.value === 'landing') return landingMenuItems.value
   return []
 })
 
@@ -170,10 +188,9 @@ function boxStateClass(box) {
   return {}
 }
 
-// "Visit Outpost", "Cargo", and "Star Charts" all switch the viewport into
-// an overlay mode (everything else on screen stays the same); "Planet
-// Overview" has no real system behind it yet, so it just logs a stub
-// notice.
+// "Visit Outpost", "Cargo", "Star Charts", and "Planet Overview" all
+// switch the viewport into an overlay mode -- everything else on screen
+// stays the same.
 function performAction(item) {
   if (item.key === 'visit_outpost') {
     viewportMode.value = 'outpost'
@@ -181,7 +198,9 @@ function performAction(item) {
     selectedIndex.value = -1
     logLines.value.push(`Docking at ${outpostFeature.value ? outpostFeature.value.name : 'the outpost'}.`)
   } else if (item.key === 'planet_overview') {
-    logLines.value.push('Planetary survey systems are not available yet.')
+    viewportMode.value = 'planet'
+    selectedIndex.value = -1
+    logLines.value.push(`Approaching ${planetFeature.value ? planetFeature.value.name : 'the planet'}.`)
   } else if (item.key === 'view_cargo') {
     viewportMode.value = 'cargo'
     selectedIndex.value = -1
@@ -199,7 +218,9 @@ function performAction(item) {
 const OVERLAY_CLOSE_MESSAGES = {
   outpost: 'Departing the outpost.',
   cargo: 'Closing the cargo manifest.',
-  charts: 'Closing star charts.'
+  charts: 'Closing star charts.',
+  planet: 'Breaking orbit.',
+  landing: 'Returning to orbit.'
 }
 
 function exitViewportOverlay() {
@@ -208,6 +229,7 @@ function exitViewportOverlay() {
   selectedIndex.value = -1
   purchaseError.value = ''
   chartsError.value = ''
+  landingError.value = ''
   logLines.value.push(message)
   scrollLogToBottom()
 }
@@ -245,6 +267,63 @@ function activateViewportMenuItem(entry) {
     purchaseItem(entry)
   } else if (viewportMode.value === 'charts') {
     setCourse(entry)
+  } else if (viewportMode.value === 'planet') {
+    if (entry.key === 'trade') enterTrade()
+    else if (entry.key === 'land') enterLanding()
+  } else if (viewportMode.value === 'landing') {
+    if (entry.key === 'explore') exploreSurface()
+  }
+}
+
+// Trade at a planet reuses the outpost view/flow entirely -- same
+// catalog, same /purchase route (which now accepts a planet feature as
+// well as a trading_outpost one). Leaving trade returns straight to
+// space, same as leaving an actual outpost, rather than back to the
+// Planet Overview menu -- keeps every overlay's "leave" behavior uniform.
+function enterTrade() {
+  viewportMode.value = 'outpost'
+  selectedIndex.value = -1
+  purchaseError.value = ''
+  logLines.value.push(`Opening a trade channel with ${planetFeature.value ? planetFeature.value.name : 'the planet'}.`)
+  scrollLogToBottom()
+}
+
+function enterLanding() {
+  viewportMode.value = 'landing'
+  selectedIndex.value = -1
+  landingError.value = ''
+  logLines.value.push(`Beginning descent toward ${planetFeature.value ? planetFeature.value.name : 'the surface'}.`)
+  scrollLogToBottom()
+}
+
+// One random surface-expedition roll (see haulonautLandingEvents.js on
+// the backend) -- repeatable, each call is an independent gamble. Doesn't
+// move the character or touch inventory, only credits/rations/fuel.
+async function exploreSurface() {
+  if (landing.value) return
+  landing.value = true
+  landingError.value = ''
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/land`, {
+      method: 'POST',
+      credentials: 'include'
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Landing failed')
+    credits.value = data.credits
+    rations.value = data.rations
+    fuel.value = data.fuel
+    logLines.value.push(data.narration)
+    const deltaParts = []
+    if (data.effects.credits) deltaParts.push(`${data.effects.credits > 0 ? '+' : ''}${data.effects.credits} Credits`)
+    if (data.effects.rations) deltaParts.push(`${data.effects.rations > 0 ? '+' : ''}${data.effects.rations} Rations`)
+    if (data.effects.fuel) deltaParts.push(`${data.effects.fuel > 0 ? '+' : ''}${data.effects.fuel} Fuel`)
+    if (deltaParts.length > 0) logLines.value.push(`(${deltaParts.join(', ')})`)
+    scrollLogToBottom()
+  } catch (err) {
+    landingError.value = err.message
+  } finally {
+    landing.value = false
   }
 }
 
@@ -704,7 +783,7 @@ onUnmounted(() => {
                     <span v-if="activeBox === 'viewport' && level === 'inside'" aria-hidden="true">&#9658; </span><span v-if="activeBox === 'viewport' && level === 'box'" aria-hidden="true">[ </span>VIEWPORT<span v-if="activeBox === 'viewport' && level === 'box'" aria-hidden="true"> ]</span>
                   </span>
                   <div v-if="viewportMode === 'outpost'" class="tui-panel-body outpost-body">
-                    <p class="outpost-heading">{{ outpostFeature ? outpostFeature.name.toUpperCase() : 'TRADING OUTPOST' }}</p>
+                    <p class="outpost-heading">{{ (outpostFeature || planetFeature) ? (outpostFeature || planetFeature).name.toUpperCase() : 'TRADING POST' }}</p>
                     <div class="outpost-items">
                       <button
                         v-for="(entry, i) in outpostMenuItems"
@@ -774,6 +853,44 @@ onUnmounted(() => {
                       </div>
                     </template>
                     <p v-if="chartsError" class="outpost-error">{{ chartsError }}</p>
+                  </div>
+
+                  <div v-else-if="viewportMode === 'planet'" class="tui-panel-body outpost-body">
+                    <p class="outpost-heading">{{ planetFeature ? planetFeature.name.toUpperCase() : 'PLANET OVERVIEW' }}</p>
+                    <p v-if="planetFeature?.description" class="planet-description">{{ planetFeature.description }}</p>
+                    <div class="outpost-items">
+                      <button
+                        v-for="(entry, i) in planetMenuItems"
+                        :key="entry.__leave ? '__leave' : entry.key"
+                        class="outpost-item-btn"
+                        :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.__leave }"
+                        :aria-pressed="selectedIndex === i"
+                        @click="activateViewportMenuItem(entry)"
+                      >
+                        <span class="outpost-item-hotkey" aria-hidden="true">{{ i + 1 }}</span>
+                        <span class="outpost-item-name">{{ entry.name }}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div v-else-if="viewportMode === 'landing'" class="tui-panel-body outpost-body">
+                    <p class="outpost-heading">SURFACE EXPEDITION</p>
+                    <p class="planet-description">Send a landing party down to see what turns up -- good and bad both happen out here.</p>
+                    <div class="outpost-items">
+                      <button
+                        v-for="(entry, i) in landingMenuItems"
+                        :key="entry.__leave ? '__leave' : entry.key"
+                        class="outpost-item-btn"
+                        :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.__leave }"
+                        :disabled="landing"
+                        :aria-pressed="selectedIndex === i"
+                        @click="activateViewportMenuItem(entry)"
+                      >
+                        <span class="outpost-item-hotkey" aria-hidden="true">{{ i + 1 }}</span>
+                        <span class="outpost-item-name">{{ entry.name }}</span>
+                      </button>
+                    </div>
+                    <p v-if="landingError" class="outpost-error">{{ landingError }}</p>
                   </div>
 
                   <div v-else class="tui-panel-body viewport-body">
@@ -1326,6 +1443,13 @@ onUnmounted(() => {
   letter-spacing: 0.08em;
   color: #baffcf;
   text-shadow: 0 0 6px rgba(77, 255, 136, 0.5);
+}
+
+.planet-description {
+  font-size: 0.72rem;
+  font-style: italic;
+  color: #6fbd8c;
+  line-height: 1.4;
 }
 
 .outpost-items {
