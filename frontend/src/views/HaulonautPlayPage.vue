@@ -18,12 +18,15 @@ const fuel = ref(0)
 const inventory = ref([])
 const itemsCatalog = ref([])
 const knownLocations = ref([])
-const viewportMode = ref('space') // 'space', 'outpost' (browsing what's for sale), 'cargo' (owned inventory), 'charts' (known planets/outposts), 'planet' (overview menu), or 'landing' (surface expedition)
+const viewportMode = ref('space') // 'space', 'outpost' (browsing what's for sale), 'cargo' (owned inventory), 'charts' (known planets/outposts), 'planet' (overview menu), or 'landing-sequence' (animated descent)
 const purchasing = ref(false)
 const purchaseError = ref('')
 const chartsError = ref('')
 const landing = ref(false) // true while a surface-expedition roll's own API call is in flight
 const landingError = ref('')
+const landingPhase = ref(null) // null | 'approaching' | 'orbiting' | 'entry' | 'sky' | 'docked' -- drives the landing-sequence animation
+const onSurface = ref(false) // true once the player has exited the craft -- replaces the whole ship UI with the surface screen
+const surfaceLog = ref([]) // exploreSurface() results shown on the surface screen itself (separate from the ship's hidden Terminal)
 const traveling = ref(false) // true while an autopilot course is being flown hop-by-hop
 const driftVariance = ref(0)
 const drifting = ref(false) // true while a drift hop's own API call is in flight
@@ -56,6 +59,33 @@ const outpostFeature = computed(() => sectorFeatures.value.find(f => f.feature_t
 // performDrift(); once false (refueled, or arrived at a planet), it
 // freezes/resets instead.
 const driftEligible = computed(() => fuel.value <= 0 && !planetFeature.value)
+
+// Same deterministic hue the space-view planet sphere already uses, reused
+// here so the sky color during/after atmospheric entry visibly matches the
+// planet seen from orbit (a purple planet gets a light purple sky).
+const planetHue = computed(() => planetFeature.value ? hashHue(planetFeature.value.name) : 200)
+const landingPlanetGradient = computed(() =>
+  `radial-gradient(circle at 35% 32%, hsl(${planetHue.value},75%,68%), hsl(${planetHue.value},60%,38%) 65%, hsl(${planetHue.value},55%,18%) 100%)`
+)
+const landingSkyGradient = computed(() =>
+  `linear-gradient(to bottom, hsl(${planetHue.value},70%,82%) 0%, hsl(${planetHue.value},55%,62%) 100%)`
+)
+
+const landingSequenceActive = computed(() => landingPhase.value !== null)
+
+const LANDING_CAPTIONS = {
+  approaching: 'Approaching...',
+  orbiting: 'Adjusting orbital trajectory...',
+  entry: 'ATMOSPHERIC ENTRY -- HOLD ON!',
+  sky: 'Breaking through the cloud layer...',
+  docked: 'Touchdown confirmed. Docking clamps engaged.'
+}
+const landingCaption = computed(() => {
+  if (landingPhase.value === 'approaching') {
+    return `Approaching ${planetFeature.value ? planetFeature.value.name : 'the planet'}...`
+  }
+  return LANDING_CAPTIONS[landingPhase.value] || ''
+})
 
 // What's available to do -- some entries are sector-dependent (grows as
 // more sector content types get real interactions), but Cargo and Star
@@ -98,21 +128,21 @@ const planetMenuItems = computed(() => [
   { __leave: true, name: 'Leave Planet Overview' }
 ])
 
-const landingMenuItems = computed(() => [
-  { key: 'explore', name: 'Explore Surface' },
-  { __leave: true, name: 'Return to Ship' }
-])
-
 // What the viewport box's keyboard handling should treat as "the current
 // list" -- depends on which overlay (if any) is showing. Cargo's own view
 // is otherwise static (just a read-only list), so its only interactive
-// entry is the one that closes it.
+// entry is the one that closes it. landing-sequence has nothing to
+// interact with until it reaches 'docked' -- an empty list here is what
+// makes the viewport keydown branch's existing "nothing to do" guard
+// naturally block input during the animation, with no extra special case.
 const viewportMenuItems = computed(() => {
   if (viewportMode.value === 'outpost') return outpostMenuItems.value
   if (viewportMode.value === 'cargo') return [{ __leave: true, name: 'Close Cargo' }]
   if (viewportMode.value === 'charts') return chartsMenuItems.value
   if (viewportMode.value === 'planet') return planetMenuItems.value
-  if (viewportMode.value === 'landing') return landingMenuItems.value
+  if (viewportMode.value === 'landing-sequence') {
+    return landingPhase.value === 'docked' ? [{ key: 'exit_craft', name: 'Exit Craft' }] : []
+  }
   return []
 })
 
@@ -219,8 +249,7 @@ const OVERLAY_CLOSE_MESSAGES = {
   outpost: 'Departing the outpost.',
   cargo: 'Closing the cargo manifest.',
   charts: 'Closing star charts.',
-  planet: 'Breaking orbit.',
-  landing: 'Returning to orbit.'
+  planet: 'Breaking orbit.'
 }
 
 function exitViewportOverlay() {
@@ -269,9 +298,9 @@ function activateViewportMenuItem(entry) {
     setCourse(entry)
   } else if (viewportMode.value === 'planet') {
     if (entry.key === 'trade') enterTrade()
-    else if (entry.key === 'land') enterLanding()
-  } else if (viewportMode.value === 'landing') {
-    if (entry.key === 'explore') exploreSurface()
+    else if (entry.key === 'land') beginLandingSequence()
+  } else if (viewportMode.value === 'landing-sequence') {
+    if (entry.key === 'exit_craft') exitCraft()
   }
 }
 
@@ -288,11 +317,64 @@ function enterTrade() {
   scrollLogToBottom()
 }
 
-function enterLanding() {
-  viewportMode.value = 'landing'
+// Phase order and how long each phase runs before auto-advancing to the
+// next -- 'docked' has no entry here, since it's a terminal state that
+// waits for the player to click Exit Craft rather than auto-advancing.
+const LANDING_PHASE_ORDER = ['approaching', 'orbiting', 'entry', 'sky', 'docked']
+const LANDING_PHASE_DURATIONS = { approaching: 20000, orbiting: 3500, entry: 4500, sky: 2500 }
+let landingTimeoutId = null
+
+function beginLandingSequence() {
+  viewportMode.value = 'landing-sequence'
   selectedIndex.value = -1
-  landingError.value = ''
+  surfaceLog.value = []
+  landingPhase.value = 'approaching'
   logLines.value.push(`Beginning descent toward ${planetFeature.value ? planetFeature.value.name : 'the surface'}.`)
+  scrollLogToBottom()
+  scheduleNextLandingPhase()
+}
+
+function scheduleNextLandingPhase() {
+  const duration = LANDING_PHASE_DURATIONS[landingPhase.value]
+  if (!duration) return // 'docked' -- nothing more to schedule, wait for Exit Craft
+  landingTimeoutId = setTimeout(() => {
+    const idx = LANDING_PHASE_ORDER.indexOf(landingPhase.value)
+    landingPhase.value = LANDING_PHASE_ORDER[idx + 1]
+    if (landingPhase.value === 'entry') logLines.value.push('ATMOSPHERIC ENTRY -- HOLD ON!')
+    else if (landingPhase.value === 'docked') logLines.value.push('Touchdown confirmed. Docking clamps engaged.')
+    scrollLogToBottom()
+    scheduleNextLandingPhase()
+  }, duration)
+}
+
+// Escape-triggered (see onKeydown) -- backs out of the animation at any
+// phase and returns to the Planet Overview menu, same as never having
+// clicked Land.
+function cancelLandingSequence() {
+  if (landingTimeoutId) { clearTimeout(landingTimeoutId); landingTimeoutId = null }
+  landingPhase.value = null
+  viewportMode.value = 'planet'
+  selectedIndex.value = -1
+  logLines.value.push('Descent aborted.')
+  scrollLogToBottom()
+}
+
+// The montage's payoff: leaves the ship UI entirely for the full-screen
+// surface view (see the top-level onSurface branch in the template).
+function exitCraft() {
+  if (landingTimeoutId) { clearTimeout(landingTimeoutId); landingTimeoutId = null }
+  landingPhase.value = null
+  surfaceLog.value = []
+  onSurface.value = true
+  logLines.value.push('Exiting craft.')
+  scrollLogToBottom()
+}
+
+function returnToShip() {
+  onSurface.value = false
+  viewportMode.value = 'space'
+  selectedIndex.value = -1
+  logLines.value.push('Boarding the ship. Systems coming back online.')
   scrollLogToBottom()
 }
 
@@ -313,12 +395,19 @@ async function exploreSurface() {
     credits.value = data.credits
     rations.value = data.rations
     fuel.value = data.fuel
-    logLines.value.push(data.narration)
     const deltaParts = []
     if (data.effects.credits) deltaParts.push(`${data.effects.credits > 0 ? '+' : ''}${data.effects.credits} Credits`)
     if (data.effects.rations) deltaParts.push(`${data.effects.rations > 0 ? '+' : ''}${data.effects.rations} Rations`)
     if (data.effects.fuel) deltaParts.push(`${data.effects.fuel > 0 ? '+' : ''}${data.effects.fuel} Fuel`)
-    if (deltaParts.length > 0) logLines.value.push(`(${deltaParts.join(', ')})`)
+    // Logged both to the ship's Terminal (for continuity once you return)
+    // and surfaceLog (visible immediately on the surface screen, which
+    // doesn't show the Terminal at all).
+    logLines.value.push(data.narration)
+    surfaceLog.value.push(data.narration)
+    if (deltaParts.length > 0) {
+      logLines.value.push(`(${deltaParts.join(', ')})`)
+      surfaceLog.value.push(`(${deltaParts.join(', ')})`)
+    }
     scrollLogToBottom()
   } catch (err) {
     landingError.value = err.message
@@ -554,12 +643,26 @@ function backToGames() {
 }
 
 function onKeydown(e) {
+  // The surface screen has no box hierarchy at all -- it's a different,
+  // much simpler paradigm than the ship UI it temporarily replaces.
+  if (onSurface.value) {
+    if (e.key === '1') { e.preventDefault(); exploreSurface() }
+    else if (e.key === '2') { e.preventDefault(); returnToShip() }
+    return
+  }
+
   // Escape always stops an in-progress autopilot course first, in addition
   // to (not instead of) its usual level-climbing below.
   if (e.key === 'Escape' && traveling.value) {
     traveling.value = false
     logLines.value.push('Autopilot disengaged.')
     scrollLogToBottom()
+  }
+
+  // ...and likewise backs out of an in-progress landing sequence, at any
+  // phase, rather than leaving it stuck mid-animation with no way out.
+  if (e.key === 'Escape' && landingSequenceActive.value) {
+    cancelLandingSequence()
   }
 
   // Escape always climbs one level, from wherever the player currently is.
@@ -623,7 +726,7 @@ function onKeydown(e) {
   }
 
   if (activeBox.value === 'nav') {
-    if (navigating.value || connectedSectors.value.length === 0) return
+    if (landingSequenceActive.value || navigating.value || connectedSectors.value.length === 0) return
     const count = connectedSectors.value.length
 
     if (e.key === 'ArrowRight' || e.key === 'Tab' && !e.shiftKey) {
@@ -656,7 +759,7 @@ function onKeydown(e) {
   }
 
   if (activeBox.value === 'actions') {
-    if (traveling.value || actionItems.value.length === 0) return
+    if (traveling.value || landingSequenceActive.value || actionItems.value.length === 0) return
     const count = actionItems.value.length
 
     if (e.key === 'ArrowDown' || e.key === 'Tab' && !e.shiftKey) {
@@ -737,6 +840,7 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   if (driftIntervalId) clearInterval(driftIntervalId)
+  if (landingTimeoutId) clearTimeout(landingTimeoutId)
 })
 </script>
 
@@ -746,6 +850,41 @@ onUnmounted(() => {
     <div v-else-if="error" class="crt-status">
       <p>{{ error }}</p>
       <button class="exit-link" @click="backToGames">Back to Games</button>
+    </div>
+
+    <!-- Surface screen: replaces the entire ship UI once the craft is
+         exited (see exitCraft()) -- a deliberately different, much
+         simpler paradigm than the CRT monitor, per the request that
+         landing "no longer see the entire interface you see now." -->
+    <div v-else-if="onSurface" class="surface-screen" :style="{ background: landingSkyGradient }">
+      <div class="surface-horizon" aria-hidden="true"></div>
+      <div class="surface-ground" aria-hidden="true"></div>
+      <div class="surface-panel">
+        <h1 class="surface-heading">{{ planetFeature ? planetFeature.name.toUpperCase() : 'PLANET SURFACE' }}</h1>
+        <p class="surface-subheading">Landing party status: nominal</p>
+
+        <div class="surface-log">
+          <p v-for="(line, i) in surfaceLog" :key="i" class="surface-log-line">{{ line }}</p>
+          <p v-if="surfaceLog.length === 0" class="surface-log-empty">The surface is still and silent.</p>
+        </div>
+
+        <div class="surface-stats">
+          <span class="resource-stat"><span class="resource-icon" aria-hidden="true">&#164;</span>{{ credits.toLocaleString() }} Credits</span>
+          <span class="resource-stat"><span class="resource-icon" aria-hidden="true">&#8801;</span>{{ rations.toLocaleString() }} Rations</span>
+          <span class="resource-stat"><span class="resource-icon" aria-hidden="true">&#9636;</span>{{ fuel.toLocaleString() }} Fuel</span>
+        </div>
+
+        <div class="surface-actions">
+          <button class="surface-btn" :disabled="landing" @click="exploreSurface">
+            <span class="surface-btn-hotkey" aria-hidden="true">1</span> Explore Surface
+          </button>
+          <button class="surface-btn surface-btn-secondary" @click="returnToShip">
+            <span class="surface-btn-hotkey" aria-hidden="true">2</span> Return to Ship
+          </button>
+        </div>
+        <p v-if="landingError" class="surface-error">{{ landingError }}</p>
+      </div>
+      <button class="surface-exit-link" @click="backToGames">Exit to Games List</button>
     </div>
 
     <div v-else class="crt-monitor">
@@ -873,16 +1012,29 @@ onUnmounted(() => {
                     </div>
                   </div>
 
-                  <div v-else-if="viewportMode === 'landing'" class="tui-panel-body outpost-body">
-                    <p class="outpost-heading">SURFACE EXPEDITION</p>
-                    <p class="planet-description">Send a landing party down to see what turns up -- good and bad both happen out here.</p>
-                    <div class="outpost-items">
+                  <div v-else-if="viewportMode === 'landing-sequence'" class="tui-panel-body landing-sequence-body">
+                    <div class="landing-scene" :class="landingPhase">
+                      <div class="landing-planet" :style="{ background: landingPlanetGradient }"></div>
+                      <div v-if="landingPhase === 'entry'" class="landing-flames" aria-hidden="true">
+                        <span class="flame flame-1"></span>
+                        <span class="flame flame-2"></span>
+                        <span class="flame flame-3"></span>
+                      </div>
+                      <div v-if="landingPhase === 'sky' || landingPhase === 'docked'" class="landing-sky" :style="{ background: landingSkyGradient }">
+                        <div class="landing-horizon"></div>
+                        <div v-if="landingPhase === 'docked'" class="landing-dock" aria-hidden="true">
+                          <div class="dock-tower"></div>
+                          <div class="dock-platform"></div>
+                        </div>
+                      </div>
+                    </div>
+                    <p class="landing-caption">{{ landingCaption }}</p>
+                    <div v-if="landingPhase === 'docked'" class="outpost-items">
                       <button
-                        v-for="(entry, i) in landingMenuItems"
-                        :key="entry.__leave ? '__leave' : entry.key"
+                        v-for="(entry, i) in viewportMenuItems"
+                        :key="entry.key"
                         class="outpost-item-btn"
-                        :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.__leave }"
-                        :disabled="landing"
+                        :class="{ selected: selectedIndex === i }"
                         :aria-pressed="selectedIndex === i"
                         @click="activateViewportMenuItem(entry)"
                       >
@@ -890,7 +1042,6 @@ onUnmounted(() => {
                         <span class="outpost-item-name">{{ entry.name }}</span>
                       </button>
                     </div>
-                    <p v-if="landingError" class="outpost-error">{{ landingError }}</p>
                   </div>
 
                   <div v-else class="tui-panel-body viewport-body">
@@ -947,7 +1098,7 @@ onUnmounted(() => {
                         :key="item.key"
                         class="action-btn"
                         :class="{ selected: selectedIndex === i }"
-                        :disabled="traveling"
+                        :disabled="traveling || landingSequenceActive"
                         :aria-label="`${item.label} (key ${i + 1})`"
                         :aria-pressed="selectedIndex === i"
                         @click="performAction(item)"
@@ -1002,7 +1153,7 @@ onUnmounted(() => {
                           :key="s.id"
                           class="warp-btn"
                           :class="{ selected: selectedIndex === i, visited: s.visited }"
-                          :disabled="navigating"
+                          :disabled="navigating || landingSequenceActive"
                           :aria-label="`Warp to Sector ${s.sector_number} (key ${i + 1})${s.visited ? ', visited' : ', unexplored'}`"
                           :aria-pressed="selectedIndex === i"
                           @click="manualNavigateTo(s)"
@@ -1559,6 +1710,161 @@ onUnmounted(() => {
   color: #ff8a8a;
 }
 
+/* ---- Viewport panel: landing-sequence mode -- the animated 90s-style
+   descent montage (approach -> orbit turn -> atmospheric entry flash/
+   flames -> sky reveal -> docked). Deliberately crude/simple shapes,
+   matching the "badly drawn" retro aesthetic that was asked for. Every
+   phase's starting size/rotation matches the previous phase's end state,
+   so switching phase classes doesn't visibly "jump". ---- */
+.landing-sequence-body {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.landing-scene {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: #050506;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.landing-planet {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  box-shadow: 0 0 18px 2px rgba(255, 255, 255, 0.15), inset -6px -6px 14px rgba(0, 0, 0, 0.5);
+}
+
+.landing-scene.approaching .landing-planet {
+  animation: landing-approach 20s linear forwards;
+}
+
+@keyframes landing-approach {
+  from { width: 40px; height: 40px; }
+  to { width: 200px; height: 200px; }
+}
+
+.landing-scene.orbiting .landing-planet {
+  width: 200px;
+  height: 200px;
+  animation: landing-orbit 3.5s ease-in forwards;
+}
+
+@keyframes landing-orbit {
+  from { width: 200px; height: 200px; transform: rotate(0deg); }
+  to { width: 360px; height: 360px; transform: rotate(90deg); }
+}
+
+.landing-scene.entry .landing-planet {
+  display: none; /* the planet now fills the whole view -- just fire from here on */
+}
+
+.landing-scene.entry {
+  animation: landing-flash-bg 0.5s steps(2) infinite;
+}
+
+@keyframes landing-flash-bg {
+  0%, 100% { background: #1a0500; }
+  25% { background: #ff6a00; }
+  50% { background: #fff2c2; }
+  75% { background: #ff2d00; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-scene.entry { animation: none; background: #ff6a00; }
+}
+
+.landing-flames {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 6%;
+}
+
+.flame {
+  width: 20%;
+  max-width: 70px;
+  height: 55%;
+  background: linear-gradient(to top, #ff2d00, #ffae42 55%, #fff2c2 100%);
+  border-radius: 50% 50% 15% 15%;
+  opacity: 0.9;
+  animation: flame-flicker 0.25s ease-in-out infinite alternate;
+}
+
+.flame-2 { height: 70%; animation-delay: 0.08s; }
+.flame-3 { animation-delay: 0.15s; }
+
+@keyframes flame-flicker {
+  from { transform: scaleY(0.85) scaleX(0.9); }
+  to { transform: scaleY(1.15) scaleX(1.05); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flame { animation: none; }
+}
+
+.landing-sky {
+  position: absolute;
+  inset: 0;
+  animation: landing-sky-fade 2.5s ease-in forwards;
+}
+
+@keyframes landing-sky-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.landing-horizon {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 28%;
+  height: 3px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.landing-dock {
+  position: absolute;
+  left: 50%;
+  bottom: 8%;
+  transform: translateX(-50%);
+}
+
+.dock-platform {
+  width: 140px;
+  height: 14px;
+  background: #6b6153;
+  border: 2px solid #4a4335;
+  border-radius: 2px;
+}
+
+.dock-tower {
+  position: absolute;
+  bottom: 14px;
+  left: 18px;
+  width: 12px;
+  height: 46px;
+  background: #8a8071;
+  border: 2px solid #4a4335;
+}
+
+.landing-caption {
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 0.75rem;
+  font-style: italic;
+  color: #baffcf;
+  padding: 8px 10px 4px;
+}
+
 /* ---- Sector scan panel ---- */
 .scan-body {
   font-size: 0.75rem;
@@ -1943,5 +2249,183 @@ onUnmounted(() => {
   .crt-bezel { padding: 14px 16px 10px; border-radius: 14px; }
   .crt-brand { font-size: 0.6rem; }
   .crt-header { flex-wrap: wrap; row-gap: 2px; }
+}
+
+/* ---- Surface screen: replaces the entire monitor once the craft is
+   exited. Deliberately a different visual language from the CRT ship UI
+   -- a full-bleed painted scene (sky gradient matching the planet's hue,
+   a crude jagged "terrain" silhouette) with a simple dialog-box menu on
+   top, closer to Oregon Trail than to a text-mode computer. ---- */
+.surface-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Courier New', Courier, monospace;
+  overflow: hidden;
+}
+
+.surface-horizon {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 58%;
+  height: 2px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.surface-ground {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: 58%;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.4));
+  clip-path: polygon(0% 22%, 8% 6%, 18% 16%, 30% 0%, 45% 13%, 60% 4%, 75% 19%, 88% 7%, 100% 16%, 100% 100%, 0% 100%);
+}
+
+.surface-panel {
+  position: relative;
+  z-index: 1;
+  width: min(90%, 560px);
+  background: rgba(5, 19, 10, 0.78);
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-radius: 8px;
+  padding: clamp(16px, 4vw, 28px);
+  color: #eafff0;
+  text-align: center;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+}
+
+.surface-heading {
+  margin: 0 0 4px;
+  font-size: clamp(1.1rem, 4vw, 1.5rem);
+  letter-spacing: 0.06em;
+  color: #baffcf;
+  text-shadow: 0 0 8px rgba(77, 255, 136, 0.5);
+}
+
+.surface-subheading {
+  margin: 0 0 16px;
+  font-size: 0.8rem;
+  font-style: italic;
+  color: #8fe6ab;
+}
+
+.surface-log {
+  min-height: 60px;
+  max-height: 140px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  text-align: left;
+}
+
+.surface-log-line {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  color: #cfe8d8;
+  line-height: 1.4;
+}
+
+.surface-log-empty {
+  margin: 0;
+  font-size: 0.78rem;
+  font-style: italic;
+  color: #7fae94;
+}
+
+.surface-stats {
+  display: flex;
+  justify-content: center;
+  gap: clamp(10px, 3vw, 20px);
+  margin-bottom: 18px;
+  font-size: 0.78rem;
+  color: #eafff0;
+  flex-wrap: wrap;
+}
+
+.surface-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.surface-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #05130a;
+  background: #4dff88;
+  border: 1px solid #baffcf;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.surface-btn:hover:not(:disabled) {
+  background: #baffcf;
+}
+
+.surface-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.surface-btn-secondary {
+  background: transparent;
+  color: #eafff0;
+  border-style: dashed;
+}
+
+.surface-btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.surface-btn-hotkey {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  background: rgba(5, 19, 10, 0.25);
+  font-size: 0.7rem;
+}
+
+.surface-btn-secondary .surface-btn-hotkey {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.surface-error {
+  margin: 10px 0 0;
+  font-size: 0.75rem;
+  color: #ff8a8a;
+}
+
+.surface-exit-link {
+  position: relative;
+  z-index: 1;
+  margin-top: 16px;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  font-family: inherit;
+  font-size: 0.7rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.surface-exit-link:hover {
+  color: #fff;
 }
 </style>
