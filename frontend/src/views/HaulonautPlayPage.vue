@@ -359,10 +359,7 @@ const LANDING_PHASE_ORDER = ['approaching', 'closing', 'sweeping', 'entry', 'doc
 const LANDING_PHASE_DURATIONS = { approaching: 8000, closing: 5000, sweeping: 4000, entry: 6000 }
 const LANDING_PHASE_ANIMATIONS = {
   'landing-approach': 'approaching',
-  // 'closing' runs two simultaneous animations (size + position, see the
-  // CSS) that both finish at the same time -- only the size one is
-  // listed here, since only one needs to trigger the advance.
-  'landing-closing-size': 'closing',
+  'landing-closing': 'closing',
   'landing-sweep': 'sweeping',
   'landing-atmosphere-rise': 'entry'
 }
@@ -1835,6 +1832,12 @@ onUnmounted(() => {
   aspect-ratio: 1 / 1;
   border-radius: 50%;
   box-shadow: 0 0 24px 4px rgba(255, 255, 255, 0.12), inset -10px -10px 24px rgba(0, 0, 0, 0.5);
+  /* Keeps this element on its own compositing layer continuously, rather
+     than letting the browser promote/demote it right as the animation-name
+     changes at each phase boundary -- that promotion/demotion churn is a
+     known source of a one-frame render glitch for exactly this pattern
+     (an animated transform whose keyframes swap at a class change). */
+  will-change: transform;
 }
 
 .landing-scene.approaching .landing-planet {
@@ -1852,25 +1855,22 @@ onUnmounted(() => {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%) scale(1);
-  /* Two independent animations on the same element: size keeps growing
-     at the EXACT same linear rate approaching ended on (10.75%/s of the
-     old height-based math -- see landing-approach: (100-14)/8s -- scale
+  /* One single animation covering both left and transform together (not
+     two separate simultaneous animations on the same element) -- that
+     split was the previous attempt at giving position its own easing,
+     but running two independent @keyframes animations on one element is
+     itself a plausible source of a sync glitch between them, which isn't
+     worth it for a minor easing nuance. Linear throughout still keeps the
+     SAME growth rate approaching ended on (10.75%/s of the old
+     height-based math -- see landing-approach: (100-14)/8s -- scale
      1 -> 1.5375 over 5s is the equivalent rate in scale terms), so
-     there's no velocity discontinuity in the diameter at the phase
-     boundary. Position gets its own easing since it's starting from a
-     dead stop (0 -> moving right is a brand new motion, not a
-     continuation of one already in progress). */
-  animation: landing-closing-size 5s linear forwards, landing-closing-position 5s ease-in forwards;
+     there's still no velocity discontinuity in the diameter. */
+  animation: landing-closing 5s linear forwards;
 }
 
-@keyframes landing-closing-size {
-  from { transform: translate(-50%, -50%) scale(1); }
-  to { transform: translate(-50%, -50%) scale(1.5375); }
-}
-
-@keyframes landing-closing-position {
-  from { left: 50%; }
-  to { left: 82%; }
+@keyframes landing-closing {
+  from { left: 50%; transform: translate(-50%, -50%) scale(1); }
+  to { left: 82%; transform: translate(-50%, -50%) scale(1.5375); }
 }
 
 .landing-scene.sweeping .landing-planet {
