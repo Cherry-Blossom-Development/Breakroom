@@ -359,7 +359,10 @@ const LANDING_PHASE_ORDER = ['approaching', 'closing', 'sweeping', 'entry', 'doc
 const LANDING_PHASE_DURATIONS = { approaching: 8000, closing: 5000, sweeping: 4000, entry: 6000 }
 const LANDING_PHASE_ANIMATIONS = {
   'landing-approach': 'approaching',
-  'landing-closing': 'closing',
+  // 'closing' runs two simultaneous animations (size + position, see the
+  // CSS) that both finish at the same time -- only the size one is
+  // listed here, since only one needs to trigger the advance.
+  'landing-closing-size': 'closing',
   'landing-sweep': 'sweeping',
   'landing-atmosphere-rise': 'entry'
 }
@@ -1837,23 +1840,34 @@ onUnmounted(() => {
   left: 50%;
   top: 50%;
   height: 100%;
-  animation: landing-closing 5s ease-in forwards;
+  /* Two independent animations on the same element: size keeps growing
+     at the EXACT same linear rate approaching ended on (10.75%/s -- see
+     landing-approach: (100-14)/8s), so there's no velocity discontinuity
+     in the diameter at the phase boundary. Position gets its own easing
+     since it's starting from a dead stop (0 -> moving right is a natural
+     new motion, not a continuation of one already in progress). */
+  animation: landing-closing-size 5s linear forwards, landing-closing-position 5s ease-in forwards;
 }
 
-@keyframes landing-closing {
-  from { left: 50%; top: 50%; height: 100%; }
-  to { left: 96%; top: 50%; height: 235%; }
+@keyframes landing-closing-size {
+  from { height: 100%; }
+  to { height: 153.75%; }
+}
+
+@keyframes landing-closing-position {
+  from { left: 50%; }
+  to { left: 82%; }
 }
 
 .landing-scene.sweeping .landing-planet {
-  left: 96%;
+  left: 82%;
   top: 50%;
-  height: 235%;
+  height: 153.75%;
   animation: landing-sweep 4s ease-in forwards;
 }
 
 @keyframes landing-sweep {
-  from { left: 96%; top: 50%; height: 235%; }
+  from { left: 82%; top: 50%; height: 153.75%; }
   to { left: 50%; top: 230%; height: 420%; }
 }
 
