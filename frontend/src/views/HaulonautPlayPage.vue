@@ -24,7 +24,7 @@ const purchaseError = ref('')
 const chartsError = ref('')
 const landing = ref(false) // true while a surface-expedition roll's own API call is in flight
 const landingError = ref('')
-const landingPhase = ref(null) // null | 'approaching' | 'orbiting' | 'entry' | 'sky' | 'docked' -- drives the landing-sequence animation
+const landingPhase = ref(null) // null | 'approaching' | 'closing' | 'sweeping' | 'entry' | 'docked' -- drives the landing-sequence animation
 const onSurface = ref(false) // true once the player has exited the craft -- replaces the whole ship UI with the surface screen
 const surfaceLog = ref([]) // exploreSurface() results shown on the surface screen itself (separate from the ship's hidden Terminal)
 const traveling = ref(false) // true while an autopilot course is being flown hop-by-hop
@@ -70,14 +70,23 @@ const landingPlanetGradient = computed(() =>
 const landingSkyGradient = computed(() =>
   `linear-gradient(to bottom, hsl(${planetHue.value},70%,82%) 0%, hsl(${planetHue.value},55%,62%) 100%)`
 )
+// The "atmospheric haze" band during entry: planet-colored right at the
+// horizon, blending into the same sky color over most of its own height,
+// with only a thin fading tip at the top -- so as the band's height grows
+// (see .landing-atmosphere's keyframes), the solid-sky portion grows with
+// it and the black area behind it ends up fully covered well before the
+// animation finishes.
+const landingAtmosphereGradient = computed(() =>
+  `linear-gradient(to top, hsl(${planetHue.value},55%,42%) 0%, hsl(${planetHue.value},70%,80%) 18%, hsl(${planetHue.value},70%,80%) 85%, transparent 100%)`
+)
 
 const landingSequenceActive = computed(() => landingPhase.value !== null)
 
 const LANDING_CAPTIONS = {
   approaching: 'Approaching...',
-  orbiting: 'Adjusting orbital trajectory...',
+  closing: 'Closing in...',
+  sweeping: 'Adjusting approach vector...',
   entry: 'ATMOSPHERIC ENTRY -- HOLD ON!',
-  sky: 'Breaking through the cloud layer...',
   docked: 'Touchdown confirmed. Docking clamps engaged.'
 }
 const landingCaption = computed(() => {
@@ -86,6 +95,13 @@ const landingCaption = computed(() => {
   }
   return LANDING_CAPTIONS[landingPhase.value] || ''
 })
+
+// 8 evenly-spaced flame spokes radiating from the viewport's center,
+// staggered so they don't all burst in/die down at once.
+const FLAME_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315]
+const landingFlames = computed(() =>
+  FLAME_ANGLES.map((angle, i) => ({ angle, delay: i * 0.35 }))
+)
 
 // What's available to do -- some entries are sector-dependent (grows as
 // more sector content types get real interactions), but Cargo and Star
@@ -320,8 +336,17 @@ function enterTrade() {
 // Phase order and how long each phase runs before auto-advancing to the
 // next -- 'docked' has no entry here, since it's a terminal state that
 // waits for the player to click Exit Craft rather than auto-advancing.
-const LANDING_PHASE_ORDER = ['approaching', 'orbiting', 'entry', 'sky', 'docked']
-const LANDING_PHASE_DURATIONS = { approaching: 20000, orbiting: 3500, entry: 4500, sky: 2500 }
+// 'approaching': centered growth until the planet's top/bottom touch the
+//   viewport edges. 'closing': keeps growing while sliding right, so the
+//   planet's left edge ends up near center. 'sweeping': keeps growing
+//   while its center moves below the viewport, sweeping the visible edge
+//   from vertical (left side) to horizontal (a flattening horizon, planet
+//   below/space above) -- pure position+scale, no CSS rotation needed,
+//   since a plain gradient-filled circle looks identical rotated or not.
+// 'entry': the atmosphere haze fills in the remaining black sky while the
+//   flame burst plays over it. 'docked': the landing facility rises.
+const LANDING_PHASE_ORDER = ['approaching', 'closing', 'sweeping', 'entry', 'docked']
+const LANDING_PHASE_DURATIONS = { approaching: 8000, closing: 5000, sweeping: 4000, entry: 6000 }
 let landingTimeoutId = null
 
 function beginLandingSequence() {
@@ -1013,19 +1038,36 @@ onUnmounted(() => {
                   </div>
 
                   <div v-else-if="viewportMode === 'landing-sequence'" class="tui-panel-body landing-sequence-body">
-                    <div class="landing-scene" :class="landingPhase">
-                      <div class="landing-planet" :style="{ background: landingPlanetGradient }"></div>
-                      <div v-if="landingPhase === 'entry'" class="landing-flames" aria-hidden="true">
-                        <span class="flame flame-1"></span>
-                        <span class="flame flame-2"></span>
-                        <span class="flame flame-3"></span>
+                    <div class="landing-scene" :class="landingPhase" :style="landingPhase === 'docked' ? { background: landingSkyGradient } : {}">
+                      <div v-if="landingPhase !== 'docked'" class="starfield" aria-hidden="true">
+                        <span
+                          v-for="(star, i) in stars"
+                          :key="i"
+                          class="star"
+                          :class="{ big: star.big }"
+                          :style="{ top: star.top + '%', left: star.left + '%' }"
+                        ></span>
                       </div>
-                      <div v-if="landingPhase === 'sky' || landingPhase === 'docked'" class="landing-sky" :style="{ background: landingSkyGradient }">
-                        <div class="landing-horizon"></div>
-                        <div v-if="landingPhase === 'docked'" class="landing-dock" aria-hidden="true">
-                          <div class="dock-tower"></div>
-                          <div class="dock-platform"></div>
+
+                      <div class="landing-planet" :style="{ background: landingPlanetGradient }"></div>
+
+                      <div v-if="landingPhase === 'entry'" class="landing-atmosphere" :style="{ background: landingAtmosphereGradient }"></div>
+
+                      <div v-if="landingPhase === 'entry'" class="landing-flames" aria-hidden="true">
+                        <div
+                          v-for="f in landingFlames"
+                          :key="f.angle"
+                          class="flame-anchor"
+                          :style="{ transform: `rotate(${f.angle}deg)`, animationDelay: f.delay + 's' }"
+                        >
+                          <span class="flame"></span>
                         </div>
+                      </div>
+
+                      <div v-if="landingPhase === 'docked'" class="landing-facility" aria-hidden="true">
+                        <div class="facility-ground"></div>
+                        <div class="facility-building facility-building-1"></div>
+                        <div class="facility-building facility-building-2"></div>
                       </div>
                     </div>
                     <p class="landing-caption">{{ landingCaption }}</p>
@@ -1711,11 +1753,19 @@ onUnmounted(() => {
 }
 
 /* ---- Viewport panel: landing-sequence mode -- the animated 90s-style
-   descent montage (approach -> orbit turn -> atmospheric entry flash/
-   flames -> sky reveal -> docked). Deliberately crude/simple shapes,
-   matching the "badly drawn" retro aesthetic that was asked for. Every
-   phase's starting size/rotation matches the previous phase's end state,
-   so switching phase classes doesn't visibly "jump". ---- */
+   descent montage. Deliberately crude/simple shapes, matching the "badly
+   drawn" retro aesthetic that was asked for.
+   Phases: approaching (centered growth until the planet's top/bottom
+   touch the viewport edges) -> closing (keeps growing while sliding
+   right, so the left edge ends up near center) -> sweeping (keeps
+   growing while its center moves below the viewport, sweeping the
+   visible edge from vertical to a flattening horizon -- pure position
+   and scale, no CSS rotation, since a plain gradient-filled circle looks
+   identical rotated or not) -> entry (an atmosphere band fills the
+   remaining black sky while a staggered flame burst radiates from
+   center) -> docked (a landing facility rises from the bottom).
+   Each phase's starting position/size matches the previous phase's end
+   state, so switching phase classes doesn't visibly "jump". ---- */
 .landing-sequence-body {
   padding: 0;
   display: flex;
@@ -1728,133 +1778,144 @@ onUnmounted(() => {
   min-height: 0;
   overflow: hidden;
   background: #050506;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .landing-planet {
   position: absolute;
-  width: 40px;
-  height: 40px;
   border-radius: 50%;
-  box-shadow: 0 0 18px 2px rgba(255, 255, 255, 0.15), inset -6px -6px 14px rgba(0, 0, 0, 0.5);
+  aspect-ratio: 1 / 1;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 24px 4px rgba(255, 255, 255, 0.12), inset -10px -10px 24px rgba(0, 0, 0, 0.5);
 }
 
 .landing-scene.approaching .landing-planet {
-  animation: landing-approach 20s linear forwards;
+  animation: landing-approach 8s linear forwards;
 }
 
 @keyframes landing-approach {
-  from { width: 40px; height: 40px; }
-  to { width: 200px; height: 200px; }
+  from { left: 50%; top: 50%; height: 14%; }
+  to { left: 50%; top: 50%; height: 100%; }
 }
 
-.landing-scene.orbiting .landing-planet {
-  width: 200px;
-  height: 200px;
-  animation: landing-orbit 3.5s ease-in forwards;
+.landing-scene.closing .landing-planet {
+  left: 50%;
+  top: 50%;
+  height: 100%;
+  animation: landing-closing 5s ease-in forwards;
 }
 
-@keyframes landing-orbit {
-  from { width: 200px; height: 200px; transform: rotate(0deg); }
-  to { width: 360px; height: 360px; transform: rotate(90deg); }
+@keyframes landing-closing {
+  from { left: 50%; top: 50%; height: 100%; }
+  to { left: 96%; top: 50%; height: 235%; }
 }
 
-.landing-scene.entry .landing-planet {
-  display: none; /* the planet now fills the whole view -- just fire from here on */
+.landing-scene.sweeping .landing-planet {
+  left: 96%;
+  top: 50%;
+  height: 235%;
+  animation: landing-sweep 4s ease-in forwards;
 }
 
-.landing-scene.entry {
-  animation: landing-flash-bg 0.5s steps(2) infinite;
+@keyframes landing-sweep {
+  from { left: 96%; top: 50%; height: 235%; }
+  to { left: 50%; top: 230%; height: 420%; }
 }
 
-@keyframes landing-flash-bg {
-  0%, 100% { background: #1a0500; }
-  25% { background: #ff6a00; }
-  50% { background: #fff2c2; }
-  75% { background: #ff2d00; }
+/* entry/docked: the planet circle itself is no longer relevant -- entry
+   shows the atmosphere band + flames instead, docked shows solid sky. */
+.landing-scene.entry .landing-planet,
+.landing-scene.docked .landing-planet {
+  display: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .landing-scene.entry { animation: none; background: #ff6a00; }
+/* Anchored right at the horizon the sweep phase ends on (~20% down from
+   the top, matching that phase's final numbers above), growing upward. */
+.landing-atmosphere {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 80%;
+  height: 0;
+  animation: landing-atmosphere-rise 6s ease-in forwards;
+}
+
+@keyframes landing-atmosphere-rise {
+  from { height: 0%; }
+  to { height: 140%; }
 }
 
 .landing-flames {
   position: absolute;
   inset: 0;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 6%;
+}
+
+/* Zero-size pivot anchored at screen center; rotating it (a fixed angle,
+   no animation needed on the anchor itself) points its child flame
+   outward in that direction with no transform-origin ambiguity. */
+.flame-anchor {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  animation: flame-spoke-fade 3.4s ease-in-out both;
 }
 
 .flame {
-  width: 20%;
-  max-width: 70px;
-  height: 55%;
-  background: linear-gradient(to top, #ff2d00, #ffae42 55%, #fff2c2 100%);
-  border-radius: 50% 50% 15% 15%;
-  opacity: 0.9;
-  animation: flame-flicker 0.25s ease-in-out infinite alternate;
+  position: absolute;
+  left: -17px;
+  top: 0;
+  width: 34px;
+  height: 140px;
+  background: linear-gradient(to bottom, #fff2c2 0%, #ffae42 45%, #ff2d00 85%, transparent 100%);
+  /* egg-shaped: rounder/wider near the pivot (top), tapering to a point
+     at the outward tip (bottom) */
+  border-radius: 50% 50% 8% 8% / 75% 75% 25% 25%;
 }
 
-.flame-2 { height: 70%; animation-delay: 0.08s; }
-.flame-3 { animation-delay: 0.15s; }
-
-@keyframes flame-flicker {
-  from { transform: scaleY(0.85) scaleX(0.9); }
-  to { transform: scaleY(1.15) scaleX(1.05); }
+@keyframes flame-spoke-fade {
+  0% { opacity: 0; }
+  35% { opacity: 1; }
+  65% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .flame { animation: none; }
+  .flame-anchor { animation: none; opacity: 0; }
 }
 
-.landing-sky {
-  position: absolute;
-  inset: 0;
-  animation: landing-sky-fade 2.5s ease-in forwards;
-}
-
-@keyframes landing-sky-fade {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.landing-horizon {
+.landing-facility {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 28%;
-  height: 3px;
-  background: rgba(0, 0, 0, 0.2);
+  bottom: 0;
+  height: 0;
+  animation: facility-rise 2.5s ease-out forwards;
 }
 
-.landing-dock {
+@keyframes facility-rise {
+  from { height: 0%; }
+  to { height: 33%; }
+}
+
+.facility-ground {
   position: absolute;
-  left: 50%;
-  bottom: 8%;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: 70%;
+  background: #3a3226;
 }
 
-.dock-platform {
-  width: 140px;
-  height: 14px;
-  background: #6b6153;
-  border: 2px solid #4a4335;
-  border-radius: 2px;
-}
-
-.dock-tower {
+.facility-building {
   position: absolute;
-  bottom: 14px;
-  left: 18px;
-  width: 12px;
-  height: 46px;
-  background: #8a8071;
-  border: 2px solid #4a4335;
+  bottom: 25%;
+  background: #23201c;
+  border: 1px solid #17140f;
 }
+
+.facility-building-1 { left: 30%; width: 12%; height: 65%; }
+.facility-building-2 { left: 55%; width: 8%; height: 45%; }
 
 .landing-caption {
   flex-shrink: 0;
