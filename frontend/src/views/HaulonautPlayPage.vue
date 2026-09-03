@@ -25,6 +25,8 @@ const chartsError = ref('')
 const landing = ref(false) // true while a surface-expedition roll's own API call is in flight
 const landingError = ref('')
 const landingPhase = ref(null) // null | 'approaching' | 'closing' | 'sweeping' | 'entry' | 'docked' -- drives the landing-sequence animation
+const landingSceneEl = ref(null)
+const landingSceneHeightPx = ref(280) // measured; see measureLandingScene() -- sane fallback before the first measurement
 const onSurface = ref(false) // true once the player has exited the craft -- replaces the whole ship UI with the surface screen
 const surfaceLog = ref([]) // exploreSurface() results shown on the surface screen itself (separate from the ship's hidden Terminal)
 const traveling = ref(false) // true while an autopilot course is being flown hop-by-hop
@@ -365,13 +367,32 @@ const LANDING_PHASE_ANIMATIONS = {
 }
 let landingTimeoutId = null
 
-function beginLandingSequence() {
+// The planet's "scale(1)" reference size is measured in actual pixels
+// (landingSceneHeightPx, applied via the --landing-diameter custom
+// property in the template) rather than expressed as height:100% of
+// .landing-scene. .landing-scene's own height comes from a flex item
+// inside a flex item inside a CSS grid cell -- percentage-height
+// resolution for an absolutely positioned child through that much nesting
+// turned out not to be reliable (a real, measurable size mismatch showed
+// up between the end of 'approaching' and the start of 'closing', not
+// just a one-frame timing artifact). An explicit pixel value sidesteps
+// that entirely: the browser has nothing left to (re)compute.
+function measureLandingScene() {
+  if (landingSceneEl.value) {
+    landingSceneHeightPx.value = landingSceneEl.value.getBoundingClientRect().height
+  }
+}
+
+async function beginLandingSequence() {
   viewportMode.value = 'landing-sequence'
   selectedIndex.value = -1
   surfaceLog.value = []
   landingPhase.value = 'approaching'
   logLines.value.push(`Beginning descent toward ${planetFeature.value ? planetFeature.value.name : 'the surface'}.`)
   scrollLogToBottom()
+  await nextTick() // .landing-scene doesn't exist in the DOM until this render lands
+  measureLandingScene()
+  window.addEventListener('resize', measureLandingScene)
   scheduleLandingFallback('approaching')
 }
 
@@ -413,6 +434,7 @@ function scheduleLandingFallback(phase) {
 // clicked Land.
 function cancelLandingSequence() {
   if (landingTimeoutId) { clearTimeout(landingTimeoutId); landingTimeoutId = null }
+  window.removeEventListener('resize', measureLandingScene)
   landingPhase.value = null
   viewportMode.value = 'planet'
   selectedIndex.value = -1
@@ -424,6 +446,7 @@ function cancelLandingSequence() {
 // surface view (see the top-level onSurface branch in the template).
 function exitCraft() {
   if (landingTimeoutId) { clearTimeout(landingTimeoutId); landingTimeoutId = null }
+  window.removeEventListener('resize', measureLandingScene)
   landingPhase.value = null
   surfaceLog.value = []
   onSurface.value = true
@@ -900,6 +923,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('resize', measureLandingScene)
   if (driftIntervalId) clearInterval(driftIntervalId)
   if (landingTimeoutId) clearTimeout(landingTimeoutId)
 })
@@ -1074,7 +1098,13 @@ onUnmounted(() => {
                   </div>
 
                   <div v-else-if="viewportMode === 'landing-sequence'" class="tui-panel-body landing-sequence-body">
-                    <div class="landing-scene" :class="landingPhase" :style="landingPhase === 'docked' ? { background: landingSkyGradient } : {}" @animationend="handleLandingAnimationEnd">
+                    <div
+                      class="landing-scene"
+                      ref="landingSceneEl"
+                      :class="landingPhase"
+                      :style="{ '--landing-diameter': landingSceneHeightPx + 'px', ...(landingPhase === 'docked' ? { background: landingSkyGradient } : {}) }"
+                      @animationend="handleLandingAnimationEnd"
+                    >
                       <div v-if="landingPhase !== 'docked'" class="starfield" aria-hidden="true">
                         <span
                           v-for="(star, i) in stars"
@@ -1828,7 +1858,14 @@ onUnmounted(() => {
    and nothing to glitch. */
 .landing-planet {
   position: absolute;
-  height: 100%;
+  /* Explicit pixel value (measured in JS, see measureLandingScene) instead
+     of height:100% -- .landing-scene's own height comes from a flex item
+     inside a flex item inside a CSS grid cell, and percentage-height
+     resolution for an absolutely positioned child through that much
+     nesting proved unreliable (a real, measurable size mismatch between
+     the end of 'approaching' and the start of 'closing', confirmed via
+     screenshots -- not just a rendering-timing artifact). */
+  height: var(--landing-diameter, 100%);
   aspect-ratio: 1 / 1;
   border-radius: 50%;
   box-shadow: 0 0 24px 4px rgba(255, 255, 255, 0.12), inset -10px -10px 24px rgba(0, 0, 0, 0.5);
