@@ -1819,39 +1819,53 @@ onUnmounted(() => {
   background: #050506;
 }
 
+/* height/aspect-ratio are a fixed, unanimated reference size (this is
+   what "scale(1)" below means) -- growth is done entirely via
+   transform:scale() instead of animating height directly. Animating a
+   layout property (height) that aspect-ratio derives width from caused a
+   visible glitch right at the phase-1/2 handoff (a black gap flashing in
+   at the top of the scene) -- almost certainly the browser's aspect-ratio
+   width recalculation not staying perfectly in lockstep with the animated
+   height for a frame. transform:scale() is purely a compositor-level
+   effect: it never touches layout at all, so there's nothing to recompute
+   and nothing to glitch. */
 .landing-planet {
   position: absolute;
-  border-radius: 50%;
+  height: 100%;
   aspect-ratio: 1 / 1;
-  transform: translate(-50%, -50%);
+  border-radius: 50%;
   box-shadow: 0 0 24px 4px rgba(255, 255, 255, 0.12), inset -10px -10px 24px rgba(0, 0, 0, 0.5);
 }
 
 .landing-scene.approaching .landing-planet {
+  left: 50%;
+  top: 50%;
   animation: landing-approach 8s linear forwards;
 }
 
 @keyframes landing-approach {
-  from { left: 50%; top: 50%; height: 14%; }
-  to { left: 50%; top: 50%; height: 100%; }
+  from { transform: translate(-50%, -50%) scale(0.14); }
+  to { transform: translate(-50%, -50%) scale(1); }
 }
 
 .landing-scene.closing .landing-planet {
   left: 50%;
   top: 50%;
-  height: 100%;
+  transform: translate(-50%, -50%) scale(1);
   /* Two independent animations on the same element: size keeps growing
-     at the EXACT same linear rate approaching ended on (10.75%/s -- see
-     landing-approach: (100-14)/8s), so there's no velocity discontinuity
-     in the diameter at the phase boundary. Position gets its own easing
-     since it's starting from a dead stop (0 -> moving right is a natural
-     new motion, not a continuation of one already in progress). */
+     at the EXACT same linear rate approaching ended on (10.75%/s of the
+     old height-based math -- see landing-approach: (100-14)/8s -- scale
+     1 -> 1.5375 over 5s is the equivalent rate in scale terms), so
+     there's no velocity discontinuity in the diameter at the phase
+     boundary. Position gets its own easing since it's starting from a
+     dead stop (0 -> moving right is a brand new motion, not a
+     continuation of one already in progress). */
   animation: landing-closing-size 5s linear forwards, landing-closing-position 5s ease-in forwards;
 }
 
 @keyframes landing-closing-size {
-  from { height: 100%; }
-  to { height: 153.75%; }
+  from { transform: translate(-50%, -50%) scale(1); }
+  to { transform: translate(-50%, -50%) scale(1.5375); }
 }
 
 @keyframes landing-closing-position {
@@ -1862,13 +1876,13 @@ onUnmounted(() => {
 .landing-scene.sweeping .landing-planet {
   left: 82%;
   top: 50%;
-  height: 153.75%;
+  transform: translate(-50%, -50%) scale(1.5375);
   animation: landing-sweep 4s ease-in forwards;
 }
 
 @keyframes landing-sweep {
-  from { left: 82%; top: 50%; height: 153.75%; }
-  to { left: 50%; top: 230%; height: 420%; }
+  from { left: 82%; top: 50%; transform: translate(-50%, -50%) scale(1.5375); }
+  to { left: 50%; top: 230%; transform: translate(-50%, -50%) scale(4.2); }
 }
 
 /* entry/docked: the planet circle itself is no longer relevant -- entry
