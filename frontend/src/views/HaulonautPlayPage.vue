@@ -333,9 +333,8 @@ function enterTrade() {
   scrollLogToBottom()
 }
 
-// Phase order and how long each phase runs before auto-advancing to the
-// next -- 'docked' has no entry here, since it's a terminal state that
-// waits for the player to click Exit Craft rather than auto-advancing.
+// Phase order -- 'docked' is terminal, it waits for the player to click
+// Exit Craft rather than auto-advancing.
 // 'approaching': centered growth until the planet's top/bottom touch the
 //   viewport edges. 'closing': keeps growing while sliding right, so the
 //   planet's left edge ends up near center. 'sweeping': keeps growing
@@ -346,7 +345,24 @@ function enterTrade() {
 // 'entry': the atmosphere haze fills in the remaining black sky while the
 //   flame burst plays over it. 'docked': the landing facility rises.
 const LANDING_PHASE_ORDER = ['approaching', 'closing', 'sweeping', 'entry', 'docked']
+
+// Each phase's advance is driven by its own CSS animation actually
+// finishing (see handleLandingAnimationEnd), NOT a JS timer -- a
+// setTimeout racing a separate animation-duration is exactly what caused
+// the phase-1-to-2 handoff to visibly jump (whichever fired first won,
+// and they didn't always agree to the millisecond). animationend
+// guarantees the next phase only ever starts from wherever the previous
+// one actually, truly ended. The duration map below is now only used for
+// a generous fallback timer as a safety net in case an animationend event
+// is ever missed for some reason -- the sequence should never be able to
+// truly get stuck.
 const LANDING_PHASE_DURATIONS = { approaching: 8000, closing: 5000, sweeping: 4000, entry: 6000 }
+const LANDING_PHASE_ANIMATIONS = {
+  'landing-approach': 'approaching',
+  'landing-closing': 'closing',
+  'landing-sweep': 'sweeping',
+  'landing-atmosphere-rise': 'entry'
+}
 let landingTimeoutId = null
 
 function beginLandingSequence() {
@@ -356,20 +372,40 @@ function beginLandingSequence() {
   landingPhase.value = 'approaching'
   logLines.value.push(`Beginning descent toward ${planetFeature.value ? planetFeature.value.name : 'the surface'}.`)
   scrollLogToBottom()
-  scheduleNextLandingPhase()
+  scheduleLandingFallback('approaching')
 }
 
-function scheduleNextLandingPhase() {
-  const duration = LANDING_PHASE_DURATIONS[landingPhase.value]
-  if (!duration) return // 'docked' -- nothing more to schedule, wait for Exit Craft
+// Bound to the whole .landing-scene's @animationend (bubbles up from
+// whichever child -- .landing-planet, .landing-atmosphere -- is driving
+// the current phase). Ignores anything that isn't the phase's own named
+// animation (e.g. the flame spokes' own fade), and ignores stale events
+// left over from a phase the player has already moved past.
+function handleLandingAnimationEnd(e) {
+  const expectedPhase = LANDING_PHASE_ANIMATIONS[e.animationName]
+  if (!expectedPhase || landingPhase.value !== expectedPhase) return
+  advanceLandingPhase()
+}
+
+function advanceLandingPhase() {
+  const idx = LANDING_PHASE_ORDER.indexOf(landingPhase.value)
+  const next = LANDING_PHASE_ORDER[idx + 1]
+  if (!next) return
+  if (landingTimeoutId) { clearTimeout(landingTimeoutId); landingTimeoutId = null }
+  landingPhase.value = next
+  if (next === 'entry') logLines.value.push('ATMOSPHERIC ENTRY -- HOLD ON!')
+  else if (next === 'docked') logLines.value.push('Touchdown confirmed. Docking clamps engaged.')
+  scrollLogToBottom()
+  scheduleLandingFallback(next)
+}
+
+function scheduleLandingFallback(phase) {
+  const duration = LANDING_PHASE_DURATIONS[phase]
+  if (!duration) return // 'docked' -- terminal, nothing to schedule
   landingTimeoutId = setTimeout(() => {
-    const idx = LANDING_PHASE_ORDER.indexOf(landingPhase.value)
-    landingPhase.value = LANDING_PHASE_ORDER[idx + 1]
-    if (landingPhase.value === 'entry') logLines.value.push('ATMOSPHERIC ENTRY -- HOLD ON!')
-    else if (landingPhase.value === 'docked') logLines.value.push('Touchdown confirmed. Docking clamps engaged.')
-    scrollLogToBottom()
-    scheduleNextLandingPhase()
-  }, duration)
+    // Only fires if animationend never did -- if the phase already moved
+    // on, this timer is stale and does nothing.
+    if (landingPhase.value === phase) advanceLandingPhase()
+  }, duration + 800)
 }
 
 // Escape-triggered (see onKeydown) -- backs out of the animation at any
@@ -1038,7 +1074,7 @@ onUnmounted(() => {
                   </div>
 
                   <div v-else-if="viewportMode === 'landing-sequence'" class="tui-panel-body landing-sequence-body">
-                    <div class="landing-scene" :class="landingPhase" :style="landingPhase === 'docked' ? { background: landingSkyGradient } : {}">
+                    <div class="landing-scene" :class="landingPhase" :style="landingPhase === 'docked' ? { background: landingSkyGradient } : {}" @animationend="handleLandingAnimationEnd">
                       <div v-if="landingPhase !== 'docked'" class="starfield" aria-hidden="true">
                         <span
                           v-for="(star, i) in stars"
