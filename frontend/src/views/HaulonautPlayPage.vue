@@ -36,6 +36,7 @@ const crtBezelEl = ref(null)
 const crtScreenEl = ref(null)
 const landingPlanetEl = ref(null)
 const landingDebugMetrics = ref(null)
+const landingDebugPaused = ref(false)
 const onSurface = ref(false) // true once the player has exited the craft -- replaces the whole ship UI with the surface screen
 const surfaceLog = ref([]) // exploreSurface() results shown on the surface screen itself (separate from the ship's hidden Terminal)
 const traveling = ref(false) // true while an autopilot course is being flown hop-by-hop
@@ -374,6 +375,13 @@ const LANDING_PHASE_ANIMATIONS = {
   'landing-sweep': 'sweeping',
   'landing-atmosphere-rise': 'entry'
 }
+// Inverse of the map above -- which named CSS animation drives a given
+// phase. Used by the debug pause/rewind controls to find that one
+// animation (via Element.getAnimations()) among the scene's others
+// (star twinkle, flame fade, etc.) so currentTime can be read/set on it.
+const PHASE_TO_ANIMATION_NAME = Object.fromEntries(
+  Object.entries(LANDING_PHASE_ANIMATIONS).map(([animName, phase]) => [phase, animName])
+)
 let landingTimeoutId = null
 
 // The planet's "scale(1)" reference size is measured in actual pixels
@@ -434,6 +442,73 @@ function stopLandingDebugLoop() {
     landingDebugRafId = null
   }
   landingDebugMetrics.value = null
+  landingDebugPaused.value = false
+}
+
+// All CSS animations currently running anywhere inside .landing-scene
+// (the planet's scale/position tween, the atmosphere rise, flame fades,
+// etc.) -- {subtree:true} is required, Element.getAnimations() alone
+// only returns animations on that exact element.
+function landingSceneAnimations() {
+  if (!landingSceneEl.value || typeof landingSceneEl.value.getAnimations !== 'function') return []
+  return landingSceneEl.value.getAnimations({ subtree: true })
+}
+
+// The one CSS animation actually driving the current phase (as opposed
+// to decorative ones like star twinkle) -- its currentTime is what
+// scheduleLandingFallback's real-world duration is measured against.
+function currentPhaseAnimation() {
+  const name = PHASE_TO_ANIMATION_NAME[landingPhase.value]
+  if (!name) return null
+  return landingSceneAnimations().find(a => a.animationName === name) || null
+}
+
+// Re-arms the animationend fallback (see scheduleLandingFallback) after
+// a pause/rewind has changed how much of the phase's animation is left
+// to play -- otherwise the original timer, still counting from when the
+// phase first started, could fire (and force-advance the phase) before
+// the now-behind-schedule animation has actually reached its end.
+function rescheduleLandingFallbackFromCurrentTime() {
+  if (landingTimeoutId) { clearTimeout(landingTimeoutId); landingTimeoutId = null }
+  if (landingDebugPaused.value) return // re-armed when resumed instead
+  const phase = landingPhase.value
+  const totalMs = LANDING_PHASE_DURATIONS[phase]
+  if (!totalMs) return
+  const anim = currentPhaseAnimation()
+  const elapsed = anim && typeof anim.currentTime === 'number' ? anim.currentTime : 0
+  const remaining = Math.max(0, totalMs - elapsed)
+  landingTimeoutId = setTimeout(() => {
+    if (landingPhase.value === phase) advanceLandingPhase()
+  }, remaining + 800)
+}
+
+// Debug-only pause/resume -- freezes every animation in the scene in
+// place (via the Web Animations API) so the current frame can be
+// inspected in devtools, rather than fighting a live 60fps transform.
+function toggleLandingDebugPause() {
+  const anims = landingSceneAnimations()
+  if (!landingDebugPaused.value) {
+    anims.forEach(a => a.pause())
+    if (landingTimeoutId) { clearTimeout(landingTimeoutId); landingTimeoutId = null }
+    landingDebugPaused.value = true
+  } else {
+    anims.forEach(a => a.play())
+    landingDebugPaused.value = false
+    rescheduleLandingFallbackFromCurrentTime()
+  }
+}
+
+// Debug-only rewind -- rolls every animation in the scene back 10s
+// (clamped to the start of the CURRENT phase; it does not cross back
+// into the previous phase's animation/class). Works whether playing or
+// paused.
+function rewindLandingDebug10s() {
+  const anims = landingSceneAnimations()
+  anims.forEach(a => {
+    const ct = typeof a.currentTime === 'number' ? a.currentTime : 0
+    a.currentTime = Math.max(0, ct - 10000)
+  })
+  rescheduleLandingFallbackFromCurrentTime()
 }
 
 async function beginLandingSequence() {
@@ -1356,17 +1431,26 @@ onUnmounted(() => {
     <!-- Diagnostic HUD for the landing-sequence phase-1/2 gap. Lives
          outside .crt-monitor entirely (pinned to the real browser
          viewport, not scaled/positioned with the fake bezel) so it keeps
-         reporting real numbers no matter what the bezel itself does. -->
-    <div v-if="landingDebugMetrics" class="landing-debug-hud" aria-hidden="true">
-      <span>phase: {{ landingDebugMetrics.phase }}</span>
-      <span>window: {{ landingDebugMetrics.window.w }}x{{ landingDebugMetrics.window.h }}</span>
-      <span>docClient: {{ landingDebugMetrics.docClient.w }}x{{ landingDebugMetrics.docClient.h }}</span>
-      <span v-if="landingDebugMetrics.monitor">monitor: {{ landingDebugMetrics.monitor.w.toFixed(1) }}x{{ landingDebugMetrics.monitor.h.toFixed(1) }} @({{ landingDebugMetrics.monitor.left.toFixed(1) }},{{ landingDebugMetrics.monitor.top.toFixed(1) }})</span>
-      <span v-if="landingDebugMetrics.bezel">bezel: {{ landingDebugMetrics.bezel.w.toFixed(1) }}x{{ landingDebugMetrics.bezel.h.toFixed(1) }}</span>
-      <span v-if="landingDebugMetrics.screen">screen: {{ landingDebugMetrics.screen.w.toFixed(1) }}x{{ landingDebugMetrics.screen.h.toFixed(1) }} @({{ landingDebugMetrics.screen.left.toFixed(1) }},{{ landingDebugMetrics.screen.top.toFixed(1) }})</span>
-      <span v-if="landingDebugMetrics.scene">scene: {{ landingDebugMetrics.scene.w.toFixed(1) }}x{{ landingDebugMetrics.scene.h.toFixed(1) }} @({{ landingDebugMetrics.scene.left.toFixed(1) }},{{ landingDebugMetrics.scene.top.toFixed(1) }})</span>
-      <span v-if="landingDebugMetrics.planet">planet: {{ landingDebugMetrics.planet.w.toFixed(1) }}x{{ landingDebugMetrics.planet.h.toFixed(1) }} @({{ landingDebugMetrics.planet.left.toFixed(1) }},{{ landingDebugMetrics.planet.top.toFixed(1) }})</span>
-      <span>--landing-diameter: {{ landingDebugMetrics.landingDiameterVar.toFixed(1) }}px</span>
+         reporting real numbers no matter what the bezel itself does.
+         Row labels are the actual CSS selector each rect belongs to, so a
+         number here can be matched straight to an element in devtools. -->
+    <div v-if="landingDebugMetrics" class="landing-debug-hud">
+      <div class="landing-debug-controls">
+        <button type="button" @click="toggleLandingDebugPause">{{ landingDebugPaused ? '▶ resume' : '⏸ pause' }}</button>
+        <button type="button" @click="rewindLandingDebug10s">⏪ -10s</button>
+        <span class="landing-debug-paused-flag" v-if="landingDebugPaused">PAUSED -- animations frozen, inspect away</span>
+      </div>
+      <div class="landing-debug-metrics">
+        <span>phase: {{ landingDebugMetrics.phase }}</span>
+        <span>window: {{ landingDebugMetrics.window.w }}x{{ landingDebugMetrics.window.h }}</span>
+        <span>documentElement: {{ landingDebugMetrics.docClient.w }}x{{ landingDebugMetrics.docClient.h }}</span>
+        <span v-if="landingDebugMetrics.monitor">.crt-monitor: {{ landingDebugMetrics.monitor.w.toFixed(1) }}x{{ landingDebugMetrics.monitor.h.toFixed(1) }} @({{ landingDebugMetrics.monitor.left.toFixed(1) }},{{ landingDebugMetrics.monitor.top.toFixed(1) }})</span>
+        <span v-if="landingDebugMetrics.bezel">.crt-bezel: {{ landingDebugMetrics.bezel.w.toFixed(1) }}x{{ landingDebugMetrics.bezel.h.toFixed(1) }}</span>
+        <span v-if="landingDebugMetrics.screen">.crt-screen: {{ landingDebugMetrics.screen.w.toFixed(1) }}x{{ landingDebugMetrics.screen.h.toFixed(1) }} @({{ landingDebugMetrics.screen.left.toFixed(1) }},{{ landingDebugMetrics.screen.top.toFixed(1) }})</span>
+        <span v-if="landingDebugMetrics.scene">.landing-scene: {{ landingDebugMetrics.scene.w.toFixed(1) }}x{{ landingDebugMetrics.scene.h.toFixed(1) }} @({{ landingDebugMetrics.scene.left.toFixed(1) }},{{ landingDebugMetrics.scene.top.toFixed(1) }})</span>
+        <span v-if="landingDebugMetrics.planet">.landing-planet: {{ landingDebugMetrics.planet.w.toFixed(1) }}x{{ landingDebugMetrics.planet.h.toFixed(1) }} @({{ landingDebugMetrics.planet.left.toFixed(1) }},{{ landingDebugMetrics.planet.top.toFixed(1) }})</span>
+        <span>--landing-diameter (JS-measured .landing-scene height): {{ landingDebugMetrics.landingDiameterVar.toFixed(1) }}px</span>
+      </div>
     </div>
   </div>
 </template>
@@ -1399,9 +1483,6 @@ onUnmounted(() => {
   right: 0;
   bottom: 0;
   z-index: 4000;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
   padding: 4px 10px;
   background: rgba(0, 0, 0, 0.85);
   color: #4dff88;
@@ -1409,6 +1490,38 @@ onUnmounted(() => {
   font-size: 11px;
   line-height: 1.4;
   pointer-events: none;
+}
+
+.landing-debug-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 3px;
+}
+
+.landing-debug-controls button {
+  pointer-events: auto;
+  background: #123322;
+  color: #4dff88;
+  border: 1px solid #4dff88;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.landing-debug-controls button:hover { background: #1c4a30; }
+
+.landing-debug-paused-flag {
+  color: #ffd24d;
+  font-weight: 700;
+}
+
+.landing-debug-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
 }
 
 .exit-link {
