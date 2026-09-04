@@ -27,6 +27,7 @@ const landingError = ref('')
 const landingPhase = ref(null) // null | 'approaching' | 'closing' | 'sweeping' | 'entry' | 'docked' -- drives the landing-sequence animation
 const landingSceneEl = ref(null)
 const landingSceneHeightPx = ref(280) // measured; see measureLandingScene() -- sane fallback before the first measurement
+const landingSceneWidthPx = ref(420) // measured; see measureLandingScene() -- sane fallback before the first measurement
 
 // Diagnostic-only refs/state for the phase-1/2 gap investigation -- see
 // landingDebugMetrics and startLandingDebugLoop() below. Not used by the
@@ -347,38 +348,48 @@ function enterTrade() {
 
 // Phase order -- 'docked' is terminal, it waits for the player to click
 // Exit Craft rather than auto-advancing.
-// 'approaching': centered growth until the planet's top/bottom touch the
-//   viewport edges. 'closing': keeps growing while sliding right, so the
-//   planet's left edge ends up near center. 'sweeping': keeps growing
-//   while its center moves below the viewport, sweeping the visible edge
-//   from vertical (left side) to horizontal (a flattening horizon, planet
-//   below/space above) -- pure position+scale, no CSS rotation needed,
-//   since a plain gradient-filled circle looks identical rotated or not.
+// 'approaching'/'closing'/'sweeping' are just labels along ONE continuous
+// motion now (see landing-descent and landingPathD) rather than three
+// separate moves -- roughly: 'approaching' is centered growth with barely
+// any drift yet; 'closing' is the fastest part, sliding out to the right;
+// 'sweeping' curves back through center and down off the bottom of the
+// viewport, growing the whole way.
 // 'entry': the atmosphere haze fills in the remaining black sky while the
 //   flame burst plays over it. 'docked': the landing facility rises.
 const LANDING_PHASE_ORDER = ['approaching', 'closing', 'sweeping', 'entry', 'docked']
 
-// Each phase's advance is driven by its own CSS animation actually
-// finishing (see handleLandingAnimationEnd), NOT a JS timer -- a
-// setTimeout racing a separate animation-duration is exactly what caused
-// the phase-1-to-2 handoff to visibly jump (whichever fired first won,
-// and they didn't always agree to the millisecond). animationend
-// guarantees the next phase only ever starts from wherever the previous
-// one actually, truly ended. The duration map below is now only used for
-// a generous fallback timer as a safety net in case an animationend event
-// is ever missed for some reason -- the sequence should never be able to
-// truly get stuck.
+// approaching/closing/sweeping used to each be their own CSS animation,
+// advanced by that animation's own animationend (see
+// handleLandingAnimationEnd) specifically to avoid a JS timer racing a
+// separate animation-duration -- a real problem back when the class swap
+// between them also swapped which animation was running. They now share
+// ONE continuous animation across all three (see landing-descent in
+// <style>, and landingPathD below), so there's no per-phase animationend
+// left for them to listen for -- advancing between them is a plain timer
+// now, which is fine because doing so no longer touches the motion at
+// all, only the caption text (see landingCaption) and arming the next
+// timer. 'entry' still has its own real animation (the atmosphere band's
+// rise) and is still driven by its animationend, with the duration below
+// used only as a generous fallback safety net in case that event is ever
+// missed for some reason.
+// approaching + closing + sweeping = 17s, which must match the
+// landing-descent animation's own duration in <style> below -- landingPhase
+// still switches at those same cumulative offsets (8s, 13s) purely for the
+// caption text, even though a single landing-descent animation is what's
+// actually running underneath for the whole 17s.
 const LANDING_PHASE_DURATIONS = { approaching: 8000, closing: 5000, sweeping: 4000, entry: 6000 }
 const LANDING_PHASE_ANIMATIONS = {
-  'landing-approach': 'approaching',
-  'landing-closing': 'closing',
-  'landing-sweep': 'sweeping',
   'landing-atmosphere-rise': 'entry'
 }
 // Inverse of the map above -- which named CSS animation drives a given
-// phase. Used by the debug pause/rewind controls to find that one
-// animation (via Element.getAnimations()) among the scene's others
-// (star twinkle, flame fade, etc.) so currentTime can be read/set on it.
+// phase. Only 'entry' resolves to anything now that approaching/closing/
+// sweeping share one continuous animation with nothing phase-specific to
+// key off of; used by the debug pause/rewind controls below to find the
+// real animation to read for a precise reschedule when resuming from a
+// pause during 'entry'. For the other three phases this intentionally
+// comes back empty, which makes that same reschedule fall back to a full
+// fresh duration instead -- also correct, since their timer no longer
+// has any real animation to stay in sync with.
 const PHASE_TO_ANIMATION_NAME = Object.fromEntries(
   Object.entries(LANDING_PHASE_ANIMATIONS).map(([animName, phase]) => [phase, animName])
 )
@@ -393,12 +404,42 @@ let landingTimeoutId = null
 // turned out not to be reliable (a real, measurable size mismatch showed
 // up between the end of 'approaching' and the start of 'closing', not
 // just a one-frame timing artifact). An explicit pixel value sidesteps
-// that entirely: the browser has nothing left to (re)compute.
+// that entirely: the browser has nothing left to (re)compute. Width is
+// measured the same way and, together with the height, feeds landingPathD
+// below -- the motion path needs to be built in real pixels for the same
+// reason the diameter does.
 function measureLandingScene() {
   if (landingSceneEl.value) {
-    landingSceneHeightPx.value = landingSceneEl.value.getBoundingClientRect().height
+    const rect = landingSceneEl.value.getBoundingClientRect()
+    landingSceneHeightPx.value = rect.height
+    landingSceneWidthPx.value = rect.width
   }
 }
+
+// The approach+closing+sweeping motion, as ONE smooth curve instead of
+// three straight-line segments handed off between each other: starts
+// centered, bulges out to the right (roughly where "closing" used to
+// end), then swings back through center as it dives off the bottom of
+// the viewport (roughly where "sweeping" used to end) -- a single cubic
+// Bezier, so it's smooth by construction with no seam for the phase-class
+// swap to interrupt. Built in pixels local to .landing-scene from its own
+// measured size (see measureLandingScene) so it still resizes correctly.
+const landingPathD = computed(() => {
+  const w = landingSceneWidthPx.value
+  const h = landingSceneHeightPx.value
+  if (!w || !h) return ''
+  const cx = w * 0.5
+  const startY = h * 0.5
+  const rightX = w * 0.82
+  const endY = h * 2.3
+  return `M ${cx} ${startY} C ${rightX} ${startY}, ${rightX} ${h * 1.4}, ${cx} ${endY}`
+})
+
+const landingPlanetStyle = computed(() => {
+  const style = { background: landingPlanetGradient.value }
+  if (landingPathD.value) style.offsetPath = `path('${landingPathD.value}')`
+  return style
+})
 
 // ---- Diagnostic HUD for the phase-1/2 gap ----
 // Reads live layout numbers every frame while the landing sequence is
@@ -477,9 +518,10 @@ function rescheduleLandingFallbackFromCurrentTime() {
   const anim = currentPhaseAnimation()
   const elapsed = anim && typeof anim.currentTime === 'number' ? anim.currentTime : 0
   const remaining = Math.max(0, totalMs - elapsed)
+  const grace = phase === 'entry' ? 800 : 0
   landingTimeoutId = setTimeout(() => {
     if (landingPhase.value === phase) advanceLandingPhase()
-  }, remaining + 800)
+  }, remaining + grace)
 }
 
 // Debug-only pause/resume -- freezes every animation in the scene in
@@ -560,11 +602,17 @@ function advanceLandingPhase() {
 function scheduleLandingFallback(phase) {
   const duration = LANDING_PHASE_DURATIONS[phase]
   if (!duration) return // 'docked' -- terminal, nothing to schedule
+  // Only 'entry' is racing a real animationend (see LANDING_PHASE_DURATIONS
+  // above) and needs the grace period to lose that race on purpose;
+  // approaching/closing/sweeping have nothing to race any more, so this
+  // timer fires right at its own duration -- it IS the advance, not a
+  // fallback for one.
+  const grace = phase === 'entry' ? 800 : 0
   landingTimeoutId = setTimeout(() => {
     // Only fires if animationend never did -- if the phase already moved
     // on, this timer is stale and does nothing.
     if (landingPhase.value === phase) advanceLandingPhase()
-  }, duration + 800)
+  }, duration + grace)
 }
 
 // Escape-triggered (see onKeydown) -- backs out of the animation at any
@@ -1256,7 +1304,7 @@ onUnmounted(() => {
                         ></span>
                       </div>
 
-                      <div class="landing-planet" ref="landingPlanetEl" :style="{ background: landingPlanetGradient }"></div>
+                      <div class="landing-planet" ref="landingPlanetEl" :style="landingPlanetStyle"></div>
 
                       <div v-if="landingPhase === 'entry'" class="landing-atmosphere" :style="{ background: landingAtmosphereGradient }"></div>
 
@@ -2037,17 +2085,19 @@ onUnmounted(() => {
 /* ---- Viewport panel: landing-sequence mode -- the animated 90s-style
    descent montage. Deliberately crude/simple shapes, matching the "badly
    drawn" retro aesthetic that was asked for.
-   Phases: approaching (centered growth until the planet's top/bottom
-   touch the viewport edges) -> closing (keeps growing while sliding
-   right, so the left edge ends up near center) -> sweeping (keeps
-   growing while its center moves below the viewport, sweeping the
-   visible edge from vertical to a flattening horizon -- pure position
-   and scale, no CSS rotation, since a plain gradient-filled circle looks
-   identical rotated or not) -> entry (an atmosphere band fills the
-   remaining black sky while a staggered flame burst radiates from
-   center) -> docked (a landing facility rises from the bottom).
-   Each phase's starting position/size matches the previous phase's end
-   state, so switching phase classes doesn't visibly "jump". ---- */
+   approaching/closing/sweeping together form ONE continuous descent along
+   a single smooth Bezier arc (landingPathD, computed in <script> from the
+   scene's own measured size): growing while barely moving, curving out to
+   the right, then sweeping back through center and down off the bottom of
+   the viewport -- see landing-descent below. landingPhase still switches
+   between those three names at the same moments as before (see
+   LANDING_PHASE_DURATIONS in <script>), but purely to change the caption
+   text and arm the next timer; neither can visibly disturb the motion any
+   more, because the motion doesn't key off which of the three classes is
+   currently present (see the shared selector below) -- there is nothing
+   left for the class swap to restart. -> entry (an atmosphere band fills
+   the remaining black sky while a staggered flame burst radiates from
+   center) -> docked (a landing facility rises from the bottom). ---- */
 .landing-sequence-body {
   padding: 0;
   display: flex;
@@ -2063,79 +2113,51 @@ onUnmounted(() => {
 }
 
 /* height/aspect-ratio are a fixed, unanimated reference size (this is
-   what "scale(1)" below means) -- growth is done entirely via
-   transform:scale() instead of animating height directly. Animating a
-   layout property (height) that aspect-ratio derives width from caused a
-   visible glitch right at the phase-1/2 handoff (a black gap flashing in
-   at the top of the scene) -- almost certainly the browser's aspect-ratio
-   width recalculation not staying perfectly in lockstep with the animated
-   height for a frame. transform:scale() is purely a compositor-level
-   effect: it never touches layout at all, so there's nothing to recompute
-   and nothing to glitch. */
+   what "scale(1)" means at the roughly-47%-through point of landing-descent
+   below, where the old approaching/closing boundary used to sit) -- growth
+   is done entirely via transform:scale() instead of animating height
+   directly, since animating a layout property that aspect-ratio derives
+   width from re-triggers layout on every frame for no visual benefit. */
 .landing-planet {
   position: absolute;
   /* Explicit pixel value (measured in JS, see measureLandingScene) instead
      of height:100% -- .landing-scene's own height comes from a flex item
      inside a flex item inside a CSS grid cell, and percentage-height
      resolution for an absolutely positioned child through that much
-     nesting proved unreliable (a real, measurable size mismatch between
-     the end of 'approaching' and the start of 'closing', confirmed via
-     screenshots -- not just a rendering-timing artifact). */
+     nesting proved unreliable (a real, measurable size mismatch, confirmed
+     via screenshots -- not just a rendering-timing artifact). */
   height: var(--landing-diameter, 100%);
   aspect-ratio: 1 / 1;
   border-radius: 50%;
   box-shadow: 0 0 24px 4px rgba(255, 255, 255, 0.12), inset -10px -10px 24px rgba(0, 0, 0, 0.5);
-  /* Keeps this element on its own compositing layer continuously, rather
-     than letting the browser promote/demote it right as the animation-name
-     changes at each phase boundary -- that promotion/demotion churn is a
-     known source of a one-frame render glitch for exactly this pattern
-     (an animated transform whose keyframes swap at a class change). */
-  will-change: transform;
+  /* offset-path (bound in <script>, see landingPlanetStyle/landingPathD)
+     carries the planet's position along the arc; offset-rotate:0deg stops
+     it from also auto-rotating to match the path's tangent, which would
+     spin landingPlanetGradient's off-center highlight as it went. */
+  offset-rotate: 0deg;
+  will-change: transform, offset-distance;
 }
 
-.landing-scene.approaching .landing-planet {
-  left: 50%;
-  top: 50%;
-  animation: landing-approach 8s linear forwards;
-}
-
-@keyframes landing-approach {
-  from { transform: translate(-50%, -50%) scale(0.14); }
-  to { transform: translate(-50%, -50%) scale(1); }
-}
-
-.landing-scene.closing .landing-planet {
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%) scale(1);
-  /* One single animation covering both left and transform together (not
-     two separate simultaneous animations on the same element) -- that
-     split was the previous attempt at giving position its own easing,
-     but running two independent @keyframes animations on one element is
-     itself a plausible source of a sync glitch between them, which isn't
-     worth it for a minor easing nuance. Linear throughout still keeps the
-     SAME growth rate approaching ended on (10.75%/s of the old
-     height-based math -- see landing-approach: (100-14)/8s -- scale
-     1 -> 1.5375 over 5s is the equivalent rate in scale terms), so
-     there's still no velocity discontinuity in the diameter. */
-  animation: landing-closing 5s linear forwards;
-}
-
-@keyframes landing-closing {
-  from { left: 50%; transform: translate(-50%, -50%) scale(1); }
-  to { left: 82%; transform: translate(-50%, -50%) scale(1.5375); }
-}
-
+.landing-scene.approaching .landing-planet,
+.landing-scene.closing .landing-planet,
 .landing-scene.sweeping .landing-planet {
-  left: 82%;
-  top: 50%;
-  transform: translate(-50%, -50%) scale(1.5375);
-  animation: landing-sweep 4s ease-in forwards;
+  /* The SAME animation in all three phase rules (not one each) -- since
+     switching between 'approaching'/'closing'/'sweeping' never actually
+     changes the computed animation, the browser has no reason to restart
+     or re-promote it at those class boundaries, which is what makes the
+     whole descent read as one continuous move instead of three animations
+     handed off between each other. Timing is a single eased curve across
+     the whole 17s (matching the old 8s+5s+4s total, see
+     LANDING_PHASE_DURATIONS in <script>) -- slow at first (reads as
+     "growing in place"), fastest through the middle (the old "closing"
+     slide), easing off toward the end (the old "sweeping" dive, already
+     off-screen well before it would matter). */
+  animation: landing-descent 17s cubic-bezier(0.76, 0, 0.24, 1) forwards;
 }
 
-@keyframes landing-sweep {
-  from { left: 82%; top: 50%; transform: translate(-50%, -50%) scale(1.5375); }
-  to { left: 50%; top: 230%; transform: translate(-50%, -50%) scale(4.2); }
+@keyframes landing-descent {
+  from { offset-distance: 0%; transform: scale(0.14); }
+  to { offset-distance: 100%; transform: scale(4.2); }
 }
 
 /* entry/docked: the planet circle itself is no longer relevant -- entry
@@ -2145,8 +2167,11 @@ onUnmounted(() => {
   display: none;
 }
 
-/* Anchored right at the horizon the sweep phase ends on (~20% down from
-   the top, matching that phase's final numbers above), growing upward. */
+/* Anchored right at the horizon the descent ends on (~20% down from the
+   top -- an independent fixed value, not derived from landingPathD's end
+   point, since the planet is already invisible off the bottom of the
+   viewport well before landing-descent actually finishes), growing
+   upward. */
 .landing-atmosphere {
   position: absolute;
   left: 0;
