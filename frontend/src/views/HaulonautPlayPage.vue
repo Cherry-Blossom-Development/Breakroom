@@ -109,12 +109,30 @@ const landingCaption = computed(() => {
   return LANDING_CAPTIONS[landingPhase.value] || ''
 })
 
-// 8 evenly-spaced flame spokes radiating from the viewport's center,
-// staggered so they don't all burst in/die down at once.
-const FLAME_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315]
-const landingFlames = computed(() =>
-  FLAME_ANGLES.map((angle, i) => ({ angle, delay: i * 0.35 }))
-)
+// Flame streaks for the atmospheric-entry burst -- irregular, and only
+// ever pointing up/left/right. rotate(0deg) on the unrotated .flame (see
+// <style>) points straight down, so 90deg=left, 180deg=up, 270deg=right;
+// the range below spans left-through-up-through-right and never comes
+// near 0/360 (down), since that's where the ship's own belly/heat shield
+// would be. They all radiate from a single shared point near the
+// bottom-middle of the viewport (see .flame-anchor's own top/left in
+// <style>), not the center of the screen. startPx staggers how far from
+// that shared point each streak actually begins, so they don't all
+// appear to erupt from the exact same spot. Regenerated fresh each time
+// 'entry' starts (see advanceLandingPhase) rather than computed once from
+// a fixed layout, so the burst is a different, organic shape every
+// landing instead of a neat, evenly-spaced starburst.
+const LANDING_FLAME_COUNT = 12
+function generateLandingFlames() {
+  return Array.from({ length: LANDING_FLAME_COUNT }, () => ({
+    angle: 90 + Math.random() * 180,
+    startPx: Math.random() * 40,
+    length: 90 + Math.random() * 70,
+    width: 22 + Math.random() * 18,
+    delay: Math.random() * 2.6
+  }))
+}
+const landingFlames = ref([])
 
 // What's available to do -- some entries are sector-dependent (grows as
 // more sector content types get real interactions), but Cargo and Star
@@ -590,6 +608,7 @@ function advanceLandingPhase() {
   // That forced-layout work landing right on top of the animated-transform
   // handoff was a plausible cause of a one-frame compositor glitch there.
   if (next === 'entry') {
+    landingFlames.value = generateLandingFlames()
     logLines.value.push('ATMOSPHERIC ENTRY -- HOLD ON!')
     scrollLogToBottom()
   } else if (next === 'docked') {
@@ -1310,12 +1329,15 @@ onUnmounted(() => {
 
                       <div v-if="landingPhase === 'entry'" class="landing-flames" aria-hidden="true">
                         <div
-                          v-for="f in landingFlames"
-                          :key="f.angle"
+                          v-for="(f, i) in landingFlames"
+                          :key="i"
                           class="flame-anchor"
                           :style="{ transform: `rotate(${f.angle}deg)`, animationDelay: f.delay + 's' }"
                         >
-                          <span class="flame"></span>
+                          <span
+                            class="flame"
+                            :style="{ top: f.startPx + 'px', height: f.length + 'px', width: f.width + 'px', left: (-f.width / 2) + 'px' }"
+                          ></span>
                         </div>
                       </div>
 
@@ -2208,24 +2230,27 @@ onUnmounted(() => {
   inset: 0;
 }
 
-/* Zero-size pivot anchored at screen center; rotating it (a fixed angle,
-   no animation needed on the anchor itself) points its child flame
-   outward in that direction with no transform-origin ambiguity. */
+/* Zero-size pivot shared by every flame streak, near the bottom-middle of
+   the viewport rather than its center (see landingFlames in <script> for
+   why) -- rotating it (a fixed angle, no animation needed on the anchor
+   itself) points its child flame outward in that direction with no
+   transform-origin ambiguity. */
 .flame-anchor {
   position: absolute;
   left: 50%;
-  top: 50%;
+  top: 88%;
   width: 0;
   height: 0;
   animation: flame-spoke-fade 3.4s ease-in-out both;
 }
 
+/* left/top/width/height are per-instance (see landingFlames/generateLandingFlames
+   in <script>) -- top offsets the streak's near end out from the shared
+   pivot instead of every one starting flush against it, and left is
+   always -width/2 so it's still centered on the pivot's own axis before
+   rotation. */
 .flame {
   position: absolute;
-  left: -17px;
-  top: 0;
-  width: 34px;
-  height: 140px;
   background: linear-gradient(to bottom, #fff2c2 0%, #ffae42 45%, #ff2d00 85%, transparent 100%);
   /* egg-shaped: rounder/wider near the pivot (top), tapering to a point
      at the outward tip (bottom) */
