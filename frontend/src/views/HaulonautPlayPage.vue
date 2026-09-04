@@ -27,6 +27,15 @@ const landingError = ref('')
 const landingPhase = ref(null) // null | 'approaching' | 'closing' | 'sweeping' | 'entry' | 'docked' -- drives the landing-sequence animation
 const landingSceneEl = ref(null)
 const landingSceneHeightPx = ref(280) // measured; see measureLandingScene() -- sane fallback before the first measurement
+
+// Diagnostic-only refs/state for the phase-1/2 gap investigation -- see
+// landingDebugMetrics and startLandingDebugLoop() below. Not used by the
+// landing sequence itself.
+const crtMonitorEl = ref(null)
+const crtBezelEl = ref(null)
+const crtScreenEl = ref(null)
+const landingPlanetEl = ref(null)
+const landingDebugMetrics = ref(null)
 const onSurface = ref(false) // true once the player has exited the craft -- replaces the whole ship UI with the surface screen
 const surfaceLog = ref([]) // exploreSurface() results shown on the surface screen itself (separate from the ship's hidden Terminal)
 const traveling = ref(false) // true while an autopilot course is being flown hop-by-hop
@@ -383,6 +392,50 @@ function measureLandingScene() {
   }
 }
 
+// ---- Diagnostic HUD for the phase-1/2 gap ----
+// Reads live layout numbers every frame while the landing sequence is
+// running so the phase-1->2 handoff (where a black band has been
+// observed briefly appearing above the viewport) can be pinpointed: is
+// it the outer .crt-monitor box (viewport/vh-driven) shrinking, the
+// .crt-screen content area, or just .landing-scene/.landing-planet
+// inside it? Purely observational -- doesn't feed back into any layout
+// or animation logic.
+let landingDebugRafId = null
+
+function rectOf(el) {
+  if (!el) return null
+  const r = el.getBoundingClientRect()
+  return { w: r.width, h: r.height, top: r.top, left: r.left }
+}
+
+function updateLandingDebugMetrics() {
+  landingDebugMetrics.value = {
+    window: { w: window.innerWidth, h: window.innerHeight },
+    docClient: { w: document.documentElement.clientWidth, h: document.documentElement.clientHeight },
+    monitor: rectOf(crtMonitorEl.value),
+    bezel: rectOf(crtBezelEl.value),
+    screen: rectOf(crtScreenEl.value),
+    scene: rectOf(landingSceneEl.value),
+    planet: rectOf(landingPlanetEl.value),
+    landingDiameterVar: landingSceneHeightPx.value,
+    phase: landingPhase.value
+  }
+  landingDebugRafId = requestAnimationFrame(updateLandingDebugMetrics)
+}
+
+function startLandingDebugLoop() {
+  if (landingDebugRafId) return
+  landingDebugRafId = requestAnimationFrame(updateLandingDebugMetrics)
+}
+
+function stopLandingDebugLoop() {
+  if (landingDebugRafId) {
+    cancelAnimationFrame(landingDebugRafId)
+    landingDebugRafId = null
+  }
+  landingDebugMetrics.value = null
+}
+
 async function beginLandingSequence() {
   viewportMode.value = 'landing-sequence'
   selectedIndex.value = -1
@@ -393,6 +446,7 @@ async function beginLandingSequence() {
   await nextTick() // .landing-scene doesn't exist in the DOM until this render lands
   measureLandingScene()
   window.addEventListener('resize', measureLandingScene)
+  startLandingDebugLoop()
   scheduleLandingFallback('approaching')
 }
 
@@ -413,9 +467,18 @@ function advanceLandingPhase() {
   if (!next) return
   if (landingTimeoutId) { clearTimeout(landingTimeoutId); landingTimeoutId = null }
   landingPhase.value = next
-  if (next === 'entry') logLines.value.push('ATMOSPHERIC ENTRY -- HOLD ON!')
-  else if (next === 'docked') logLines.value.push('Touchdown confirmed. Docking clamps engaged.')
-  scrollLogToBottom()
+  // Only scroll when a line was actually added -- 'closing'/'sweeping' add
+  // nothing, so there's no reason to force a scrollHeight layout read (and
+  // scrollTop write) in the same tick as the .landing-scene class swap.
+  // That forced-layout work landing right on top of the animated-transform
+  // handoff was a plausible cause of a one-frame compositor glitch there.
+  if (next === 'entry') {
+    logLines.value.push('ATMOSPHERIC ENTRY -- HOLD ON!')
+    scrollLogToBottom()
+  } else if (next === 'docked') {
+    logLines.value.push('Touchdown confirmed. Docking clamps engaged.')
+    scrollLogToBottom()
+  }
   scheduleLandingFallback(next)
 }
 
@@ -435,6 +498,7 @@ function scheduleLandingFallback(phase) {
 function cancelLandingSequence() {
   if (landingTimeoutId) { clearTimeout(landingTimeoutId); landingTimeoutId = null }
   window.removeEventListener('resize', measureLandingScene)
+  stopLandingDebugLoop()
   landingPhase.value = null
   viewportMode.value = 'planet'
   selectedIndex.value = -1
@@ -447,6 +511,7 @@ function cancelLandingSequence() {
 function exitCraft() {
   if (landingTimeoutId) { clearTimeout(landingTimeoutId); landingTimeoutId = null }
   window.removeEventListener('resize', measureLandingScene)
+  stopLandingDebugLoop()
   landingPhase.value = null
   surfaceLog.value = []
   onSurface.value = true
@@ -924,6 +989,7 @@ onMounted(async () => {
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('resize', measureLandingScene)
+  stopLandingDebugLoop()
   if (driftIntervalId) clearInterval(driftIntervalId)
   if (landingTimeoutId) clearTimeout(landingTimeoutId)
 })
@@ -972,12 +1038,12 @@ onUnmounted(() => {
       <button class="surface-exit-link" @click="backToGames">Exit to Games List</button>
     </div>
 
-    <div v-else class="crt-monitor">
-      <div class="crt-bezel">
+    <div v-else class="crt-monitor" ref="crtMonitorEl">
+      <div class="crt-bezel" ref="crtBezelEl">
         <div class="crt-brand" aria-hidden="true">PROSAURUS <span class="crt-brand-model">MODEL H-88</span></div>
 
         <div class="crt-screen-frame">
-          <div class="crt-screen">
+          <div class="crt-screen" ref="crtScreenEl">
             <div class="crt-scanlines" aria-hidden="true"></div>
             <div class="crt-glow" aria-hidden="true"></div>
             <div class="crt-content">
@@ -1115,7 +1181,7 @@ onUnmounted(() => {
                         ></span>
                       </div>
 
-                      <div class="landing-planet" :style="{ background: landingPlanetGradient }"></div>
+                      <div class="landing-planet" ref="landingPlanetEl" :style="{ background: landingPlanetGradient }"></div>
 
                       <div v-if="landingPhase === 'entry'" class="landing-atmosphere" :style="{ background: landingAtmosphereGradient }"></div>
 
@@ -1286,6 +1352,22 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    <!-- Diagnostic HUD for the landing-sequence phase-1/2 gap. Lives
+         outside .crt-monitor entirely (pinned to the real browser
+         viewport, not scaled/positioned with the fake bezel) so it keeps
+         reporting real numbers no matter what the bezel itself does. -->
+    <div v-if="landingDebugMetrics" class="landing-debug-hud" aria-hidden="true">
+      <span>phase: {{ landingDebugMetrics.phase }}</span>
+      <span>window: {{ landingDebugMetrics.window.w }}x{{ landingDebugMetrics.window.h }}</span>
+      <span>docClient: {{ landingDebugMetrics.docClient.w }}x{{ landingDebugMetrics.docClient.h }}</span>
+      <span v-if="landingDebugMetrics.monitor">monitor: {{ landingDebugMetrics.monitor.w.toFixed(1) }}x{{ landingDebugMetrics.monitor.h.toFixed(1) }} @({{ landingDebugMetrics.monitor.left.toFixed(1) }},{{ landingDebugMetrics.monitor.top.toFixed(1) }})</span>
+      <span v-if="landingDebugMetrics.bezel">bezel: {{ landingDebugMetrics.bezel.w.toFixed(1) }}x{{ landingDebugMetrics.bezel.h.toFixed(1) }}</span>
+      <span v-if="landingDebugMetrics.screen">screen: {{ landingDebugMetrics.screen.w.toFixed(1) }}x{{ landingDebugMetrics.screen.h.toFixed(1) }} @({{ landingDebugMetrics.screen.left.toFixed(1) }},{{ landingDebugMetrics.screen.top.toFixed(1) }})</span>
+      <span v-if="landingDebugMetrics.scene">scene: {{ landingDebugMetrics.scene.w.toFixed(1) }}x{{ landingDebugMetrics.scene.h.toFixed(1) }} @({{ landingDebugMetrics.scene.left.toFixed(1) }},{{ landingDebugMetrics.scene.top.toFixed(1) }})</span>
+      <span v-if="landingDebugMetrics.planet">planet: {{ landingDebugMetrics.planet.w.toFixed(1) }}x{{ landingDebugMetrics.planet.h.toFixed(1) }} @({{ landingDebugMetrics.planet.left.toFixed(1) }},{{ landingDebugMetrics.planet.top.toFixed(1) }})</span>
+      <span>--landing-diameter: {{ landingDebugMetrics.landingDiameterVar.toFixed(1) }}px</span>
+    </div>
   </div>
 </template>
 
@@ -1306,6 +1388,27 @@ onUnmounted(() => {
   color: #cfcfd4;
   text-align: center;
   font-family: 'Courier New', Courier, monospace;
+}
+
+/* Diagnostic-only, see landingDebugMetrics. Pinned to the real viewport
+   (not inside .crt-monitor) so it reports true numbers regardless of
+   whatever the fake bezel is doing. */
+.landing-debug-hud {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4000;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 4px 10px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #4dff88;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  pointer-events: none;
 }
 
 .exit-link {
