@@ -2160,9 +2160,26 @@ onUnmounted(() => {
   to { offset-distance: 100%; transform: scale(4.2); }
 }
 
-/* entry/docked: the planet circle itself is no longer relevant -- entry
-   shows the atmosphere band + flames instead, docked shows solid sky. */
-.landing-scene.entry .landing-planet,
+/* 'entry': the planet doesn't vanish -- it keeps growing in the same spot
+   (offset-distance frozen at landing-descent's own 100%, so there's no
+   position jump at the handoff) so its curve keeps flattening toward a
+   horizon as it fills the screen. ease-in starts at ~zero growth-rate,
+   matching the near-zero rate landing-descent above already decelerated
+   to by its own end (same cubic-bezier shape, just mirrored), then
+   accelerates -- reads as rushing toward the ground, not a restart. The
+   atmosphere band + flames (below) layer on top of this, not instead of
+   it. */
+.landing-scene.entry .landing-planet {
+  animation: landing-entry-grow 6s ease-in forwards;
+}
+
+@keyframes landing-entry-grow {
+  from { offset-distance: 100%; transform: scale(4.2); }
+  to { offset-distance: 100%; transform: scale(30); }
+}
+
+/* docked: the planet circle itself is no longer relevant here -- solid
+   sky (landingSkyGradient) takes over the whole scene. */
 .landing-scene.docked .landing-planet {
   display: none;
 }
