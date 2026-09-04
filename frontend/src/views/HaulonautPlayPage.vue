@@ -40,6 +40,11 @@ const landingDebugMetrics = ref(null)
 const landingDebugPaused = ref(false)
 const onSurface = ref(false) // true once the player has exited the craft -- replaces the whole ship UI with the surface screen
 const surfaceLog = ref([]) // exploreSurface() results shown on the surface screen itself (separate from the ship's hidden Terminal)
+const onSurfaceFeatureId = ref(null) // mirrors the server's haulonaut_pilots.on_surface_feature_id -- which planet feature onSurface refers to
+const surfaceMap = ref(null) // { gridWidth, gridHeight, shipX, shipY, buggyX, buggyY, revealed: number[] } for the current planet, or null before it's loaded
+const mapLoading = ref(false)
+const mapError = ref('')
+const buggyMoving = ref(false) // guards overlapping /drive-buggy requests, same pattern as navigating/landing
 const traveling = ref(false) // true while an autopilot course is being flown hop-by-hop
 const driftVariance = ref(0)
 const drifting = ref(false) // true while a drift hop's own API call is in flight
@@ -65,6 +70,10 @@ const FEATURE_LABELS = { planet: 'PLANET', trading_outpost: 'OUTPOST' }
 
 const planetFeature = computed(() => sectorFeatures.value.find(f => f.feature_type === 'planet') || null)
 const outpostFeature = computed(() => sectorFeatures.value.find(f => f.feature_type === 'trading_outpost') || null)
+
+// O(1) template lookups for which cells are revealed on the current
+// planet's surface map (see surfaceMap ref).
+const revealedSet = computed(() => new Set(surfaceMap.value?.revealed || []))
 
 // The ship should be drifting: out of fuel, and not already sitting
 // somewhere that resolves the crisis. Once true, the drift ticker (near
@@ -649,7 +658,11 @@ function cancelLandingSequence() {
 }
 
 // The montage's payoff: leaves the ship UI entirely for the full-screen
-// surface view (see the top-level onSurface branch in the template).
+// surface view (see the top-level onSurface branch in the template). Flips
+// onSurface immediately (zero added latency on top of the landing
+// animation) and loads the persisted surface-map state in the background --
+// see loadSurfaceMap, which has its own loading/error handling so a slow or
+// failed request doesn't block this moment.
 function exitCraft() {
   if (landingTimeoutId) { clearTimeout(landingTimeoutId); landingTimeoutId = null }
   window.removeEventListener('resize', measureLandingScene)
@@ -659,14 +672,77 @@ function exitCraft() {
   onSurface.value = true
   logLines.value.push('Exiting craft.')
   scrollLogToBottom()
+  loadSurfaceMap()
 }
 
-function returnToShip() {
+// POSTs /exit-craft -- persists on_surface_feature_id server-side (deriving
+// the planet from the character's actual sector, same as /land already
+// does) and returns that planet's surface map, creating it on a first-ever
+// visit. Also (re)callable as a retry from the map panel's own error state.
+async function loadSurfaceMap() {
+  mapLoading.value = true
+  mapError.value = ''
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/exit-craft`, {
+      method: 'POST',
+      credentials: 'include'
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Failed to exit craft')
+    onSurfaceFeatureId.value = data.onSurfaceFeatureId
+    surfaceMap.value = data.surfaceMap
+  } catch (err) {
+    mapError.value = err.message
+  } finally {
+    mapLoading.value = false
+  }
+}
+
+// Optimistic, same reasoning as exitCraft: flips the UI back instantly, and
+// the return-to-ship call itself is best-effort -- a failure just means the
+// next reload would (incorrectly) restore surface state, which is a
+// low-stakes, self-correcting failure the player can fix by exiting the
+// craft again.
+async function returnToShip() {
   onSurface.value = false
   viewportMode.value = 'space'
   selectedIndex.value = -1
+  onSurfaceFeatureId.value = null
+  surfaceMap.value = null
   logLines.value.push('Boarding the ship. Systems coming back online.')
   scrollLogToBottom()
+  try {
+    await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/return-to-ship`, {
+      method: 'POST',
+      credentials: 'include'
+    })
+  } catch {
+    // Best-effort -- see comment above.
+  }
+}
+
+// Drives the buggy one cell across the current planet's surface map.
+// Single step per call, matching this game's existing single-step,
+// hotkey-driven interaction model (see onKeydown) -- no diagonal, no
+// hold-to-repeat.
+async function moveBuggy(direction) {
+  if (buggyMoving.value || !surfaceMap.value) return
+  buggyMoving.value = true
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/drive-buggy`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ direction })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Move failed')
+    surfaceMap.value = { ...surfaceMap.value, buggyX: data.buggyX, buggyY: data.buggyY, revealed: data.revealed }
+  } catch (err) {
+    mapError.value = err.message
+  } finally {
+    buggyMoving.value = false
+  }
 }
 
 // One random surface-expedition roll (see haulonautLandingEvents.js on
@@ -732,6 +808,15 @@ async function loadCharacter() {
     rations.value = data.rations || 0
     fuel.value = data.fuel || 0
     inventory.value = data.inventory || []
+    // Restores "on the surface of a planet" across reloads/logins -- see
+    // exitCraft()/returnToShip() for where these are also kept in sync
+    // during the current session. viewportMode needs no equivalent
+    // handling: the template's onSurface branch is checked before the ship
+    // UI, so viewportMode sitting at its 'space' default underneath is
+    // harmless either way.
+    onSurfaceFeatureId.value = data.onSurfaceFeatureId || null
+    surfaceMap.value = data.surfaceMap || null
+    onSurface.value = !!data.onSurfaceFeatureId
     regenerateStarfield()
     logLines.value = [
       'Docking confirmed.',
@@ -939,6 +1024,10 @@ function onKeydown(e) {
   if (onSurface.value) {
     if (e.key === '1') { e.preventDefault(); exploreSurface() }
     else if (e.key === '2') { e.preventDefault(); returnToShip() }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); moveBuggy('up') }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); moveBuggy('down') }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); moveBuggy('left') }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); moveBuggy('right') }
     return
   }
 
@@ -1160,6 +1249,33 @@ onUnmounted(() => {
           <p v-for="(line, i) in surfaceLog" :key="i" class="surface-log-line">{{ line }}</p>
           <p v-if="surfaceLog.length === 0" class="surface-log-empty">The surface is still and silent.</p>
         </div>
+
+        <div class="surface-map" v-if="surfaceMap">
+          <div
+            class="surface-map-grid"
+            :style="{ gridTemplateColumns: `repeat(${surfaceMap.gridWidth}, 1fr)`, gridTemplateRows: `repeat(${surfaceMap.gridHeight}, 1fr)` }"
+          >
+            <div
+              v-for="i in surfaceMap.gridWidth * surfaceMap.gridHeight"
+              :key="i - 1"
+              class="surface-map-cell"
+              :class="{ revealed: revealedSet.has(i - 1) }"
+            ></div>
+            <span
+              class="surface-map-icon surface-map-ship"
+              :style="{ left: (surfaceMap.shipX + 0.5) / surfaceMap.gridWidth * 100 + '%', top: (surfaceMap.shipY + 0.5) / surfaceMap.gridHeight * 100 + '%' }"
+              aria-hidden="true"
+            >&#9650;</span>
+            <span
+              class="surface-map-icon surface-map-buggy"
+              :style="{ left: (surfaceMap.buggyX + 0.5) / surfaceMap.gridWidth * 100 + '%', top: (surfaceMap.buggyY + 0.5) / surfaceMap.gridHeight * 100 + '%' }"
+              aria-hidden="true"
+            >&#9673;</span>
+          </div>
+          <p class="surface-map-hint">Arrow keys: drive buggy</p>
+        </div>
+        <p v-else-if="mapLoading" class="surface-log-empty">Charting surface...</p>
+        <p v-else-if="mapError" class="surface-error">{{ mapError }} <button class="surface-btn-inline" @click="loadSurfaceMap">Retry</button></p>
 
         <div class="surface-stats">
           <span class="resource-stat"><span class="resource-icon" aria-hidden="true">&#164;</span>{{ credits.toLocaleString() }} Credits</span>
@@ -2785,6 +2901,63 @@ onUnmounted(() => {
   color: #7fae94;
 }
 
+/* Low-res fog-of-war grid -- the whole map (never a scrolling camera) is
+   always on screen at fixed percentage positions, so the ship and buggy
+   icons are always visible relative to each other regardless of how much
+   is still unexplored. */
+.surface-map {
+  margin-bottom: 16px;
+}
+
+.surface-map-grid {
+  position: relative;
+  display: grid;
+  gap: 1px;
+  width: 216px;
+  max-width: 100%;
+  aspect-ratio: 3 / 2;
+  margin: 0 auto;
+  padding: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.surface-map-cell {
+  background: #020402;
+  border-radius: 1px;
+}
+
+.surface-map-cell.revealed {
+  background: #0d2b18;
+}
+
+.surface-map-icon {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-size: 0.7rem;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.surface-map-ship {
+  color: #e8c76a;
+}
+
+.surface-map-buggy {
+  color: #4dff88;
+  text-shadow: 0 0 8px rgba(77, 255, 136, 0.7);
+  transition: left 0.15s linear, top 0.15s linear;
+}
+
+.surface-map-hint {
+  margin: 6px 0 0;
+  font-size: 0.72rem;
+  font-style: italic;
+  color: #7fae94;
+  text-align: center;
+}
+
 .surface-stats {
   display: flex;
   justify-content: center;
@@ -2855,6 +3028,21 @@ onUnmounted(() => {
   margin: 10px 0 0;
   font-size: 0.75rem;
   color: #ff8a8a;
+}
+
+.surface-btn-inline {
+  background: none;
+  border: 1px solid #ff8a8a;
+  border-radius: 3px;
+  padding: 1px 8px;
+  color: #ff8a8a;
+  font-family: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.surface-btn-inline:hover {
+  background: rgba(255, 138, 138, 0.15);
 }
 
 .surface-exit-link {

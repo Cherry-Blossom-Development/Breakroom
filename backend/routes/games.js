@@ -25,6 +25,19 @@ const STARTING_FUEL = 100;
 const WARP_RATIONS_COST = 1;
 const WARP_FUEL_COST = 1;
 
+// A planet surface's exploration grid -- low-res and small on purpose (see
+// haulonaut_surface_maps in migration 063). Reveal radius 1 means a 3x3
+// block (the cell moved onto, plus its immediate neighbors) is uncovered
+// per stop, including the very first reveal around the ship's own landing
+// point -- genuinely starts mostly black and takes real exploration to
+// uncover, rather than showing most of the map on arrival. Buggy movement
+// is free (no rations/fuel cost, unlike warping) -- it's exploration on an
+// already-parked ship, not another form of travel.
+const SURFACE_MAP_GRID_WIDTH = 12;
+const SURFACE_MAP_GRID_HEIGHT = 8;
+const SURFACE_MAP_REVEAL_RADIUS = 1;
+const SURFACE_MAP_DIRECTIONS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+
 const authenticate = async (req, res, next) => {
   try {
     const token = extractToken(req);
@@ -131,8 +144,12 @@ async function loadPilotLocation(client, gameUserId) {
     [currentSector.id]
   );
 
+  // ORDER BY id: makes "which feature is THE planet" deterministic (lowest
+  // id) in the schema-permitted but never-yet-generated case of a sector
+  // holding more than one -- matches the same tie-break used to pick a
+  // planet in /exit-craft below.
   const featuresResult = await client.query(
-    'SELECT id, feature_type, name, description FROM haulonaut_sector_features WHERE sector_id = $1',
+    'SELECT id, feature_type, name, description FROM haulonaut_sector_features WHERE sector_id = $1 ORDER BY id',
     [currentSector.id]
   );
 
@@ -159,6 +176,76 @@ async function loadPilotLocation(client, gameUserId) {
     credits,
     rations,
     fuel
+  };
+}
+
+// Returns a NEW array (doesn't mutate existingIndices) with every cell in
+// the radius-sized square centered on (x,y) added, clamped to the grid and
+// deduped via a Set. Row-major indexing (index = y * gridWidth + x) matches
+// haulonaut_surface_maps.revealed_cells.
+function revealAround(existingIndices, x, y, gridWidth, gridHeight, radius) {
+  const set = new Set(existingIndices);
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx >= 0 && nx < gridWidth && ny >= 0 && ny < gridHeight) set.add(ny * gridWidth + nx);
+    }
+  }
+  return Array.from(set);
+}
+
+// First-ever visit to a given planet feature: creates its
+// haulonaut_surface_maps row, parking the ship (and starting the buggy) at
+// the grid's center with an initial reveal around that point -- so landing
+// doesn't drop the player into total blackness with 0 cells visible.
+async function createSurfaceMap(client, gameUserId, featureId) {
+  const shipX = Math.floor(SURFACE_MAP_GRID_WIDTH / 2);
+  const shipY = Math.floor(SURFACE_MAP_GRID_HEIGHT / 2);
+  const revealed = revealAround([], shipX, shipY, SURFACE_MAP_GRID_WIDTH, SURFACE_MAP_GRID_HEIGHT, SURFACE_MAP_REVEAL_RADIUS);
+  await client.query(
+    `INSERT INTO haulonaut_surface_maps
+       (game_user_id, feature_id, grid_width, grid_height, ship_x, ship_y, buggy_x, buggy_y, revealed_cells)
+     VALUES ($1, $2, $3, $4, $5, $6, $5, $6, $7)`,
+    [gameUserId, featureId, SURFACE_MAP_GRID_WIDTH, SURFACE_MAP_GRID_HEIGHT, shipX, shipY, JSON.stringify(revealed)]
+  );
+  return { gridWidth: SURFACE_MAP_GRID_WIDTH, gridHeight: SURFACE_MAP_GRID_HEIGHT, shipX, shipY, buggyX: shipX, buggyY: shipY, revealed };
+}
+
+// Whether a character is aboard their ship (null) or standing on a specific
+// planet feature's surface, plus that surface's map state if so. Self-heals
+// like loadPilotLocation does for a missing pilot row: on_surface_feature_id
+// set with no matching map row (shouldn't happen via normal flow, since
+// /exit-craft creates both together) gets a fresh map rather than a broken
+// response.
+async function loadSurfaceState(client, gameUserId) {
+  const pilotResult = await client.query(
+    'SELECT on_surface_feature_id FROM haulonaut_pilots WHERE game_user_id = $1',
+    [gameUserId]
+  );
+  const onSurfaceFeatureId = pilotResult.rowCount > 0 ? pilotResult.rows[0].on_surface_feature_id : null;
+  if (!onSurfaceFeatureId) return { onSurfaceFeatureId: null, surfaceMap: null };
+
+  const mapResult = await client.query(
+    `SELECT grid_width, grid_height, ship_x, ship_y, buggy_x, buggy_y, revealed_cells
+     FROM haulonaut_surface_maps WHERE game_user_id = $1 AND feature_id = $2`,
+    [gameUserId, onSurfaceFeatureId]
+  );
+  if (mapResult.rowCount === 0) {
+    return { onSurfaceFeatureId, surfaceMap: await createSurfaceMap(client, gameUserId, onSurfaceFeatureId) };
+  }
+  const row = mapResult.rows[0];
+  return {
+    onSurfaceFeatureId,
+    surfaceMap: {
+      gridWidth: row.grid_width,
+      gridHeight: row.grid_height,
+      shipX: row.ship_x,
+      shipY: row.ship_y,
+      buggyX: row.buggy_x,
+      buggyY: row.buggy_y,
+      revealed: JSON.parse(row.revealed_cells)
+    }
   };
 }
 
@@ -398,8 +485,9 @@ router.get('/:gameKey/characters/:id', authenticate, async (req, res) => {
 
     const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel } = await loadPilotLocation(client, req.params.id);
     const inventory = await loadInventory(client, req.params.id);
+    const { onSurfaceFeatureId, surfaceMap } = await loadSurfaceState(client, req.params.id);
 
-    res.json({ character: result.rows[0], currentSector, connectedSectors, features, playersHere, credits, rations, fuel, inventory });
+    res.json({ character: result.rows[0], currentSector, connectedSectors, features, playersHere, credits, rations, fuel, inventory, onSurfaceFeatureId, surfaceMap });
   } catch (err) {
     console.error('Error loading character:', err);
     res.status(500).json({ message: 'Failed to load character' });
@@ -431,11 +519,15 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
     if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
 
     const pilotResult = await client.query(
-      'SELECT current_sector_id, rations, fuel FROM haulonaut_pilots WHERE game_user_id = $1',
+      'SELECT current_sector_id, on_surface_feature_id, rations, fuel FROM haulonaut_pilots WHERE game_user_id = $1',
       [req.params.id]
     );
     if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
     const pilot = pilotResult.rows[0];
+    // Not reachable from the ship UI today (no warp controls render on the
+    // surface screen), but re-checked server-side anyway -- same posture as
+    // the link check just below, which the client also already enforces.
+    if (pilot.on_surface_feature_id) return res.status(409).json({ message: 'Return to ship before warping' });
 
     const linkCheck = await client.query(
       'SELECT 1 FROM haulonaut_sector_links WHERE from_sector_id = $1 AND to_sector_id = $2',
@@ -512,10 +604,14 @@ router.post('/:gameKey/characters/:id/drift', authenticate, async (req, res) => 
     const instanceId = ownerCheck.rows[0].game_instance_id;
 
     const pilotResult = await client.query(
-      'SELECT current_sector_id, fuel FROM haulonaut_pilots WHERE game_user_id = $1',
+      'SELECT current_sector_id, on_surface_feature_id, fuel FROM haulonaut_pilots WHERE game_user_id = $1',
       [req.params.id]
     );
     if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
+    // Not reachable from the surface screen today (drift is paced by the
+    // ship UI's own tick, which doesn't run there), but re-checked
+    // server-side for the same reason as /navigate's equivalent guard.
+    if (pilotResult.rows[0].on_surface_feature_id) return res.status(409).json({ message: 'Return to ship before drifting' });
     if (pilotResult.rows[0].fuel > 0) return res.status(409).json({ message: 'Not out of fuel' });
     const currentSectorId = pilotResult.rows[0].current_sector_id;
 
@@ -750,6 +846,155 @@ router.post('/:gameKey/characters/:id/land', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Error landing:', err);
     res.status(500).json({ message: 'Failed to land' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/characters/:id/exit-craft
+ * Leaves the ship for the surface of whatever planet is in the character's
+ * current sector -- the planet is derived server-side from current_sector_id
+ * (never trusted from the client), same posture as /land's own planet
+ * check. Sets haulonaut_pilots.on_surface_feature_id and returns that
+ * planet's surface-map state, creating it (see createSurfaceMap) on a
+ * character's first-ever visit to this particular planet.
+ */
+router.post('/:gameKey/characters/:id/exit-craft', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+
+    const pilotResult = await client.query(
+      'SELECT current_sector_id FROM haulonaut_pilots WHERE game_user_id = $1',
+      [req.params.id]
+    );
+    if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
+
+    // ORDER BY id LIMIT 1: same deterministic tie-break as
+    // loadPilotLocation's featuresResult, for the schema-permitted (but
+    // never-yet-generated) case of a sector holding more than one planet.
+    const featureResult = await client.query(
+      `SELECT id FROM haulonaut_sector_features WHERE sector_id = $1 AND feature_type = 'planet' ORDER BY id LIMIT 1`,
+      [pilotResult.rows[0].current_sector_id]
+    );
+    if (featureResult.rowCount === 0) return res.status(409).json({ message: 'No planet in this sector' });
+    const featureId = featureResult.rows[0].id;
+
+    await client.query('UPDATE haulonaut_pilots SET on_surface_feature_id = $1 WHERE game_user_id = $2', [featureId, req.params.id]);
+
+    const existingMap = await client.query(
+      'SELECT 1 FROM haulonaut_surface_maps WHERE game_user_id = $1 AND feature_id = $2',
+      [req.params.id, featureId]
+    );
+    const surfaceMap = existingMap.rowCount > 0
+      ? (await loadSurfaceState(client, req.params.id)).surfaceMap
+      : await createSurfaceMap(client, req.params.id, featureId);
+
+    res.json({ onSurfaceFeatureId: featureId, surfaceMap });
+  } catch (err) {
+    console.error('Error exiting craft:', err);
+    res.status(500).json({ message: 'Failed to exit craft' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/characters/:id/return-to-ship
+ * Clears on_surface_feature_id back to null -- the surface map itself
+ * (haulonaut_surface_maps) is left untouched so it's exactly as explored
+ * whenever this planet is visited again.
+ */
+router.post('/:gameKey/characters/:id/return-to-ship', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+
+    await client.query('UPDATE haulonaut_pilots SET on_surface_feature_id = NULL WHERE game_user_id = $1', [req.params.id]);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error returning to ship:', err);
+    res.status(500).json({ message: 'Failed to return to ship' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/characters/:id/drive-buggy
+ * Moves the buggy one cell across the current planet's surface map. Body:
+ * { direction: 'up'|'down'|'left'|'right' }. Bumping into the grid's edge
+ * is a silent no-op (200, unchanged position), not an error -- low-friction
+ * input handling, nothing to punish here.
+ */
+router.post('/:gameKey/characters/:id/drive-buggy', authenticate, async (req, res) => {
+  const direction = req.body.direction;
+  if (!SURFACE_MAP_DIRECTIONS[direction]) return res.status(400).json({ message: 'Invalid direction' });
+
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+
+    const pilotResult = await client.query(
+      'SELECT on_surface_feature_id FROM haulonaut_pilots WHERE game_user_id = $1',
+      [req.params.id]
+    );
+    const featureId = pilotResult.rowCount > 0 ? pilotResult.rows[0].on_surface_feature_id : null;
+    if (!featureId) return res.status(409).json({ message: 'Not on a planet surface' });
+
+    let mapResult = await client.query(
+      'SELECT grid_width, grid_height, buggy_x, buggy_y, revealed_cells FROM haulonaut_surface_maps WHERE game_user_id = $1 AND feature_id = $2',
+      [req.params.id, featureId]
+    );
+    if (mapResult.rowCount === 0) {
+      // Shouldn't happen via normal flow (exit-craft always creates this
+      // row first) -- self-heal the same way loadSurfaceState does rather
+      // than 409ing on a state the player can't fix themselves.
+      await createSurfaceMap(client, req.params.id, featureId);
+      mapResult = await client.query(
+        'SELECT grid_width, grid_height, buggy_x, buggy_y, revealed_cells FROM haulonaut_surface_maps WHERE game_user_id = $1 AND feature_id = $2',
+        [req.params.id, featureId]
+      );
+    }
+    const row = mapResult.rows[0];
+
+    const [dx, dy] = SURFACE_MAP_DIRECTIONS[direction];
+    const newX = Math.min(Math.max(row.buggy_x + dx, 0), row.grid_width - 1);
+    const newY = Math.min(Math.max(row.buggy_y + dy, 0), row.grid_height - 1);
+    const revealed = revealAround(JSON.parse(row.revealed_cells), newX, newY, row.grid_width, row.grid_height, SURFACE_MAP_REVEAL_RADIUS);
+
+    await client.query(
+      'UPDATE haulonaut_surface_maps SET buggy_x = $1, buggy_y = $2, revealed_cells = $3 WHERE game_user_id = $4 AND feature_id = $5',
+      [newX, newY, JSON.stringify(revealed), req.params.id, featureId]
+    );
+
+    res.json({ buggyX: newX, buggyY: newY, revealed });
+  } catch (err) {
+    console.error('Error driving buggy:', err);
+    res.status(500).json({ message: 'Failed to drive buggy' });
   } finally {
     client.release();
   }
