@@ -48,7 +48,7 @@
 // No logic needed yet
 </script>
 
-<style>
+<style scoped>
 .home-page {
   padding: 60px 20px;
   max-width: 900px;
