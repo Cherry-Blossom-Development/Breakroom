@@ -198,16 +198,19 @@ function revealAround(existingIndices, x, y, gridWidth, gridHeight, radius) {
 // First-ever visit to a given planet feature: creates its
 // haulonaut_surface_maps row, parking the ship (and starting the buggy) at
 // the grid's center with an initial reveal around that point -- so landing
-// doesn't drop the player into total blackness with 0 cells visible.
+// doesn't drop the player into total blackness with 0 cells visible. The
+// ship's own starting cell is marked visited (not a "new area" to roll an
+// event for -- that's where the player just disembarked from).
 async function createSurfaceMap(client, gameUserId, featureId) {
   const shipX = Math.floor(SURFACE_MAP_GRID_WIDTH / 2);
   const shipY = Math.floor(SURFACE_MAP_GRID_HEIGHT / 2);
   const revealed = revealAround([], shipX, shipY, SURFACE_MAP_GRID_WIDTH, SURFACE_MAP_GRID_HEIGHT, SURFACE_MAP_REVEAL_RADIUS);
+  const visited = [shipY * SURFACE_MAP_GRID_WIDTH + shipX];
   await client.query(
     `INSERT INTO haulonaut_surface_maps
-       (game_user_id, feature_id, grid_width, grid_height, ship_x, ship_y, buggy_x, buggy_y, revealed_cells)
-     VALUES ($1, $2, $3, $4, $5, $6, $5, $6, $7)`,
-    [gameUserId, featureId, SURFACE_MAP_GRID_WIDTH, SURFACE_MAP_GRID_HEIGHT, shipX, shipY, JSON.stringify(revealed)]
+       (game_user_id, feature_id, grid_width, grid_height, ship_x, ship_y, buggy_x, buggy_y, revealed_cells, visited_cells)
+     VALUES ($1, $2, $3, $4, $5, $6, $5, $6, $7, $8)`,
+    [gameUserId, featureId, SURFACE_MAP_GRID_WIDTH, SURFACE_MAP_GRID_HEIGHT, shipX, shipY, JSON.stringify(revealed), JSON.stringify(visited)]
   );
   return { gridWidth: SURFACE_MAP_GRID_WIDTH, gridHeight: SURFACE_MAP_GRID_HEIGHT, shipX, shipY, buggyX: shipX, buggyY: shipY, revealed };
 }
@@ -800,79 +803,13 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
 });
 
 /**
- * POST /api/games/:gameKey/characters/:id/land
- * Rolls one random surface-expedition event (see
- * utilities/haulonautLandingEvents.js) and applies its credits/rations/fuel
- * delta straight to the pilot -- no new stats, no multi-turn expedition
- * state, just one narrated outcome per call. Rejected unless the character
- * is actually standing in a sector with a planet feature (re-checked
- * server-side). Deltas are clamped at 0 same as everywhere else on
- * haulonaut_pilots; there's no upper cap.
- */
-router.post('/:gameKey/characters/:id/land', authenticate, async (req, res) => {
-  const client = await getClient();
-  try {
-    const ownerCheck = await client.query(
-      `SELECT gu.id FROM game_users gu
-       JOIN game_instances gi ON gi.id = gu.game_instance_id
-       JOIN games g ON g.id = gi.game_id
-       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
-      [req.params.id, req.user.id, req.params.gameKey]
-    );
-    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
-
-    const pilotResult = await client.query(
-      'SELECT current_sector_id FROM haulonaut_pilots WHERE game_user_id = $1',
-      [req.params.id]
-    );
-    if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
-
-    const planetCheck = await client.query(
-      `SELECT 1 FROM haulonaut_sector_features WHERE sector_id = $1 AND feature_type = 'planet'`,
-      [pilotResult.rows[0].current_sector_id]
-    );
-    if (planetCheck.rowCount === 0) return res.status(409).json({ message: 'No planet in this sector' });
-
-    const { narration, effects } = rollLandingEvent();
-
-    await client.query(
-      `UPDATE haulonaut_pilots
-       SET credits = GREATEST(0, credits + $1),
-           rations = GREATEST(0, rations + $2),
-           fuel = GREATEST(0, fuel + $3)
-       WHERE game_user_id = $4`,
-      [effects.credits || 0, effects.rations || 0, effects.fuel || 0, req.params.id]
-    );
-
-    const pilotAfter = await client.query(
-      'SELECT credits, rations, fuel FROM haulonaut_pilots WHERE game_user_id = $1',
-      [req.params.id]
-    );
-
-    res.json({
-      narration,
-      effects,
-      credits: pilotAfter.rows[0].credits,
-      rations: pilotAfter.rows[0].rations,
-      fuel: pilotAfter.rows[0].fuel
-    });
-  } catch (err) {
-    console.error('Error landing:', err);
-    res.status(500).json({ message: 'Failed to land' });
-  } finally {
-    client.release();
-  }
-});
-
-/**
  * POST /api/games/:gameKey/characters/:id/dock
  * Marks the character as landed at whatever planet is in their current
  * sector -- called the moment the client's landing-sequence animation
  * reaches its 'docked' phase, independent of whether they go on to exit
  * the craft. The planet is derived server-side from current_sector_id
- * (never trusted from the client), same posture as /land's own planet
- * check. Idempotent: landing again while already docked at the same
- * planet just re-confirms it.
+ * (never trusted from the client). Idempotent: landing again while already
+ * docked at the same planet just re-confirms it.
  */
 router.post('/:gameKey/characters/:id/dock', authenticate, async (req, res) => {
   const client = await getClient();
@@ -966,7 +903,9 @@ router.post('/:gameKey/characters/:id/exit-craft', authenticate, async (req, res
  * boarding the ship doesn't undock it (see /navigate for the only thing
  * that does). The surface map itself (haulonaut_surface_maps) is also left
  * untouched so it's exactly as explored whenever the surface is visited
- * again.
+ * again. Only allowed once the buggy has actually been driven back to the
+ * ship's own cell -- re-checked server-side, since the client only shows
+ * this action once it's already true.
  */
 router.post('/:gameKey/characters/:id/return-to-ship', authenticate, async (req, res) => {
   const client = await getClient();
@@ -979,6 +918,22 @@ router.post('/:gameKey/characters/:id/return-to-ship', authenticate, async (req,
       [req.params.id, req.user.id, req.params.gameKey]
     );
     if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+
+    const pilotResult = await client.query(
+      'SELECT docked_feature_id, on_surface FROM haulonaut_pilots WHERE game_user_id = $1',
+      [req.params.id]
+    );
+    const featureId = pilotResult.rowCount > 0 && pilotResult.rows[0].on_surface ? pilotResult.rows[0].docked_feature_id : null;
+    if (!featureId) return res.status(409).json({ message: 'Not on a planet surface' });
+
+    const mapResult = await client.query(
+      'SELECT ship_x, ship_y, buggy_x, buggy_y FROM haulonaut_surface_maps WHERE game_user_id = $1 AND feature_id = $2',
+      [req.params.id, featureId]
+    );
+    const map = mapResult.rows[0];
+    if (!map || map.buggy_x !== map.ship_x || map.buggy_y !== map.ship_y) {
+      return res.status(409).json({ message: 'Drive the buggy back to the ship first' });
+    }
 
     await client.query('UPDATE haulonaut_pilots SET on_surface = 0 WHERE game_user_id = $1', [req.params.id]);
 
@@ -997,6 +952,13 @@ router.post('/:gameKey/characters/:id/return-to-ship', authenticate, async (req,
  * { direction: 'up'|'down'|'left'|'right' }. Bumping into the grid's edge
  * is a silent no-op (200, unchanged position), not an error -- low-friction
  * input handling, nothing to punish here.
+ *
+ * The first time the buggy actually reaches a given cell (tracked by
+ * visited_cells, distinct from revealed_cells' wider fog-of-war sight
+ * radius), this rolls one narrated landing event -- see
+ * utilities/haulonautLandingEvents.js -- the same mechanic the old manual
+ * "Explore Surface" button used to trigger, now automatic on arrival
+ * instead. Re-visiting an already-visited cell rolls nothing.
  */
 router.post('/:gameKey/characters/:id/drive-buggy', authenticate, async (req, res) => {
   const direction = req.body.direction;
@@ -1021,7 +983,7 @@ router.post('/:gameKey/characters/:id/drive-buggy', authenticate, async (req, re
     if (!featureId) return res.status(409).json({ message: 'Not on a planet surface' });
 
     let mapResult = await client.query(
-      'SELECT grid_width, grid_height, buggy_x, buggy_y, revealed_cells FROM haulonaut_surface_maps WHERE game_user_id = $1 AND feature_id = $2',
+      'SELECT grid_width, grid_height, ship_x, ship_y, buggy_x, buggy_y, revealed_cells, visited_cells FROM haulonaut_surface_maps WHERE game_user_id = $1 AND feature_id = $2',
       [req.params.id, featureId]
     );
     if (mapResult.rowCount === 0) {
@@ -1030,7 +992,7 @@ router.post('/:gameKey/characters/:id/drive-buggy', authenticate, async (req, re
       // than 409ing on a state the player can't fix themselves.
       await createSurfaceMap(client, req.params.id, featureId);
       mapResult = await client.query(
-        'SELECT grid_width, grid_height, buggy_x, buggy_y, revealed_cells FROM haulonaut_surface_maps WHERE game_user_id = $1 AND feature_id = $2',
+        'SELECT grid_width, grid_height, ship_x, ship_y, buggy_x, buggy_y, revealed_cells, visited_cells FROM haulonaut_surface_maps WHERE game_user_id = $1 AND feature_id = $2',
         [req.params.id, featureId]
       );
     }
@@ -1041,12 +1003,45 @@ router.post('/:gameKey/characters/:id/drive-buggy', authenticate, async (req, re
     const newY = Math.min(Math.max(row.buggy_y + dy, 0), row.grid_height - 1);
     const revealed = revealAround(JSON.parse(row.revealed_cells), newX, newY, row.grid_width, row.grid_height, SURFACE_MAP_REVEAL_RADIUS);
 
+    const visitedIndices = JSON.parse(row.visited_cells);
+    const newIndex = newY * row.grid_width + newX;
+    const isNewArea = !visitedIndices.includes(newIndex);
+    let narration = null;
+    let effects = null;
+    let pilotAfter = null;
+
+    if (isNewArea) {
+      visitedIndices.push(newIndex);
+      ({ narration, effects } = rollLandingEvent());
+      await client.query(
+        `UPDATE haulonaut_pilots
+         SET credits = GREATEST(0, credits + $1),
+             rations = GREATEST(0, rations + $2),
+             fuel = GREATEST(0, fuel + $3)
+         WHERE game_user_id = $4`,
+        [effects.credits || 0, effects.rations || 0, effects.fuel || 0, req.params.id]
+      );
+      const pilotResultAfter = await client.query(
+        'SELECT credits, rations, fuel FROM haulonaut_pilots WHERE game_user_id = $1',
+        [req.params.id]
+      );
+      pilotAfter = pilotResultAfter.rows[0];
+    }
+
     await client.query(
-      'UPDATE haulonaut_surface_maps SET buggy_x = $1, buggy_y = $2, revealed_cells = $3 WHERE game_user_id = $4 AND feature_id = $5',
-      [newX, newY, JSON.stringify(revealed), req.params.id, featureId]
+      'UPDATE haulonaut_surface_maps SET buggy_x = $1, buggy_y = $2, revealed_cells = $3, visited_cells = $4 WHERE game_user_id = $5 AND feature_id = $6',
+      [newX, newY, JSON.stringify(revealed), JSON.stringify(visitedIndices), req.params.id, featureId]
     );
 
-    res.json({ buggyX: newX, buggyY: newY, revealed });
+    res.json({
+      buggyX: newX,
+      buggyY: newY,
+      revealed,
+      atShip: newX === row.ship_x && newY === row.ship_y,
+      narration,
+      effects,
+      ...(pilotAfter || {})
+    });
   } catch (err) {
     console.error('Error driving buggy:', err);
     res.status(500).json({ message: 'Failed to drive buggy' });

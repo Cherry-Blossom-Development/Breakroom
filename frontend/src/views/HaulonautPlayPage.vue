@@ -22,8 +22,6 @@ const viewportMode = ref('space') // 'space', 'outpost' (browsing what's for sal
 const purchasing = ref(false)
 const purchaseError = ref('')
 const chartsError = ref('')
-const landing = ref(false) // true while a surface-expedition roll's own API call is in flight
-const landingError = ref('')
 const landingPhase = ref(null) // null | 'approaching' | 'closing' | 'sweeping' | 'entry' | 'docked' -- drives the landing-sequence animation
 const landingSceneEl = ref(null)
 const landingSceneHeightPx = ref(280) // measured; see measureLandingScene() -- sane fallback before the first measurement
@@ -39,7 +37,7 @@ const landingPlanetEl = ref(null)
 const landingDebugMetrics = ref(null)
 const landingDebugPaused = ref(false)
 const onSurface = ref(false) // true once the player has exited the craft -- replaces the whole ship UI with the surface screen
-const surfaceLog = ref([]) // exploreSurface() results shown on the surface screen itself (separate from the ship's hidden Terminal)
+const surfaceLog = ref([]) // landing-event narrations (see logLandingEvent) shown on the surface screen itself (separate from the ship's hidden Terminal)
 const dockedFeatureId = ref(null) // mirrors the server's haulonaut_pilots.docked_feature_id -- which planet feature the ship is landed at, whether or not onSurface is also true
 const surfaceMap = ref(null) // { gridWidth, gridHeight, shipX, shipY, buggyX, buggyY, revealed: number[] } for the current planet, or null before it's loaded
 const mapLoading = ref(false)
@@ -75,6 +73,13 @@ const outpostFeature = computed(() => sectorFeatures.value.find(f => f.feature_t
 // planet's surface map (see surfaceMap ref).
 const revealedSet = computed(() => new Set(surfaceMap.value?.revealed || []))
 
+// The buggy has to actually be parked back on the ship's own cell before
+// re-docking is offered -- there's no unconditional "Return to Ship"
+// button any more, see the surface-controls template block.
+const buggyAtShip = computed(() =>
+  !!surfaceMap.value && surfaceMap.value.buggyX === surfaceMap.value.shipX && surfaceMap.value.buggyY === surfaceMap.value.shipY
+)
+
 // The ship should be drifting: out of fuel, and not already sitting
 // somewhere that resolves the crisis. Once true, the drift ticker (near
 // onMounted) starts climbing driftVariance and eventually calls
@@ -86,6 +91,17 @@ const driftEligible = computed(() => fuel.value <= 0 && !planetFeature.value)
 // here so the sky color during/after atmospheric entry visibly matches the
 // planet seen from orbit (a purple planet gets a light purple sky).
 const planetHue = computed(() => planetFeature.value ? hashHue(planetFeature.value.name) : 200)
+
+// Oregon-Trail-style side view of the surface: driving east/west (buggyX)
+// scrolls the background layers under a buggy that otherwise stays put in
+// the middle of the screen; driving north/south (buggyY) instead drifts
+// the terrain's own hue a little, so different latitudes at least *look*
+// like different areas even though nothing here is a real 2D scene.
+const SURFACE_PARALLAX_FAR_PX = 26
+const SURFACE_PARALLAX_NEAR_PX = 64
+const surfaceParallaxFar = computed(() => surfaceMap.value ? -(surfaceMap.value.buggyX * SURFACE_PARALLAX_FAR_PX) : 0)
+const surfaceParallaxNear = computed(() => surfaceMap.value ? -(surfaceMap.value.buggyX * SURFACE_PARALLAX_NEAR_PX) : 0)
+const surfaceTerrainHue = computed(() => surfaceMap.value ? (planetHue.value + surfaceMap.value.buggyY * 15) % 360 : planetHue.value)
 const landingPlanetGradient = computed(() =>
   `radial-gradient(circle at 35% 32%, hsl(${planetHue.value},75%,68%), hsl(${planetHue.value},60%,38%) 65%, hsl(${planetHue.value},55%,18%) 100%)`
 )
@@ -318,7 +334,6 @@ function exitViewportOverlay() {
   selectedIndex.value = -1
   purchaseError.value = ''
   chartsError.value = ''
-  landingError.value = ''
   logLines.value.push(message)
   scrollLogToBottom()
 }
@@ -766,6 +781,15 @@ async function moveBuggy(direction) {
     const data = await res.json()
     if (!res.ok) throw new Error(data.message || 'Move failed')
     surfaceMap.value = { ...surfaceMap.value, buggyX: data.buggyX, buggyY: data.buggyY, revealed: data.revealed }
+    // Arriving at a cell for the first time rolls one landing event
+    // server-side (see POST /drive-buggy) -- narration is only present
+    // when that happened.
+    if (data.narration) {
+      logLandingEvent(data.narration, data.effects)
+      credits.value = data.credits
+      rations.value = data.rations
+      fuel.value = data.fuel
+    }
   } catch (err) {
     mapError.value = err.message
   } finally {
@@ -773,42 +797,24 @@ async function moveBuggy(direction) {
   }
 }
 
-// One random surface-expedition roll (see haulonautLandingEvents.js on
-// the backend) -- repeatable, each call is an independent gamble. Doesn't
-// move the character or touch inventory, only credits/rations/fuel.
-async function exploreSurface() {
-  if (landing.value) return
-  landing.value = true
-  landingError.value = ''
-  try {
-    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/land`, {
-      method: 'POST',
-      credentials: 'include'
-    })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.message || 'Landing failed')
-    credits.value = data.credits
-    rations.value = data.rations
-    fuel.value = data.fuel
-    const deltaParts = []
-    if (data.effects.credits) deltaParts.push(`${data.effects.credits > 0 ? '+' : ''}${data.effects.credits} Credits`)
-    if (data.effects.rations) deltaParts.push(`${data.effects.rations > 0 ? '+' : ''}${data.effects.rations} Rations`)
-    if (data.effects.fuel) deltaParts.push(`${data.effects.fuel > 0 ? '+' : ''}${data.effects.fuel} Fuel`)
-    // Logged both to the ship's Terminal (for continuity once you return)
-    // and surfaceLog (visible immediately on the surface screen, which
-    // doesn't show the Terminal at all).
-    logLines.value.push(data.narration)
-    surfaceLog.value.push(data.narration)
-    if (deltaParts.length > 0) {
-      logLines.value.push(`(${deltaParts.join(', ')})`)
-      surfaceLog.value.push(`(${deltaParts.join(', ')})`)
-    }
-    scrollLogToBottom()
-  } catch (err) {
-    landingError.value = err.message
-  } finally {
-    landing.value = false
+// Logs a landing-event narration (see haulonautLandingEvents.js on the
+// backend) both to the ship's Terminal (for continuity once the player
+// returns) and surfaceLog (visible immediately on the surface screen,
+// which doesn't show the Terminal at all). Shared by moveBuggy, which is
+// the only thing that can trigger one of these now -- arriving at a new
+// area, not a standalone button.
+function logLandingEvent(narration, effects) {
+  const deltaParts = []
+  if (effects.credits) deltaParts.push(`${effects.credits > 0 ? '+' : ''}${effects.credits} Credits`)
+  if (effects.rations) deltaParts.push(`${effects.rations > 0 ? '+' : ''}${effects.rations} Rations`)
+  if (effects.fuel) deltaParts.push(`${effects.fuel > 0 ? '+' : ''}${effects.fuel} Fuel`)
+  logLines.value.push(narration)
+  surfaceLog.value.push(narration)
+  if (deltaParts.length > 0) {
+    logLines.value.push(`(${deltaParts.join(', ')})`)
+    surfaceLog.value.push(`(${deltaParts.join(', ')})`)
   }
+  scrollLogToBottom()
 }
 
 function submitTerminalCommand() {
@@ -1063,8 +1069,7 @@ function onKeydown(e) {
   // The surface screen has no box hierarchy at all -- it's a different,
   // much simpler paradigm than the ship UI it temporarily replaces.
   if (onSurface.value) {
-    if (e.key === '1') { e.preventDefault(); exploreSurface() }
-    else if (e.key === '2') { e.preventDefault(); returnToShip() }
+    if (e.key === '1' && buggyAtShip.value) { e.preventDefault(); returnToShip() }
     else if (e.key === 'ArrowUp') { e.preventDefault(); moveBuggy('up') }
     else if (e.key === 'ArrowDown') { e.preventDefault(); moveBuggy('down') }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); moveBuggy('left') }
@@ -1280,60 +1285,82 @@ onUnmounted(() => {
          simpler paradigm than the CRT monitor, per the request that
          landing "no longer see the entire interface you see now." -->
     <div v-else-if="onSurface" class="surface-screen" :style="{ background: landingSkyGradient }">
-      <div class="surface-horizon" aria-hidden="true"></div>
-      <div class="surface-ground" aria-hidden="true"></div>
-      <div class="surface-panel">
-        <h1 class="surface-heading">{{ planetFeature ? planetFeature.name.toUpperCase() : 'PLANET SURFACE' }}</h1>
-        <p class="surface-subheading">Landing party status: nominal</p>
+      <!-- Side-view scene: the buggy stays fixed in the middle of the
+           screen while these layers scroll under it (parallax offsets
+           computed from buggyX; ground/hill tone drifts with buggyY) --
+           an Oregon-Trail-style illusion of travel rather than a real 2D
+           scene. -->
+      <div
+        class="surface-hills-far"
+        :style="{ backgroundPositionX: surfaceParallaxFar + 'px', color: `hsl(${surfaceTerrainHue}, 30%, 22%)` }"
+        aria-hidden="true"
+      ></div>
+      <div
+        class="surface-hills-near"
+        :style="{ backgroundPositionX: surfaceParallaxNear + 'px', color: `hsl(${surfaceTerrainHue}, 32%, 16%)` }"
+        aria-hidden="true"
+      ></div>
+      <div class="surface-ground" :style="{ background: `linear-gradient(to bottom, hsl(${surfaceTerrainHue}, 28%, 12%), hsl(${surfaceTerrainHue}, 30%, 7%))` }" aria-hidden="true"></div>
 
-        <div class="surface-log">
-          <p v-for="(line, i) in surfaceLog" :key="i" class="surface-log-line">{{ line }}</p>
-          <p v-if="surfaceLog.length === 0" class="surface-log-empty">The surface is still and silent.</p>
-        </div>
+      <div class="surface-ship" v-if="buggyAtShip" aria-hidden="true">&#128640;</div>
+      <div class="surface-buggy" aria-hidden="true">
+        <div class="surface-buggy-body"></div>
+        <div class="surface-buggy-wheel surface-buggy-wheel-back"></div>
+        <div class="surface-buggy-wheel surface-buggy-wheel-front"></div>
+      </div>
 
-        <div class="surface-map" v-if="surfaceMap">
+      <div class="surface-minimap" v-if="surfaceMap">
+        <div
+          class="surface-map-grid"
+          :style="{ gridTemplateColumns: `repeat(${surfaceMap.gridWidth}, 1fr)`, gridTemplateRows: `repeat(${surfaceMap.gridHeight}, 1fr)` }"
+        >
           <div
-            class="surface-map-grid"
-            :style="{ gridTemplateColumns: `repeat(${surfaceMap.gridWidth}, 1fr)`, gridTemplateRows: `repeat(${surfaceMap.gridHeight}, 1fr)` }"
-          >
-            <div
-              v-for="i in surfaceMap.gridWidth * surfaceMap.gridHeight"
-              :key="i - 1"
-              class="surface-map-cell"
-              :class="{ revealed: revealedSet.has(i - 1) }"
-            ></div>
-            <span
-              class="surface-map-icon surface-map-ship"
-              :style="{ left: (surfaceMap.shipX + 0.5) / surfaceMap.gridWidth * 100 + '%', top: (surfaceMap.shipY + 0.5) / surfaceMap.gridHeight * 100 + '%' }"
-              aria-hidden="true"
-            >&#9650;</span>
-            <span
-              class="surface-map-icon surface-map-buggy"
-              :style="{ left: (surfaceMap.buggyX + 0.5) / surfaceMap.gridWidth * 100 + '%', top: (surfaceMap.buggyY + 0.5) / surfaceMap.gridHeight * 100 + '%' }"
-              aria-hidden="true"
-            >&#9673;</span>
-          </div>
-          <p class="surface-map-hint">Arrow keys: drive buggy</p>
+            v-for="i in surfaceMap.gridWidth * surfaceMap.gridHeight"
+            :key="i - 1"
+            class="surface-map-cell"
+            :class="{ revealed: revealedSet.has(i - 1) }"
+          ></div>
+          <span
+            class="surface-map-icon surface-map-ship"
+            :style="{ left: (surfaceMap.shipX + 0.5) / surfaceMap.gridWidth * 100 + '%', top: (surfaceMap.shipY + 0.5) / surfaceMap.gridHeight * 100 + '%' }"
+            aria-hidden="true"
+          >&#9650;</span>
+          <span
+            class="surface-map-icon surface-map-buggy"
+            :style="{ left: (surfaceMap.buggyX + 0.5) / surfaceMap.gridWidth * 100 + '%', top: (surfaceMap.buggyY + 0.5) / surfaceMap.gridHeight * 100 + '%' }"
+            aria-hidden="true"
+          >&#9673;</span>
         </div>
-        <p v-else-if="mapLoading" class="surface-log-empty">Charting surface...</p>
-        <p v-else-if="mapError" class="surface-error">{{ mapError }} <button class="surface-btn-inline" @click="loadSurfaceMap">Retry</button></p>
+      </div>
+      <p v-else-if="mapLoading" class="surface-map-status">Charting surface...</p>
+      <p v-else-if="mapError" class="surface-map-status surface-error">{{ mapError }} <button class="surface-btn-inline" @click="loadSurfaceMap">Retry</button></p>
 
+      <div class="surface-hud">
+        <h1 class="surface-heading">{{ planetFeature ? planetFeature.name.toUpperCase() : 'PLANET SURFACE' }}</h1>
         <div class="surface-stats">
           <span class="resource-stat"><span class="resource-icon" aria-hidden="true">&#164;</span>{{ credits.toLocaleString() }} Credits</span>
           <span class="resource-stat"><span class="resource-icon" aria-hidden="true">&#8801;</span>{{ rations.toLocaleString() }} Rations</span>
           <span class="resource-stat"><span class="resource-icon" aria-hidden="true">&#9636;</span>{{ fuel.toLocaleString() }} Fuel</span>
         </div>
-
-        <div class="surface-actions">
-          <button class="surface-btn" :disabled="landing" @click="exploreSurface">
-            <span class="surface-btn-hotkey" aria-hidden="true">1</span> Explore Surface
-          </button>
-          <button class="surface-btn surface-btn-secondary" @click="returnToShip">
-            <span class="surface-btn-hotkey" aria-hidden="true">2</span> Return to Ship
-          </button>
+        <div class="surface-log">
+          <p v-for="(line, i) in surfaceLog" :key="i" class="surface-log-line">{{ line }}</p>
+          <p v-if="surfaceLog.length === 0" class="surface-log-empty">The surface is still and silent.</p>
         </div>
-        <p v-if="landingError" class="surface-error">{{ landingError }}</p>
       </div>
+
+      <div class="surface-controls">
+        <button class="surface-dir-btn surface-dir-north" @click="moveBuggy('up')" :disabled="buggyMoving">North</button>
+        <div class="surface-dir-row">
+          <button class="surface-dir-btn" @click="moveBuggy('left')" :disabled="buggyMoving">West</button>
+          <button v-if="buggyAtShip" class="surface-btn surface-dock-btn" @click="returnToShip">
+            <span class="surface-btn-hotkey" aria-hidden="true">1</span> Dock with Ship
+          </button>
+          <button class="surface-dir-btn" @click="moveBuggy('right')" :disabled="buggyMoving">East</button>
+        </div>
+        <button class="surface-dir-btn surface-dir-south" @click="moveBuggy('down')" :disabled="buggyMoving">South</button>
+        <p class="surface-controls-hint">(arrow keys also work)</p>
+      </div>
+
       <button class="surface-exit-link" @click="backToGames">Exit to Games List</button>
     </div>
 
@@ -2861,21 +2888,44 @@ onUnmounted(() => {
 .surface-screen {
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
   font-family: 'Courier New', Courier, monospace;
   overflow: hidden;
 }
 
-.surface-horizon {
+/* Side-view scene. The buggy (see .surface-buggy) stays fixed in the
+   middle of the screen; these two layers scroll under it instead --
+   background-position-x is bound to buggyX (see surfaceParallaxFar/Near)
+   -- to create the illusion of travel. Each is a single repeating radial
+   -- gradient "bump" (a circle whose radius equals its tile's height,
+   anchored at the tile's bottom-center) rather than a hand-drawn shape, so
+   it tiles perfectly via background-repeat at any scroll offset or screen
+   width, with nothing to visibly seam or run out of. currentColor (set
+   inline, see surfaceTerrainHue) lets the buggy's north/south position
+   tint the hills without a second gradient. */
+.surface-hills-far {
   position: absolute;
   left: 0;
   right: 0;
-  top: 58%;
-  height: 2px;
-  background: rgba(0, 0, 0, 0.25);
+  bottom: 30%;
+  height: 70px;
+  background-image: radial-gradient(circle 70px at 50% 100%, currentColor 99%, transparent 100%);
+  background-size: 170px 70px;
+  background-repeat: repeat-x;
+  background-position: bottom left;
+  opacity: 0.55;
+}
+
+.surface-hills-near {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 20%;
+  height: 92px;
+  background-image: radial-gradient(circle 92px at 50% 100%, currentColor 99%, transparent 100%);
+  background-size: 230px 92px;
+  background-repeat: repeat-x;
+  background-position: bottom left;
+  opacity: 0.85;
 }
 
 .surface-ground {
@@ -2883,84 +2933,72 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  top: 58%;
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.4));
-  clip-path: polygon(0% 22%, 8% 6%, 18% 16%, 30% 0%, 45% 13%, 60% 4%, 75% 19%, 88% 7%, 100% 16%, 100% 100%, 0% 100%);
+  height: 22%;
 }
 
-.surface-panel {
-  position: relative;
-  z-index: 1;
-  width: min(90%, 560px);
-  background: rgba(5, 19, 10, 0.78);
-  border: 2px solid rgba(255, 255, 255, 0.45);
-  border-radius: 8px;
-  padding: clamp(16px, 4vw, 28px);
-  color: #eafff0;
-  text-align: center;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+.surface-ship {
+  position: absolute;
+  left: 50%;
+  bottom: 15%;
+  transform: translateX(-170%);
+  font-size: 2.4rem;
+  line-height: 1;
+  filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.5));
 }
 
-.surface-heading {
-  margin: 0 0 4px;
-  font-size: clamp(1.1rem, 4vw, 1.5rem);
-  letter-spacing: 0.06em;
-  color: #baffcf;
-  text-shadow: 0 0 8px rgba(77, 255, 136, 0.5);
+.surface-buggy {
+  position: absolute;
+  left: 50%;
+  bottom: 15%;
+  width: 64px;
+  height: 30px;
+  transform: translateX(-50%);
 }
 
-.surface-subheading {
-  margin: 0 0 16px;
-  font-size: 0.8rem;
-  font-style: italic;
-  color: #8fe6ab;
+.surface-buggy-body {
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  top: 2px;
+  height: 17px;
+  background: linear-gradient(to bottom, #d8cdb8, #a89b82);
+  border-radius: 7px 11px 4px 4px;
+  box-shadow: inset 0 -4px 6px rgba(0, 0, 0, 0.3), 0 2px 4px rgba(0, 0, 0, 0.4);
 }
 
-.surface-log {
-  min-height: 60px;
-  max-height: 140px;
-  overflow-y: auto;
-  margin-bottom: 16px;
-  padding: 10px 12px;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
-  text-align: left;
+.surface-buggy-wheel {
+  position: absolute;
+  bottom: 0;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #1a1712;
+  border: 2px solid #050506;
 }
 
-.surface-log-line {
-  margin: 0 0 6px;
-  font-size: 0.78rem;
-  color: #cfe8d8;
-  line-height: 1.4;
-}
+.surface-buggy-wheel-back { left: 2px; }
+.surface-buggy-wheel-front { right: 2px; }
 
-.surface-log-empty {
-  margin: 0;
-  font-size: 0.78rem;
-  font-style: italic;
-  color: #7fae94;
-}
-
-/* Low-res fog-of-war grid -- the whole map (never a scrolling camera) is
-   always on screen at fixed percentage positions, so the ship and buggy
-   icons are always visible relative to each other regardless of how much
-   is still unexplored. */
-.surface-map {
-  margin-bottom: 16px;
+/* Low-res fog-of-war minimap, tucked in the corner rather than the main
+   view -- the whole map (never a scrolling camera) is always shown at
+   fixed percentage positions, so the ship and buggy icons stay visible
+   relative to each other regardless of how much is still unexplored. */
+.surface-minimap {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
 }
 
 .surface-map-grid {
   position: relative;
   display: grid;
   gap: 1px;
-  width: 216px;
-  max-width: 100%;
+  width: 126px;
   aspect-ratio: 3 / 2;
-  margin: 0 auto;
-  padding: 4px;
-  background: rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 3px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 4px;
 }
 
@@ -2976,7 +3014,7 @@ onUnmounted(() => {
 .surface-map-icon {
   position: absolute;
   transform: translate(-50%, -50%);
-  font-size: 0.7rem;
+  font-size: 0.55rem;
   line-height: 1;
   pointer-events: none;
 }
@@ -2987,32 +3025,128 @@ onUnmounted(() => {
 
 .surface-map-buggy {
   color: #4dff88;
-  text-shadow: 0 0 8px rgba(77, 255, 136, 0.7);
+  text-shadow: 0 0 6px rgba(77, 255, 136, 0.7);
   transition: left 0.15s linear, top 0.15s linear;
 }
 
-.surface-map-hint {
-  margin: 6px 0 0;
-  font-size: 0.72rem;
+.surface-map-status {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  margin: 0;
+  padding: 6px 10px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  font-size: 0.7rem;
   font-style: italic;
   color: #7fae94;
-  text-align: center;
+}
+
+.surface-map-status.surface-error {
+  font-style: normal;
+}
+
+.surface-hud {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  max-width: min(58%, 320px);
+  background: rgba(5, 19, 10, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: #eafff0;
+}
+
+.surface-heading {
+  margin: 0 0 6px;
+  font-size: clamp(0.9rem, 3vw, 1.15rem);
+  letter-spacing: 0.06em;
+  color: #baffcf;
+  text-shadow: 0 0 8px rgba(77, 255, 136, 0.5);
+}
+
+.surface-log {
+  min-height: 40px;
+  max-height: 110px;
+  overflow-y: auto;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  text-align: left;
+}
+
+.surface-log-line {
+  margin: 0 0 6px;
+  font-size: 0.75rem;
+  color: #cfe8d8;
+  line-height: 1.4;
+}
+
+.surface-log-empty {
+  margin: 0;
+  font-size: 0.75rem;
+  font-style: italic;
+  color: #7fae94;
 }
 
 .surface-stats {
   display: flex;
-  justify-content: center;
-  gap: clamp(10px, 3vw, 20px);
-  margin-bottom: 18px;
-  font-size: 0.78rem;
+  gap: clamp(8px, 2vw, 16px);
+  font-size: 0.72rem;
   color: #eafff0;
   flex-wrap: wrap;
 }
 
-.surface-actions {
+.surface-controls {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  z-index: 2;
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
+}
+
+.surface-dir-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.surface-dir-btn {
+  padding: 8px 16px;
+  font-family: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #05130a;
+  background: #4dff88;
+  border: 1px solid #baffcf;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.surface-dir-btn:hover:not(:disabled) {
+  background: #baffcf;
+}
+
+.surface-dir-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.surface-controls-hint {
+  margin: 2px 0 0;
+  font-size: 0.65rem;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .surface-btn {
@@ -3020,9 +3154,9 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 10px 14px;
+  padding: 8px 14px;
   font-family: inherit;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   font-weight: 700;
   color: #05130a;
   background: #4dff88;
@@ -3040,16 +3174,6 @@ onUnmounted(() => {
   cursor: not-allowed;
 }
 
-.surface-btn-secondary {
-  background: transparent;
-  color: #eafff0;
-  border-style: dashed;
-}
-
-.surface-btn-secondary:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
 .surface-btn-hotkey {
   display: inline-flex;
   align-items: center;
@@ -3059,10 +3183,6 @@ onUnmounted(() => {
   border-radius: 3px;
   background: rgba(5, 19, 10, 0.25);
   font-size: 0.7rem;
-}
-
-.surface-btn-secondary .surface-btn-hotkey {
-  background: rgba(255, 255, 255, 0.15);
 }
 
 .surface-error {
@@ -3087,9 +3207,10 @@ onUnmounted(() => {
 }
 
 .surface-exit-link {
-  position: relative;
-  z-index: 1;
-  margin-top: 16px;
+  position: absolute;
+  bottom: 14px;
+  left: 12px;
+  z-index: 2;
   background: none;
   border: none;
   color: rgba(255, 255, 255, 0.6);
