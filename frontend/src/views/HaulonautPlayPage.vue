@@ -129,7 +129,9 @@ const LANDING_CAPTIONS = {
   closing: 'Closing in...',
   sweeping: 'Adjusting approach vector...',
   entry: 'ATMOSPHERIC ENTRY -- HOLD ON!',
-  docked: 'Touchdown confirmed. Docking clamps engaged.'
+  docked: 'Touchdown confirmed. Docking clamps engaged.',
+  'launch-ignition': 'Ignition sequence engaged...',
+  'launch-departing': 'Breaking orbit...'
 }
 const landingCaption = computed(() => {
   if (landingPhase.value === 'approaching') {
@@ -208,16 +210,17 @@ const planetMenuItems = computed(() => [
 // list" -- depends on which overlay (if any) is showing. Cargo's own view
 // is otherwise static (just a read-only list), so its only interactive
 // entry is the one that closes it. landing-sequence has nothing to
-// interact with until it reaches 'docked' -- an empty list here is what
+// interact with except while sitting docked -- an empty list here is what
 // makes the viewport keydown branch's existing "nothing to do" guard
-// naturally block input during the animation, with no extra special case.
+// naturally block input during the animation (descent OR launch), with no
+// extra special case.
 const viewportMenuItems = computed(() => {
   if (viewportMode.value === 'outpost') return outpostMenuItems.value
   if (viewportMode.value === 'cargo') return [{ __leave: true, name: 'Close Cargo' }]
   if (viewportMode.value === 'charts') return chartsMenuItems.value
   if (viewportMode.value === 'planet') return planetMenuItems.value
   if (viewportMode.value === 'landing-sequence') {
-    return landingPhase.value === 'docked' ? [{ key: 'exit_craft', name: 'Exit Craft' }] : []
+    return landingPhase.value === 'docked' ? [{ key: 'exit_craft', name: 'Exit Craft' }, { key: 'launch', name: 'Launch' }] : []
   }
   return []
 })
@@ -376,6 +379,7 @@ function activateViewportMenuItem(entry) {
     else if (entry.key === 'land') beginLandingSequence()
   } else if (viewportMode.value === 'landing-sequence') {
     if (entry.key === 'exit_craft') exitCraft()
+    else if (entry.key === 'launch') beginLaunchSequence()
   }
 }
 
@@ -424,6 +428,14 @@ const LANDING_PHASE_ORDER = ['approaching', 'closing', 'sweeping', 'entry', 'doc
 // caption text, even though a single landing-descent animation is what's
 // actually running underneath for the whole 17s.
 const LANDING_PHASE_DURATIONS = { approaching: 8000, closing: 5000, sweeping: 4000, entry: 6000 }
+
+// The launch sequence -- much shorter than landing, and simple enough
+// (two brief CSS fades, see .landing-sky/.landing-facility's
+// launch-departing rules and the reused flame burst) that it doesn't need
+// landing's animationend-driven precision; a plain timer pair is exactly
+// as reliable here and far simpler.
+const LAUNCH_PHASE_DURATIONS = { 'launch-ignition': 1800, 'launch-departing': 2800 }
+
 const LANDING_PHASE_ANIMATIONS = {
   'landing-atmosphere-rise': 'entry'
 }
@@ -440,6 +452,7 @@ const PHASE_TO_ANIMATION_NAME = Object.fromEntries(
   Object.entries(LANDING_PHASE_ANIMATIONS).map(([animName, phase]) => [phase, animName])
 )
 let landingTimeoutId = null
+let launchTimeoutId = null
 
 // The planet's "scale(1)" reference size is measured in actual pixels
 // (landingSceneHeightPx, applied via the --landing-diameter custom
@@ -684,16 +697,66 @@ function scheduleLandingFallback(phase) {
 
 // Escape-triggered (see onKeydown) -- backs out of the animation at any
 // phase and returns to the Planet Overview menu, same as never having
-// clicked Land.
+// clicked Land. Also doubles as the launch sequence's own Escape-abort --
+// landing back on 'docked' (still landed, just changed its mind about
+// leaving) rather than 'planet'/null, which is only correct for aborting
+// a descent that never actually touched down.
 function cancelLandingSequence() {
   if (landingTimeoutId) { clearTimeout(landingTimeoutId); landingTimeoutId = null }
+  if (launchTimeoutId) { clearTimeout(launchTimeoutId); launchTimeoutId = null }
   window.removeEventListener('resize', measureLandingScene)
   stopLandingDebugLoop()
-  landingPhase.value = null
-  viewportMode.value = 'planet'
+  if (landingPhase.value === 'launch-ignition' || landingPhase.value === 'launch-departing') {
+    landingPhase.value = 'docked'
+    logLines.value.push('Launch aborted.')
+  } else {
+    landingPhase.value = null
+    viewportMode.value = 'planet'
+    logLines.value.push('Descent aborted.')
+  }
   selectedIndex.value = -1
-  logLines.value.push('Descent aborted.')
   scrollLogToBottom()
+}
+
+// The reverse of the landing montage, and much shorter: a brief ignition
+// flare (reuses the same flame-burst visual as atmospheric entry, just
+// re-triggered here) followed by the ground/sky fading away to reveal
+// open space again. Purely a plain timer pair, not the animationend-driven
+// approach the original descent needed -- see LAUNCH_PHASE_DURATIONS.
+function beginLaunchSequence() {
+  selectedIndex.value = -1
+  landingFlames.value = generateLandingFlames()
+  landingPhase.value = 'launch-ignition'
+  logLines.value.push('Launch sequence initiated.')
+  scrollLogToBottom()
+  launchTimeoutId = setTimeout(() => {
+    landingPhase.value = 'launch-departing'
+    logLines.value.push('Ascending...')
+    scrollLogToBottom()
+    launchTimeoutId = setTimeout(finishLaunch, LAUNCH_PHASE_DURATIONS['launch-departing'])
+  }, LAUNCH_PHASE_DURATIONS['launch-ignition'])
+}
+
+// POSTs /launch (the /dock counterpart) and returns to plain space view.
+// Best-effort like returnToShip/exitCraft's background calls -- a failure
+// here just means the next reload would (incorrectly) restore the docked
+// screen, self-correcting by launching again.
+async function finishLaunch() {
+  launchTimeoutId = null
+  landingPhase.value = null
+  viewportMode.value = 'space'
+  dockedFeatureId.value = null
+  selectedIndex.value = -1
+  logLines.value.push('Breaking orbit. Back in open space.')
+  scrollLogToBottom()
+  try {
+    await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/launch`, {
+      method: 'POST',
+      credentials: 'include'
+    })
+  } catch {
+    // Best-effort -- see comment above.
+  }
 }
 
 // The montage's payoff: leaves the ship UI entirely for the full-screen
@@ -1269,6 +1332,7 @@ onUnmounted(() => {
   stopLandingDebugLoop()
   if (driftIntervalId) clearInterval(driftIntervalId)
   if (landingTimeoutId) clearTimeout(landingTimeoutId)
+  if (launchTimeoutId) clearTimeout(launchTimeoutId)
 })
 </script>
 
@@ -1494,10 +1558,17 @@ onUnmounted(() => {
                       class="landing-scene"
                       ref="landingSceneEl"
                       :class="landingPhase"
-                      :style="{ '--landing-diameter': landingSceneHeightPx + 'px', ...(landingPhase === 'docked' ? { background: landingSkyGradient } : {}) }"
+                      :style="{ '--landing-diameter': landingSceneHeightPx + 'px' }"
                       @animationend="handleLandingAnimationEnd"
                     >
-                      <div v-if="landingPhase !== 'docked'" class="starfield" aria-hidden="true">
+                      <div
+                        v-if="['docked', 'launch-ignition', 'launch-departing'].includes(landingPhase)"
+                        class="landing-sky"
+                        :style="{ background: landingSkyGradient }"
+                        aria-hidden="true"
+                      ></div>
+
+                      <div v-if="!['docked', 'launch-ignition'].includes(landingPhase)" class="starfield" aria-hidden="true">
                         <span
                           v-for="(star, i) in stars"
                           :key="i"
@@ -1511,7 +1582,7 @@ onUnmounted(() => {
 
                       <div v-if="landingPhase === 'entry'" class="landing-atmosphere" :style="{ background: landingAtmosphereGradient }"></div>
 
-                      <div v-if="landingPhase === 'entry'" class="landing-flames" aria-hidden="true">
+                      <div v-if="landingPhase === 'entry' || landingPhase === 'launch-ignition'" class="landing-flames" aria-hidden="true">
                         <div
                           v-for="(f, i) in landingFlames"
                           :key="i"
@@ -1525,7 +1596,7 @@ onUnmounted(() => {
                         </div>
                       </div>
 
-                      <div v-if="landingPhase === 'docked'" class="landing-facility" aria-hidden="true">
+                      <div v-if="['docked', 'launch-ignition', 'launch-departing'].includes(landingPhase)" class="landing-facility" aria-hidden="true">
                         <div class="facility-ground"></div>
                         <div class="facility-building facility-building-1"></div>
                         <div class="facility-building facility-building-2"></div>
@@ -2384,10 +2455,31 @@ onUnmounted(() => {
   to { offset-distance: 100%; transform: scale(30); }
 }
 
-/* docked: the planet circle itself is no longer relevant here -- solid
-   sky (landingSkyGradient) takes over the whole scene. */
-.landing-scene.docked .landing-planet {
+/* docked/launch-*: the planet circle itself is no longer relevant here --
+   solid sky (see .landing-sky) takes over the whole scene. Also covers the
+   launch phases so the planet doesn't reappear once its own governing
+   animation (landing-entry-grow, above) stops applying at the 'entry' ->
+   'docked' handoff -- its held scale(30) end state would otherwise just
+   sit there, unstyled, the moment nothing else says to hide it. */
+.landing-scene.docked .landing-planet,
+.landing-scene.launch-ignition .landing-planet,
+.landing-scene.launch-departing .landing-planet {
   display: none;
+}
+
+.landing-sky {
+  position: absolute;
+  inset: 0;
+}
+
+/* Matches LAUNCH_PHASE_DURATIONS['launch-departing'] in <script>. */
+.landing-scene.launch-departing .landing-sky {
+  animation: landing-sky-fade 2.8s ease-in forwards;
+}
+
+@keyframes landing-sky-fade {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
 /* Anchored right at the horizon the descent ends on (~20% down from the
@@ -2458,12 +2550,28 @@ onUnmounted(() => {
   right: 0;
   bottom: 0;
   height: 0;
+  transform-origin: bottom center;
   animation: facility-rise 2.5s ease-out forwards;
 }
 
 @keyframes facility-rise {
   from { height: 0%; }
   to { height: 33%; }
+}
+
+/* The facility-rise animation above has already finished and settled by
+   the time launch-departing can ever start (docked/launch-ignition both
+   come first) -- this is a deliberate, distinct animation taking over
+   from a static state, not a continuation of it, so there's no continuity
+   concern the way the original descent had. Matches
+   LAUNCH_PHASE_DURATIONS['launch-departing'] in <script>. */
+.landing-scene.launch-departing .landing-facility {
+  animation: landing-facility-depart 2.8s ease-in forwards;
+}
+
+@keyframes landing-facility-depart {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(30px) scale(0.55); }
 }
 
 .facility-ground {

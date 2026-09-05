@@ -853,6 +853,47 @@ router.post('/:gameKey/characters/:id/dock', authenticate, async (req, res) => {
 });
 
 /**
+ * POST /api/games/:gameKey/characters/:id/launch
+ * The undock counterpart to /dock -- clears docked_feature_id (and
+ * on_surface, defensively) so the ship shows as back in open space
+ * without needing to warp anywhere (see /navigate for the other way this
+ * can happen, as a side effect of leaving for a different sector).
+ * Requires being back aboard the ship first -- can't launch while the
+ * pilot's body is still out on the surface in the buggy.
+ */
+router.post('/:gameKey/characters/:id/launch', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+
+    const pilotResult = await client.query(
+      'SELECT docked_feature_id, on_surface FROM haulonaut_pilots WHERE game_user_id = $1',
+      [req.params.id]
+    );
+    if (pilotResult.rowCount === 0 || !pilotResult.rows[0].docked_feature_id) {
+      return res.status(409).json({ message: 'Not docked at a planet' });
+    }
+    if (pilotResult.rows[0].on_surface) return res.status(409).json({ message: 'Return to ship before launching' });
+
+    await client.query('UPDATE haulonaut_pilots SET docked_feature_id = NULL, on_surface = 0 WHERE game_user_id = $1', [req.params.id]);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error launching:', err);
+    res.status(500).json({ message: 'Failed to launch' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
  * POST /api/games/:gameKey/characters/:id/exit-craft
  * Steps out of an already-docked ship onto its planet's surface (see POST
  * /dock, which must have already run) -- sets on_surface and returns that
