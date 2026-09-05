@@ -212,31 +212,36 @@ async function createSurfaceMap(client, gameUserId, featureId) {
   return { gridWidth: SURFACE_MAP_GRID_WIDTH, gridHeight: SURFACE_MAP_GRID_HEIGHT, shipX, shipY, buggyX: shipX, buggyY: shipY, revealed };
 }
 
-// Whether a character is aboard their ship (null) or standing on a specific
-// planet feature's surface, plus that surface's map state if so. Self-heals
-// like loadPilotLocation does for a missing pilot row: on_surface_feature_id
-// set with no matching map row (shouldn't happen via normal flow, since
-// /exit-craft creates both together) gets a fresh map rather than a broken
-// response.
+// Whether a character has landed at a planet -- docked_feature_id is
+// non-null the moment the landing sequence reaches 'docked' (see POST
+// /dock), independent of whether they've since stepped out of the ship
+// (on_surface). The surface map is only loaded/created once they actually
+// have (on_surface = 1) -- no reason to allocate it before it's needed.
+// Self-heals like loadPilotLocation does for a missing pilot row:
+// on_surface with no matching map row (shouldn't happen via normal flow,
+// since /exit-craft creates both together) gets a fresh map rather than a
+// broken response.
 async function loadSurfaceState(client, gameUserId) {
   const pilotResult = await client.query(
-    'SELECT on_surface_feature_id FROM haulonaut_pilots WHERE game_user_id = $1',
+    'SELECT docked_feature_id, on_surface FROM haulonaut_pilots WHERE game_user_id = $1',
     [gameUserId]
   );
-  const onSurfaceFeatureId = pilotResult.rowCount > 0 ? pilotResult.rows[0].on_surface_feature_id : null;
-  if (!onSurfaceFeatureId) return { onSurfaceFeatureId: null, surfaceMap: null };
+  const dockedFeatureId = pilotResult.rowCount > 0 ? pilotResult.rows[0].docked_feature_id : null;
+  const onSurface = pilotResult.rowCount > 0 && !!pilotResult.rows[0].on_surface;
+  if (!dockedFeatureId || !onSurface) return { dockedFeatureId, onSurface: false, surfaceMap: null };
 
   const mapResult = await client.query(
     `SELECT grid_width, grid_height, ship_x, ship_y, buggy_x, buggy_y, revealed_cells
      FROM haulonaut_surface_maps WHERE game_user_id = $1 AND feature_id = $2`,
-    [gameUserId, onSurfaceFeatureId]
+    [gameUserId, dockedFeatureId]
   );
   if (mapResult.rowCount === 0) {
-    return { onSurfaceFeatureId, surfaceMap: await createSurfaceMap(client, gameUserId, onSurfaceFeatureId) };
+    return { dockedFeatureId, onSurface: true, surfaceMap: await createSurfaceMap(client, gameUserId, dockedFeatureId) };
   }
   const row = mapResult.rows[0];
   return {
-    onSurfaceFeatureId,
+    dockedFeatureId,
+    onSurface: true,
     surfaceMap: {
       gridWidth: row.grid_width,
       gridHeight: row.grid_height,
@@ -485,9 +490,9 @@ router.get('/:gameKey/characters/:id', authenticate, async (req, res) => {
 
     const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel } = await loadPilotLocation(client, req.params.id);
     const inventory = await loadInventory(client, req.params.id);
-    const { onSurfaceFeatureId, surfaceMap } = await loadSurfaceState(client, req.params.id);
+    const { dockedFeatureId, onSurface, surfaceMap } = await loadSurfaceState(client, req.params.id);
 
-    res.json({ character: result.rows[0], currentSector, connectedSectors, features, playersHere, credits, rations, fuel, inventory, onSurfaceFeatureId, surfaceMap });
+    res.json({ character: result.rows[0], currentSector, connectedSectors, features, playersHere, credits, rations, fuel, inventory, dockedFeatureId, onSurface, surfaceMap });
   } catch (err) {
     console.error('Error loading character:', err);
     res.status(500).json({ message: 'Failed to load character' });
@@ -519,7 +524,7 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
     if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
 
     const pilotResult = await client.query(
-      'SELECT current_sector_id, on_surface_feature_id, rations, fuel FROM haulonaut_pilots WHERE game_user_id = $1',
+      'SELECT current_sector_id, on_surface, rations, fuel FROM haulonaut_pilots WHERE game_user_id = $1',
       [req.params.id]
     );
     if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
@@ -527,7 +532,9 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
     // Not reachable from the ship UI today (no warp controls render on the
     // surface screen), but re-checked server-side anyway -- same posture as
     // the link check just below, which the client also already enforces.
-    if (pilot.on_surface_feature_id) return res.status(409).json({ message: 'Return to ship before warping' });
+    // Being merely docked (still inside the ship) is fine -- warping away
+    // is exactly how undocking happens, see the UPDATE below.
+    if (pilot.on_surface) return res.status(409).json({ message: 'Return to ship before warping' });
 
     const linkCheck = await client.query(
       'SELECT 1 FROM haulonaut_sector_links WHERE from_sector_id = $1 AND to_sector_id = $2',
@@ -553,10 +560,13 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
     // Every warp costs a small, fixed amount of rations and fuel (clamped
     // at 0 rather than going negative) -- credits aren't touched by
     // movement, only by whatever the player chooses to spend them on
-    // later.
+    // later. Warping always undocks (docked_feature_id/on_surface both
+    // cleared) -- leaving orbit means neither applies any more, whether or
+    // not the pilot was actually docked at the old sector's planet.
     await client.query(
       `UPDATE haulonaut_pilots
-       SET current_sector_id = $1, rations = GREATEST(0, rations - $2), fuel = GREATEST(0, fuel - $3)
+       SET current_sector_id = $1, rations = GREATEST(0, rations - $2), fuel = GREATEST(0, fuel - $3),
+           docked_feature_id = NULL, on_surface = 0
        WHERE game_user_id = $4`,
       [toSectorId, WARP_RATIONS_COST, WARP_FUEL_COST, req.params.id]
     );
@@ -565,7 +575,7 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
 
     const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel } = await loadPilotLocation(client, req.params.id);
 
-    res.json({ currentSector, connectedSectors, features, playersHere, credits, rations, fuel });
+    res.json({ currentSector, connectedSectors, features, playersHere, credits, rations, fuel, dockedFeatureId: null, onSurface: false, surfaceMap: null });
   } catch (err) {
     console.error('Error navigating:', err);
     res.status(500).json({ message: 'Failed to navigate' });
@@ -604,14 +614,17 @@ router.post('/:gameKey/characters/:id/drift', authenticate, async (req, res) => 
     const instanceId = ownerCheck.rows[0].game_instance_id;
 
     const pilotResult = await client.query(
-      'SELECT current_sector_id, on_surface_feature_id, fuel FROM haulonaut_pilots WHERE game_user_id = $1',
+      'SELECT current_sector_id, on_surface, fuel FROM haulonaut_pilots WHERE game_user_id = $1',
       [req.params.id]
     );
     if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
     // Not reachable from the surface screen today (drift is paced by the
     // ship UI's own tick, which doesn't run there), but re-checked
     // server-side for the same reason as /navigate's equivalent guard.
-    if (pilotResult.rows[0].on_surface_feature_id) return res.status(409).json({ message: 'Return to ship before drifting' });
+    // Redundant with the "Already at a planet" check below in practice
+    // (being on the surface implies the current sector has a planet), but
+    // cheap and explicit.
+    if (pilotResult.rows[0].on_surface) return res.status(409).json({ message: 'Return to ship before drifting' });
     if (pilotResult.rows[0].fuel > 0) return res.status(409).json({ message: 'Not out of fuel' });
     const currentSectorId = pilotResult.rows[0].current_sector_id;
 
@@ -852,15 +865,16 @@ router.post('/:gameKey/characters/:id/land', authenticate, async (req, res) => {
 });
 
 /**
- * POST /api/games/:gameKey/characters/:id/exit-craft
- * Leaves the ship for the surface of whatever planet is in the character's
- * current sector -- the planet is derived server-side from current_sector_id
+ * POST /api/games/:gameKey/characters/:id/dock
+ * Marks the character as landed at whatever planet is in their current
+ * sector -- called the moment the client's landing-sequence animation
+ * reaches its 'docked' phase, independent of whether they go on to exit
+ * the craft. The planet is derived server-side from current_sector_id
  * (never trusted from the client), same posture as /land's own planet
- * check. Sets haulonaut_pilots.on_surface_feature_id and returns that
- * planet's surface-map state, creating it (see createSurfaceMap) on a
- * character's first-ever visit to this particular planet.
+ * check. Idempotent: landing again while already docked at the same
+ * planet just re-confirms it.
  */
-router.post('/:gameKey/characters/:id/exit-craft', authenticate, async (req, res) => {
+router.post('/:gameKey/characters/:id/dock', authenticate, async (req, res) => {
   const client = await getClient();
   try {
     const ownerCheck = await client.query(
@@ -888,7 +902,46 @@ router.post('/:gameKey/characters/:id/exit-craft', authenticate, async (req, res
     if (featureResult.rowCount === 0) return res.status(409).json({ message: 'No planet in this sector' });
     const featureId = featureResult.rows[0].id;
 
-    await client.query('UPDATE haulonaut_pilots SET on_surface_feature_id = $1 WHERE game_user_id = $2', [featureId, req.params.id]);
+    // on_surface reset to 0 -- a fresh dock always starts back inside the
+    // ship; stepping out is a separate, later /exit-craft call.
+    await client.query('UPDATE haulonaut_pilots SET docked_feature_id = $1, on_surface = 0 WHERE game_user_id = $2', [featureId, req.params.id]);
+
+    res.json({ dockedFeatureId: featureId });
+  } catch (err) {
+    console.error('Error docking:', err);
+    res.status(500).json({ message: 'Failed to dock' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/characters/:id/exit-craft
+ * Steps out of an already-docked ship onto its planet's surface (see POST
+ * /dock, which must have already run) -- sets on_surface and returns that
+ * planet's surface-map state, creating it (see createSurfaceMap) on a
+ * character's first-ever visit to this particular planet.
+ */
+router.post('/:gameKey/characters/:id/exit-craft', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+
+    const pilotResult = await client.query(
+      'SELECT docked_feature_id FROM haulonaut_pilots WHERE game_user_id = $1',
+      [req.params.id]
+    );
+    const featureId = pilotResult.rowCount > 0 ? pilotResult.rows[0].docked_feature_id : null;
+    if (!featureId) return res.status(409).json({ message: 'Not docked at a planet' });
+
+    await client.query('UPDATE haulonaut_pilots SET on_surface = 1 WHERE game_user_id = $1', [req.params.id]);
 
     const existingMap = await client.query(
       'SELECT 1 FROM haulonaut_surface_maps WHERE game_user_id = $1 AND feature_id = $2',
@@ -898,7 +951,7 @@ router.post('/:gameKey/characters/:id/exit-craft', authenticate, async (req, res
       ? (await loadSurfaceState(client, req.params.id)).surfaceMap
       : await createSurfaceMap(client, req.params.id, featureId);
 
-    res.json({ onSurfaceFeatureId: featureId, surfaceMap });
+    res.json({ dockedFeatureId: featureId, surfaceMap });
   } catch (err) {
     console.error('Error exiting craft:', err);
     res.status(500).json({ message: 'Failed to exit craft' });
@@ -909,9 +962,11 @@ router.post('/:gameKey/characters/:id/exit-craft', authenticate, async (req, res
 
 /**
  * POST /api/games/:gameKey/characters/:id/return-to-ship
- * Clears on_surface_feature_id back to null -- the surface map itself
- * (haulonaut_surface_maps) is left untouched so it's exactly as explored
- * whenever this planet is visited again.
+ * Clears on_surface back to 0 -- docked_feature_id is left alone, since
+ * boarding the ship doesn't undock it (see /navigate for the only thing
+ * that does). The surface map itself (haulonaut_surface_maps) is also left
+ * untouched so it's exactly as explored whenever the surface is visited
+ * again.
  */
 router.post('/:gameKey/characters/:id/return-to-ship', authenticate, async (req, res) => {
   const client = await getClient();
@@ -925,7 +980,7 @@ router.post('/:gameKey/characters/:id/return-to-ship', authenticate, async (req,
     );
     if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
 
-    await client.query('UPDATE haulonaut_pilots SET on_surface_feature_id = NULL WHERE game_user_id = $1', [req.params.id]);
+    await client.query('UPDATE haulonaut_pilots SET on_surface = 0 WHERE game_user_id = $1', [req.params.id]);
 
     res.json({ success: true });
   } catch (err) {
@@ -959,10 +1014,10 @@ router.post('/:gameKey/characters/:id/drive-buggy', authenticate, async (req, re
     if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
 
     const pilotResult = await client.query(
-      'SELECT on_surface_feature_id FROM haulonaut_pilots WHERE game_user_id = $1',
+      'SELECT docked_feature_id, on_surface FROM haulonaut_pilots WHERE game_user_id = $1',
       [req.params.id]
     );
-    const featureId = pilotResult.rowCount > 0 ? pilotResult.rows[0].on_surface_feature_id : null;
+    const featureId = pilotResult.rowCount > 0 && pilotResult.rows[0].on_surface ? pilotResult.rows[0].docked_feature_id : null;
     if (!featureId) return res.status(409).json({ message: 'Not on a planet surface' });
 
     let mapResult = await client.query(

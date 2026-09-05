@@ -40,7 +40,7 @@ const landingDebugMetrics = ref(null)
 const landingDebugPaused = ref(false)
 const onSurface = ref(false) // true once the player has exited the craft -- replaces the whole ship UI with the surface screen
 const surfaceLog = ref([]) // exploreSurface() results shown on the surface screen itself (separate from the ship's hidden Terminal)
-const onSurfaceFeatureId = ref(null) // mirrors the server's haulonaut_pilots.on_surface_feature_id -- which planet feature onSurface refers to
+const dockedFeatureId = ref(null) // mirrors the server's haulonaut_pilots.docked_feature_id -- which planet feature the ship is landed at, whether or not onSurface is also true
 const surfaceMap = ref(null) // { gridWidth, gridHeight, shipX, shipY, buggyX, buggyY, revealed: number[] } for the current planet, or null before it's loaded
 const mapLoading = ref(false)
 const mapError = ref('')
@@ -102,7 +102,11 @@ const landingAtmosphereGradient = computed(() =>
   `linear-gradient(to top, hsl(${planetHue.value},55%,42%) 0%, hsl(${planetHue.value},70%,80%) 18%, hsl(${planetHue.value},70%,80%) 85%, transparent 100%)`
 )
 
-const landingSequenceActive = computed(() => landingPhase.value !== null)
+// Excludes 'docked' on purpose -- that's a stable, resumable resting state
+// (persisted server-side, see dockedFeatureId) rather than an animation in
+// progress, so nav/actions/warp shouldn't stay blocked by it the way they
+// correctly are for the actual descent phases.
+const landingSequenceActive = computed(() => landingPhase.value !== null && landingPhase.value !== 'docked')
 
 const LANDING_CAPTIONS = {
   approaching: 'Approaching...',
@@ -623,8 +627,28 @@ function advanceLandingPhase() {
   } else if (next === 'docked') {
     logLines.value.push('Touchdown confirmed. Docking clamps engaged.')
     scrollLogToBottom()
+    notifyDocked()
   }
   scheduleLandingFallback(next)
+}
+
+// Persists "landed at this planet" the moment the animation actually
+// reaches 'docked' -- independent of whether the player goes on to exit
+// the craft (see exitCraft/loadSurfaceMap for that separate, later step).
+// Fire-and-forget: nothing in the UI needs to wait on this, and a failure
+// here just means a reload before it eventually succeeds would show the
+// ship in space instead of docked -- self-correcting by landing again.
+async function notifyDocked() {
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/dock`, {
+      method: 'POST',
+      credentials: 'include'
+    })
+    const data = await res.json()
+    if (res.ok) dockedFeatureId.value = data.dockedFeatureId
+  } catch {
+    // Best-effort -- see comment above.
+  }
 }
 
 function scheduleLandingFallback(phase) {
@@ -675,10 +699,11 @@ function exitCraft() {
   loadSurfaceMap()
 }
 
-// POSTs /exit-craft -- persists on_surface_feature_id server-side (deriving
-// the planet from the character's actual sector, same as /land already
-// does) and returns that planet's surface map, creating it on a first-ever
-// visit. Also (re)callable as a retry from the map panel's own error state.
+// POSTs /exit-craft -- requires already being docked (see notifyDocked,
+// called when the landing animation reached 'docked', well before this
+// point) and returns that planet's surface map, creating it on a
+// first-ever visit. Also (re)callable as a retry from the map panel's own
+// error state.
 async function loadSurfaceMap() {
   mapLoading.value = true
   mapError.value = ''
@@ -689,7 +714,7 @@ async function loadSurfaceMap() {
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.message || 'Failed to exit craft')
-    onSurfaceFeatureId.value = data.onSurfaceFeatureId
+    dockedFeatureId.value = data.dockedFeatureId
     surfaceMap.value = data.surfaceMap
   } catch (err) {
     mapError.value = err.message
@@ -702,12 +727,15 @@ async function loadSurfaceMap() {
 // the return-to-ship call itself is best-effort -- a failure just means the
 // next reload would (incorrectly) restore surface state, which is a
 // low-stakes, self-correcting failure the player can fix by exiting the
-// craft again.
+// craft again. Boarding the ship doesn't undock it -- dockedFeatureId is
+// left alone, and the view goes back to the docked ship screen (the same
+// one loadCharacter restores to on reload), not all the way out to plain
+// space. Only warping away actually undocks (see navigateTo).
 async function returnToShip() {
   onSurface.value = false
-  viewportMode.value = 'space'
+  viewportMode.value = 'landing-sequence'
+  landingPhase.value = 'docked'
   selectedIndex.value = -1
-  onSurfaceFeatureId.value = null
   surfaceMap.value = null
   logLines.value.push('Boarding the ship. Systems coming back online.')
   scrollLogToBottom()
@@ -808,15 +836,21 @@ async function loadCharacter() {
     rations.value = data.rations || 0
     fuel.value = data.fuel || 0
     inventory.value = data.inventory || []
-    // Restores "on the surface of a planet" across reloads/logins -- see
-    // exitCraft()/returnToShip() for where these are also kept in sync
-    // during the current session. viewportMode needs no equivalent
-    // handling: the template's onSurface branch is checked before the ship
-    // UI, so viewportMode sitting at its 'space' default underneath is
-    // harmless either way.
-    onSurfaceFeatureId.value = data.onSurfaceFeatureId || null
+    // Restores "landed at a planet" across reloads/logins -- see
+    // notifyDocked()/exitCraft()/returnToShip() for where these are also
+    // kept in sync during the current session. Landed-but-still-in-the-ship
+    // restores straight to the docked screen (skipping the descent
+    // animation entirely, since it's a stable resting state, not something
+    // to replay); landed-and-out-on-the-surface restores the surface
+    // screen and its map. Neither needs viewportMode/landingPhase reset
+    // first -- both branches set exactly what they need.
+    dockedFeatureId.value = data.dockedFeatureId || null
     surfaceMap.value = data.surfaceMap || null
-    onSurface.value = !!data.onSurfaceFeatureId
+    onSurface.value = !!data.onSurface
+    if (dockedFeatureId.value && !onSurface.value) {
+      viewportMode.value = 'landing-sequence'
+      landingPhase.value = 'docked'
+    }
     regenerateStarfield()
     logLines.value = [
       'Docking confirmed.',
@@ -876,6 +910,13 @@ async function navigateTo(sector) {
     credits.value = data.credits || 0
     rations.value = data.rations || 0
     fuel.value = data.fuel || 0
+    // Warping always undocks server-side (see /navigate) -- mirror that
+    // here rather than leaving a stale dockedFeatureId/landingPhase behind
+    // from wherever the ship was landed before this warp.
+    dockedFeatureId.value = data.dockedFeatureId ?? null
+    onSurface.value = !!data.onSurface
+    surfaceMap.value = data.surfaceMap ?? null
+    landingPhase.value = null
     viewportMode.value = 'space'
     regenerateStarfield()
     logLines.value.push(`Arrived in Sector ${data.currentSector.sector_number}.`)
