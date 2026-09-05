@@ -43,6 +43,7 @@ const surfaceMap = ref(null) // { gridWidth, gridHeight, shipX, shipY, buggyX, b
 const mapLoading = ref(false)
 const mapError = ref('')
 const buggyMoving = ref(false) // guards overlapping /drive-buggy requests, same pattern as navigating/landing
+const buggyMoveCount = ref(0) // bumped on every actual position change -- :key on .surface-buggy, forces its bounce/wheel-spin CSS animations to restart each move
 const traveling = ref(false) // true while an autopilot course is being flown hop-by-hop
 const driftVariance = ref(0)
 const drifting = ref(false) // true while a drift hop's own API call is in flight
@@ -95,13 +96,21 @@ const planetHue = computed(() => planetFeature.value ? hashHue(planetFeature.val
 // Oregon-Trail-style side view of the surface: driving east/west (buggyX)
 // scrolls the background layers under a buggy that otherwise stays put in
 // the middle of the screen; driving north/south (buggyY) instead drifts
-// the terrain's own hue a little, so different latitudes at least *look*
-// like different areas even though nothing here is a real 2D scene.
+// the terrain's own shade a little, so different latitudes at least
+// *look* like different areas even though nothing here is a real 2D
+// scene. Ground and hills are always dirt-brown (SURFACE_TERRAIN_HUE),
+// deliberately never tied to the sky's own planet-hue gradient -- only
+// the lightness (how light/dark that brown is) varies with buggyY.
 const SURFACE_PARALLAX_FAR_PX = 26
 const SURFACE_PARALLAX_NEAR_PX = 64
+const SURFACE_TERRAIN_HUE = 28
+const SURFACE_TERRAIN_SATURATION = 38
 const surfaceParallaxFar = computed(() => surfaceMap.value ? -(surfaceMap.value.buggyX * SURFACE_PARALLAX_FAR_PX) : 0)
 const surfaceParallaxNear = computed(() => surfaceMap.value ? -(surfaceMap.value.buggyX * SURFACE_PARALLAX_NEAR_PX) : 0)
-const surfaceTerrainHue = computed(() => surfaceMap.value ? (planetHue.value + surfaceMap.value.buggyY * 15) % 360 : planetHue.value)
+const surfaceTerrainLightness = computed(() => surfaceMap.value ? 14 + (surfaceMap.value.buggyY % 4) * 4 : 14)
+function surfaceTerrainColor(lightnessOffset) {
+  return `hsl(${SURFACE_TERRAIN_HUE}, ${SURFACE_TERRAIN_SATURATION}%, ${surfaceTerrainLightness.value + lightnessOffset}%)`
+}
 const landingPlanetGradient = computed(() =>
   `radial-gradient(circle at 35% 32%, hsl(${planetHue.value},75%,68%), hsl(${planetHue.value},60%,38%) 65%, hsl(${planetHue.value},55%,18%) 100%)`
 )
@@ -843,6 +852,11 @@ async function moveBuggy(direction) {
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.message || 'Move failed')
+    // Only bounce/spin when the buggy actually moved -- bumping into the
+    // grid's edge is a silent no-op server-side (see POST /drive-buggy),
+    // and shouldn't play the "hit a rock" animation for a move that didn't
+    // happen.
+    if (data.buggyX !== surfaceMap.value.buggyX || data.buggyY !== surfaceMap.value.buggyY) buggyMoveCount.value++
     surfaceMap.value = { ...surfaceMap.value, buggyX: data.buggyX, buggyY: data.buggyY, revealed: data.revealed }
     // Arriving at a cell for the first time rolls one landing event
     // server-side (see POST /drive-buggy) -- narration is only present
@@ -1356,21 +1370,29 @@ onUnmounted(() => {
            scene. -->
       <div
         class="surface-hills-far"
-        :style="{ backgroundPositionX: surfaceParallaxFar + 'px', color: `hsl(${surfaceTerrainHue}, 30%, 22%)` }"
+        :style="{ backgroundPositionX: surfaceParallaxFar + 'px', color: surfaceTerrainColor(8) }"
         aria-hidden="true"
       ></div>
       <div
         class="surface-hills-near"
-        :style="{ backgroundPositionX: surfaceParallaxNear + 'px', color: `hsl(${surfaceTerrainHue}, 32%, 16%)` }"
+        :style="{ backgroundPositionX: surfaceParallaxNear + 'px', color: surfaceTerrainColor(2) }"
         aria-hidden="true"
       ></div>
-      <div class="surface-ground" :style="{ background: `linear-gradient(to bottom, hsl(${surfaceTerrainHue}, 28%, 12%), hsl(${surfaceTerrainHue}, 30%, 7%))` }" aria-hidden="true"></div>
+      <div class="surface-ground" :style="{ background: `linear-gradient(to bottom, ${surfaceTerrainColor(-2)}, ${surfaceTerrainColor(-9)})` }" aria-hidden="true"></div>
 
       <div class="surface-ship" v-if="buggyAtShip" aria-hidden="true">&#128640;</div>
-      <div class="surface-buggy" aria-hidden="true">
+      <div class="surface-buggy" :key="buggyMoveCount" aria-hidden="true">
+        <div class="surface-buggy-antenna"></div>
+        <div class="surface-buggy-antenna-tip"></div>
+        <div class="surface-buggy-cab"></div>
         <div class="surface-buggy-body"></div>
-        <div class="surface-buggy-wheel surface-buggy-wheel-back"></div>
-        <div class="surface-buggy-wheel surface-buggy-wheel-front"></div>
+        <div class="surface-buggy-headlight"></div>
+        <div class="surface-buggy-wheel surface-buggy-wheel-back">
+          <div class="surface-buggy-wheel-rim"></div>
+        </div>
+        <div class="surface-buggy-wheel surface-buggy-wheel-front">
+          <div class="surface-buggy-wheel-rim"></div>
+        </div>
       </div>
 
       <div class="surface-minimap" v-if="surfaceMap">
@@ -3003,21 +3025,29 @@ onUnmounted(() => {
 /* Side-view scene. The buggy (see .surface-buggy) stays fixed in the
    middle of the screen; these two layers scroll under it instead --
    background-position-x is bound to buggyX (see surfaceParallaxFar/Near)
-   -- to create the illusion of travel. Each is a single repeating radial
-   -- gradient "bump" (a circle whose radius equals its tile's height,
-   anchored at the tile's bottom-center) rather than a hand-drawn shape, so
-   it tiles perfectly via background-repeat at any scroll offset or screen
-   width, with nothing to visibly seam or run out of. currentColor (set
-   inline, see surfaceTerrainHue) lets the buggy's north/south position
-   tint the hills without a second gradient. */
+   -- to create the illusion of travel. Each layer is several overlaid
+   repeating radial-gradient "bumps" of different sizes and spacing within
+   one tile (rather than one uniform bump, which read as a perfectly even
+   row of identical half-circles) -- still just background-repeat, so it
+   tiles perfectly at any scroll offset or screen width with nothing to
+   visibly seam or run out of, but the skyline within each repeat reads as
+   irregular. Far and near use different tile widths on top of their
+   already-different parallax speeds, so the two layers never visually
+   sync up into an obviously repeating pattern either. currentColor (set
+   inline, see surfaceTerrainColor) keeps both layers dirt-brown,
+   independent of the sky's own planet-hue gradient. */
 .surface-hills-far {
   position: absolute;
   left: 0;
   right: 0;
   bottom: 30%;
   height: 70px;
-  background-image: radial-gradient(circle 70px at 50% 100%, currentColor 99%, transparent 100%);
-  background-size: 170px 70px;
+  background-image:
+    radial-gradient(circle 46px at 60px 100%, currentColor 99%, transparent 100%),
+    radial-gradient(circle 70px at 210px 100%, currentColor 99%, transparent 100%),
+    radial-gradient(circle 32px at 330px 100%, currentColor 99%, transparent 100%),
+    radial-gradient(circle 54px at 430px 100%, currentColor 99%, transparent 100%);
+  background-size: 480px 70px;
   background-repeat: repeat-x;
   background-position: bottom left;
   opacity: 0.55;
@@ -3029,8 +3059,11 @@ onUnmounted(() => {
   right: 0;
   bottom: 20%;
   height: 92px;
-  background-image: radial-gradient(circle 92px at 50% 100%, currentColor 99%, transparent 100%);
-  background-size: 230px 92px;
+  background-image:
+    radial-gradient(circle 60px at 40px 100%, currentColor 99%, transparent 100%),
+    radial-gradient(circle 92px at 170px 100%, currentColor 99%, transparent 100%),
+    radial-gradient(circle 45px at 300px 100%, currentColor 99%, transparent 100%);
+  background-size: 360px 92px;
   background-repeat: repeat-x;
   background-position: bottom left;
   opacity: 0.85;
@@ -3046,46 +3079,125 @@ onUnmounted(() => {
 
 .surface-ship {
   position: absolute;
-  left: 50%;
+  right: calc(50% + 100px);
   bottom: 15%;
-  transform: translateX(-170%);
   font-size: 2.4rem;
   line-height: 1;
   filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.5));
 }
 
+/* ~5x the old size (was 64x30) -- clamp() keeps it from overwhelming
+   narrow viewports while staying large on everything else. Every inner
+   part is sized in % of this box (aspect-ratio keeps that box's own
+   proportions fixed) so it scales as one unit across that clamp range,
+   rather than a fixed-px sprite that would look right at only one size.
+   The bounce/spin animations below are re-triggered each move via :key
+   forcing a full remount (see buggyMoveCount in <script>) -- simpler and
+   more reliable than toggling classes to restart a CSS animation. */
 .surface-buggy {
   position: absolute;
   left: 50%;
   bottom: 15%;
-  width: 64px;
-  height: 30px;
+  width: clamp(180px, 26vw, 320px);
+  aspect-ratio: 64 / 34;
   transform: translateX(-50%);
+  animation: buggy-bounce 0.35s ease-out;
+}
+
+.surface-buggy-antenna {
+  position: absolute;
+  right: 18%;
+  top: 0;
+  width: 1.5%;
+  height: 24%;
+  background: #3a352c;
+}
+
+.surface-buggy-antenna-tip {
+  position: absolute;
+  right: 17.2%;
+  top: -2%;
+  width: 3%;
+  aspect-ratio: 1;
+  background: #ff6b4d;
+  border-radius: 50%;
+}
+
+/* Small roll-cage bump, deliberately solid rather than a hollow arch --
+   simpler and more robust to render correctly than trying to cut a
+   see-through hole out of a CSS shape. */
+.surface-buggy-cab {
+  position: absolute;
+  left: 32%;
+  width: 26%;
+  top: 8%;
+  height: 20%;
+  background: #3a352c;
+  border-radius: 50% 50% 10% 10%;
 }
 
 .surface-buggy-body {
   position: absolute;
-  left: 5px;
-  right: 5px;
-  top: 2px;
-  height: 17px;
+  left: 6%;
+  right: 6%;
+  top: 30%;
+  height: 40%;
   background: linear-gradient(to bottom, #d8cdb8, #a89b82);
-  border-radius: 7px 11px 4px 4px;
-  box-shadow: inset 0 -4px 6px rgba(0, 0, 0, 0.3), 0 2px 4px rgba(0, 0, 0, 0.4);
+  border-radius: 12% 18% 6% 6%;
+  box-shadow: inset 0 -6px 10px rgba(0, 0, 0, 0.3), 0 4px 8px rgba(0, 0, 0, 0.4);
+}
+
+.surface-buggy-headlight {
+  position: absolute;
+  right: 4%;
+  top: 44%;
+  width: 7%;
+  aspect-ratio: 1;
+  background: #fff2c2;
+  border-radius: 50%;
+  box-shadow: 0 0 8px 2px rgba(255, 242, 194, 0.6);
 }
 
 .surface-buggy-wheel {
   position: absolute;
   bottom: 0;
-  width: 15px;
-  height: 15px;
+  width: 27%;
+  aspect-ratio: 1;
   border-radius: 50%;
   background: #1a1712;
-  border: 2px solid #050506;
+  border: 3px solid #050506;
+  animation: buggy-wheel-spin 0.35s linear;
 }
 
-.surface-buggy-wheel-back { left: 2px; }
-.surface-buggy-wheel-front { right: 2px; }
+.surface-buggy-wheel-back { left: 0; }
+.surface-buggy-wheel-front { right: 0; }
+
+.surface-buggy-wheel-rim {
+  position: absolute;
+  inset: 28%;
+  background: #6b6357;
+  border-radius: 50%;
+}
+
+/* Reads as "the buggy just hit a rock" -- a quick hop plus a settle, not a
+   smooth glide. transform is re-specified in full at every step (not just
+   translateY) since an animation's keyframes always replace the static
+   translateX(-50%) centering above, not add to it. */
+@keyframes buggy-bounce {
+  0% { transform: translateX(-50%) translateY(0); }
+  35% { transform: translateX(-50%) translateY(-10%); }
+  60% { transform: translateX(-50%) translateY(3%); }
+  100% { transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes buggy-wheel-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .surface-buggy, .surface-buggy-wheel { animation: none; }
+}
 
 /* Low-res fog-of-war minimap, tucked in the corner rather than the main
    view -- the whole map (never a scrolling camera) is always shown at
