@@ -3177,10 +3177,19 @@ onUnmounted(() => {
   text-shadow: 0 0 8px rgba(77, 255, 136, 0.5);
 }
 
+/* column-reverse (with surfaceLog itself pushed oldest-first, newest-last)
+   packs from the bottom up -- the newest line always lands flush against
+   the bottom edge, and anything that doesn't fit just runs past the top
+   edge, clipped by overflow:hidden. No scrollbar, no JS scroll-to-bottom
+   needed at all -- this replaces scrollLogToBottom's old surfaceLog
+   scrolling (that function still scrolls the ship's own Terminal log
+   elsewhere, which keeps a real scrollbar on purpose). */
 .surface-log {
   min-height: 40px;
   max-height: 110px;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column-reverse;
+  overflow: hidden;
   margin-top: 8px;
   padding: 8px 10px;
   background: rgba(0, 0, 0, 0.3);
@@ -3190,7 +3199,7 @@ onUnmounted(() => {
 }
 
 .surface-log-line {
-  margin: 0 0 6px;
+  margin: 6px 0 0;
   font-size: 0.75rem;
   color: #cfe8d8;
   line-height: 1.4;
