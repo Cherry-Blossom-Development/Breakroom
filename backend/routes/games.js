@@ -25,6 +25,22 @@ const STARTING_FUEL = 100;
 const WARP_RATIONS_COST = 1;
 const WARP_FUEL_COST = 1;
 
+// Cycles -- a wall-clock action budget (see migration 066). A pilot holds
+// at most MAX_CYCLES and regains one every CYCLE_REPLENISH_SECONDS of real
+// time, whether online or not (replenishCycles below does this lazily on
+// read). STARTING_CYCLES / MAX_CYCLES must match the haulonaut_pilots.cycles
+// column default in migration 066 -- the self-heal spawn and character
+// creation paths insert a pilot row without naming cycles and rely on that
+// default. Only piloted travel spends a cycle: warping, landing on a
+// planet, and driving the buggy onto a new surface cell. Trading, course
+// plotting, launching, exiting the craft, and passive drift cost nothing.
+const MAX_CYCLES = 24;
+const STARTING_CYCLES = 24;
+const CYCLE_REPLENISH_SECONDS = 3600;
+const WARP_CYCLE_COST = 1;
+const DOCK_CYCLE_COST = 1;
+const BUGGY_CYCLE_COST = 1;
+
 // A planet surface's exploration grid -- low-res and small on purpose (see
 // haulonaut_surface_maps in migration 063). Reveal radius 1 means a 3x3
 // block (the cell moved onto, plus its immediate neighbors) is uncovered
@@ -107,6 +123,73 @@ function buildBulkInsertQuery(table, columns, rows) {
   };
 }
 
+// Lazily accrues replenished cycles from wall-clock time elapsed since
+// cycles_updated_at -- one per CYCLE_REPLENISH_SECONDS, capped at
+// MAX_CYCLES -- so replenishment is identical whether the player is online,
+// backgrounded, or logged out (see migration 066). The anchor advances by
+// whole intervals actually consumed, never straight to "now", so progress
+// toward the next cycle survives across calls. While the pilot is at the
+// cap the anchor is pulled up to "now" instead, so a long-idle full bar
+// never banks overflow. Returns { cycles, cyclesUpdatedAt } with
+// cyclesUpdatedAt as epoch seconds (what the client's own countdown needs).
+// FROM_UNIXTIME/UNIX_TIMESTAMP are exact inverses under a stable session
+// timezone, so the epoch round-trip here is timezone-independent.
+async function replenishCycles(client, gameUserId) {
+  const result = await client.query(
+    `SELECT cycles,
+            UNIX_TIMESTAMP(cycles_updated_at) AS anchor,
+            UNIX_TIMESTAMP() AS now_ts
+     FROM haulonaut_pilots WHERE game_user_id = $1`,
+    [gameUserId]
+  );
+  if (result.rowCount === 0) return { cycles: 0, cyclesUpdatedAt: 0 };
+
+  const cycles = Number(result.rows[0].cycles);
+  const anchor = Number(result.rows[0].anchor);
+  const now = Number(result.rows[0].now_ts);
+
+  if (cycles >= MAX_CYCLES) {
+    // Keep the accrual clock parked at "now" while full -- but only touch
+    // the row if it's actually drifted, to avoid a pointless write (and an
+    // updated_at bump) on every read of an already-current full bar.
+    if (anchor < now) {
+      await client.query(
+        'UPDATE haulonaut_pilots SET cycles_updated_at = FROM_UNIXTIME($1) WHERE game_user_id = $2',
+        [now, gameUserId]
+      );
+    }
+    return { cycles: MAX_CYCLES, cyclesUpdatedAt: now };
+  }
+
+  const earned = Math.floor((now - anchor) / CYCLE_REPLENISH_SECONDS);
+  if (earned <= 0) return { cycles, cyclesUpdatedAt: anchor };
+
+  const newCycles = Math.min(MAX_CYCLES, cycles + earned);
+  const newAnchor = newCycles >= MAX_CYCLES ? now : anchor + earned * CYCLE_REPLENISH_SECONDS;
+  await client.query(
+    'UPDATE haulonaut_pilots SET cycles = $1, cycles_updated_at = FROM_UNIXTIME($2) WHERE game_user_id = $3',
+    [newCycles, newAnchor, gameUserId]
+  );
+  return { cycles: newCycles, cyclesUpdatedAt: newAnchor };
+}
+
+// Replenishes first (so time-accrued cycles are spendable), then deducts
+// `cost` if the pilot can afford it. The deduction is guarded with
+// "AND cycles >= cost" so two racing requests can't drive it negative --
+// the loser comes back ok:false. Returns { ok, cycles, cyclesUpdatedAt };
+// on ok:false nothing was deducted and `cycles` is the current balance
+// (for the "out of cycles" message).
+async function spendCycles(client, gameUserId, cost) {
+  const { cycles, cyclesUpdatedAt } = await replenishCycles(client, gameUserId);
+  if (cycles < cost) return { ok: false, cycles, cyclesUpdatedAt };
+  const upd = await client.query(
+    'UPDATE haulonaut_pilots SET cycles = cycles - $1 WHERE game_user_id = $2 AND cycles >= $1',
+    [cost, gameUserId]
+  );
+  if (!upd.affectedRows) return { ok: false, cycles, cyclesUpdatedAt };
+  return { ok: true, cycles: cycles - cost, cyclesUpdatedAt };
+}
+
 // Loads a character's current sector (with its description), every sector
 // directly reachable from it (haulonaut_sector_links stores both
 // directions of each connection, so this is a single indexed lookup), what
@@ -129,11 +212,12 @@ async function loadPilotLocation(client, gameUserId) {
 
   if (pilotResult.rowCount === 0) {
     const spawned = await spawnPilotAtRandomSector(client, gameUserId);
-    if (!spawned) return { currentSector: null, connectedSectors: [], features: [], playersHere: [], credits: 0, rations: 0, fuel: 0 };
+    if (!spawned) return { currentSector: null, connectedSectors: [], features: [], playersHere: [], credits: 0, rations: 0, fuel: 0, cycles: 0, cyclesUpdatedAt: 0 };
     pilotResult = { rows: [spawned] };
   }
 
   const { credits, rations, fuel, ...currentSector } = pilotResult.rows[0];
+  const { cycles, cyclesUpdatedAt } = await replenishCycles(client, gameUserId);
 
   const linksResult = await client.query(
     `SELECT hs.id, hs.sector_number
@@ -175,7 +259,9 @@ async function loadPilotLocation(client, gameUserId) {
     playersHere: playersResult.rows,
     credits,
     rations,
-    fuel
+    fuel,
+    cycles,
+    cyclesUpdatedAt
   };
 }
 
@@ -491,11 +577,11 @@ router.get('/:gameKey/characters/:id', authenticate, async (req, res) => {
 
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
 
-    const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel } = await loadPilotLocation(client, req.params.id);
+    const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel, cycles, cyclesUpdatedAt } = await loadPilotLocation(client, req.params.id);
     const inventory = await loadInventory(client, req.params.id);
     const { dockedFeatureId, onSurface, surfaceMap } = await loadSurfaceState(client, req.params.id);
 
-    res.json({ character: result.rows[0], currentSector, connectedSectors, features, playersHere, credits, rations, fuel, inventory, dockedFeatureId, onSurface, surfaceMap });
+    res.json({ character: result.rows[0], currentSector, connectedSectors, features, playersHere, credits, rations, fuel, cycles, cyclesUpdatedAt, inventory, dockedFeatureId, onSurface, surfaceMap });
   } catch (err) {
     console.error('Error loading character:', err);
     res.status(500).json({ message: 'Failed to load character' });
@@ -560,6 +646,15 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
       return res.status(409).json({ message: 'Out of fuel -- cannot warp' });
     }
 
+    // A warp costs a cycle (see MAX_CYCLES). Checked last, after the move is
+    // known to be otherwise valid, so nothing is spent on a warp that would
+    // have been rejected anyway. The client blocks this case up front too,
+    // but it's re-enforced here like every other movement guard.
+    const spent = await spendCycles(client, req.params.id, WARP_CYCLE_COST);
+    if (!spent.ok) {
+      return res.status(409).json({ message: 'Out of cycles -- wait for replenishment', cycles: spent.cycles, cyclesUpdatedAt: spent.cyclesUpdatedAt });
+    }
+
     // Every warp costs a small, fixed amount of rations and fuel (clamped
     // at 0 rather than going negative) -- credits aren't touched by
     // movement, only by whatever the player chooses to spend them on
@@ -576,9 +671,9 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
     await markSectorVisited(client, req.params.id, toSectorId);
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
 
-    const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel } = await loadPilotLocation(client, req.params.id);
+    const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel, cycles, cyclesUpdatedAt } = await loadPilotLocation(client, req.params.id);
 
-    res.json({ currentSector, connectedSectors, features, playersHere, credits, rations, fuel, dockedFeatureId: null, onSurface: false, surfaceMap: null });
+    res.json({ currentSector, connectedSectors, features, playersHere, credits, rations, fuel, cycles, cyclesUpdatedAt, dockedFeatureId: null, onSurface: false, surfaceMap: null });
   } catch (err) {
     console.error('Error navigating:', err);
     res.status(500).json({ message: 'Failed to navigate' });
@@ -675,9 +770,9 @@ router.post('/:gameKey/characters/:id/drift', authenticate, async (req, res) => 
     await markSectorVisited(client, req.params.id, nextSectorId);
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
 
-    const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel } = await loadPilotLocation(client, req.params.id);
+    const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel, cycles, cyclesUpdatedAt } = await loadPilotLocation(client, req.params.id);
 
-    res.json({ currentSector, connectedSectors, features, playersHere, credits, rations, fuel });
+    res.json({ currentSector, connectedSectors, features, playersHere, credits, rations, fuel, cycles, cyclesUpdatedAt });
   } catch (err) {
     console.error('Error drifting:', err);
     res.status(500).json({ message: 'Failed to drift' });
@@ -785,12 +880,17 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
 
     const pilotAfter = await client.query('SELECT credits, rations, fuel FROM haulonaut_pilots WHERE game_user_id = $1', [req.params.id]);
     const inventory = await loadInventory(client, req.params.id);
+    // Trading never spends a cycle -- this is just so the HUD stays in sync
+    // (and picks up any time-based replenishment) after a purchase.
+    const { cycles, cyclesUpdatedAt } = await replenishCycles(client, req.params.id);
 
     res.json({
       message: `Purchased ${quantity} ${item.name}`,
       credits: pilotAfter.rows[0].credits,
       rations: pilotAfter.rows[0].rations,
       fuel: pilotAfter.rows[0].fuel,
+      cycles,
+      cyclesUpdatedAt,
       inventory
     });
   } catch (err) {
@@ -809,7 +909,10 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
  * reaches its 'docked' phase, independent of whether they go on to exit
  * the craft. The planet is derived server-side from current_sector_id
  * (never trusted from the client). Idempotent: landing again while already
- * docked at the same planet just re-confirms it.
+ * docked at the same planet just re-confirms it -- and, because it's
+ * idempotent, only a landing that actually changes docked_feature_id
+ * spends a cycle (so a retried/duplicate call after a network hiccup
+ * doesn't double-charge).
  */
 router.post('/:gameKey/characters/:id/dock', authenticate, async (req, res) => {
   const client = await getClient();
@@ -824,7 +927,7 @@ router.post('/:gameKey/characters/:id/dock', authenticate, async (req, res) => {
     if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
 
     const pilotResult = await client.query(
-      'SELECT current_sector_id FROM haulonaut_pilots WHERE game_user_id = $1',
+      'SELECT current_sector_id, docked_feature_id FROM haulonaut_pilots WHERE game_user_id = $1',
       [req.params.id]
     );
     if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
@@ -839,11 +942,28 @@ router.post('/:gameKey/characters/:id/dock', authenticate, async (req, res) => {
     if (featureResult.rowCount === 0) return res.status(409).json({ message: 'No planet in this sector' });
     const featureId = featureResult.rows[0].id;
 
+    // A genuinely new landing spends a cycle; re-confirming a dock the pilot
+    // is already parked at (idempotent retry, or re-boarding then re-landing
+    // without launching) spends nothing. The client blocks starting the
+    // descent with no cycle in hand, so hitting the out-of-cycles branch
+    // here is an edge case -- but it's still enforced rather than trusted.
+    const alreadyDocked = pilotResult.rows[0].docked_feature_id === featureId;
+    let cycleState;
+    if (alreadyDocked) {
+      cycleState = await replenishCycles(client, req.params.id);
+    } else {
+      const spent = await spendCycles(client, req.params.id, DOCK_CYCLE_COST);
+      if (!spent.ok) {
+        return res.status(409).json({ message: 'Out of cycles -- cannot land', cycles: spent.cycles, cyclesUpdatedAt: spent.cyclesUpdatedAt });
+      }
+      cycleState = spent;
+    }
+
     // on_surface reset to 0 -- a fresh dock always starts back inside the
     // ship; stepping out is a separate, later /exit-craft call.
     await client.query('UPDATE haulonaut_pilots SET docked_feature_id = $1, on_surface = 0 WHERE game_user_id = $2', [featureId, req.params.id]);
 
-    res.json({ dockedFeatureId: featureId });
+    res.json({ dockedFeatureId: featureId, cycles: cycleState.cycles, cyclesUpdatedAt: cycleState.cyclesUpdatedAt });
   } catch (err) {
     console.error('Error docking:', err);
     res.status(500).json({ message: 'Failed to dock' });
@@ -929,7 +1049,12 @@ router.post('/:gameKey/characters/:id/exit-craft', authenticate, async (req, res
       ? (await loadSurfaceState(client, req.params.id)).surfaceMap
       : await createSurfaceMap(client, req.params.id, featureId);
 
-    res.json({ dockedFeatureId: featureId, surfaceMap });
+    // Stepping out of the ship costs nothing -- only buggy moves onto new
+    // cells do (see /drive-buggy). Returned so the surface HUD opens with a
+    // current cycle count.
+    const { cycles, cyclesUpdatedAt } = await replenishCycles(client, req.params.id);
+
+    res.json({ dockedFeatureId: featureId, surfaceMap, cycles, cyclesUpdatedAt });
   } catch (err) {
     console.error('Error exiting craft:', err);
     res.status(500).json({ message: 'Failed to exit craft' });
@@ -1000,6 +1125,11 @@ router.post('/:gameKey/characters/:id/return-to-ship', authenticate, async (req,
  * utilities/haulonautLandingEvents.js -- the same mechanic the old manual
  * "Explore Surface" button used to trigger, now automatic on arrival
  * instead. Re-visiting an already-visited cell rolls nothing.
+ *
+ * Every move that actually changes the buggy's cell spends one cycle
+ * (whether or not the destination is new). A move that only bumps the grid
+ * edge changes nothing and stays a free 200 no-op -- including when the
+ * pilot is out of cycles.
  */
 router.post('/:gameKey/characters/:id/drive-buggy', authenticate, async (req, res) => {
   const direction = req.body.direction;
@@ -1042,6 +1172,22 @@ router.post('/:gameKey/characters/:id/drive-buggy', authenticate, async (req, re
     const [dx, dy] = SURFACE_MAP_DIRECTIONS[direction];
     const newX = Math.min(Math.max(row.buggy_x + dx, 0), row.grid_width - 1);
     const newY = Math.min(Math.max(row.buggy_y + dy, 0), row.grid_height - 1);
+    const moved = newX !== row.buggy_x || newY !== row.buggy_y;
+
+    // A real move costs a cycle; a grid-edge bump (moved === false) is left
+    // as a free no-op below. Spent up front so nothing else is written on a
+    // move the pilot can't afford.
+    let cycleState;
+    if (moved) {
+      const spent = await spendCycles(client, req.params.id, BUGGY_CYCLE_COST);
+      if (!spent.ok) {
+        return res.status(409).json({ message: 'Out of cycles -- wait for replenishment', cycles: spent.cycles, cyclesUpdatedAt: spent.cyclesUpdatedAt });
+      }
+      cycleState = spent;
+    } else {
+      cycleState = await replenishCycles(client, req.params.id);
+    }
+
     const revealed = revealAround(JSON.parse(row.revealed_cells), newX, newY, row.grid_width, row.grid_height, SURFACE_MAP_REVEAL_RADIUS);
 
     const visitedIndices = JSON.parse(row.visited_cells);
@@ -1081,6 +1227,8 @@ router.post('/:gameKey/characters/:id/drive-buggy', authenticate, async (req, re
       atShip: newX === row.ship_x && newY === row.ship_y,
       narration,
       effects,
+      cycles: cycleState.cycles,
+      cyclesUpdatedAt: cycleState.cyclesUpdatedAt,
       ...(pilotAfter || {})
     });
   } catch (err) {
@@ -1148,6 +1296,38 @@ router.get('/:gameKey/characters/:id/known-locations', authenticate, async (req,
   } catch (err) {
     console.error('Error loading known locations:', err);
     res.status(500).json({ message: 'Failed to load known locations' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * GET /api/games/:gameKey/characters/:id/cycles
+ * The pilot's current cycle balance after time-based replenishment, plus
+ * the accrual anchor (cyclesUpdatedAt, epoch seconds) the client's own
+ * countdown runs off. Read-only apart from the replenishment write
+ * replenishCycles does. The client polls this on a slow timer / on tab
+ * refocus to stay in sync with wall-clock replenishment without needing a
+ * full character reload; every action endpoint already returns the same
+ * two fields.
+ */
+router.get('/:gameKey/characters/:id/cycles', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+
+    const { cycles, cyclesUpdatedAt } = await replenishCycles(client, req.params.id);
+    res.json({ cycles, cyclesUpdatedAt, maxCycles: MAX_CYCLES, replenishSeconds: CYCLE_REPLENISH_SECONDS });
+  } catch (err) {
+    console.error('Error loading cycles:', err);
+    res.status(500).json({ message: 'Failed to load cycles' });
   } finally {
     client.release();
   }

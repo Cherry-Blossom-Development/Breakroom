@@ -15,6 +15,16 @@ const playersHere = ref([])
 const credits = ref(0)
 const rations = ref(0)
 const fuel = ref(0)
+// Cycles -- a wall-clock action budget (see backend migration 066). `cycles`
+// / `cyclesUpdatedAt` (epoch seconds) are the server's last-known balance
+// and accrual anchor; `displayedCycles` / `nextCycleSeconds` below re-run
+// the server's replenishment math locally against `nowMs` so the HUD keeps
+// counting up between the syncs every real action already does.
+const cycles = ref(0)
+const cyclesUpdatedAt = ref(0)
+const nowMs = ref(Date.now())
+const MAX_CYCLES = 24
+const CYCLE_REPLENISH_SECONDS = 3600
 const inventory = ref([])
 const itemsCatalog = ref([])
 const knownLocations = ref([])
@@ -87,6 +97,36 @@ const buggyAtShip = computed(() =>
 // performDrift(); once false (refueled, or arrived at a planet), it
 // freezes/resets instead.
 const driftEligible = computed(() => fuel.value <= 0 && !planetFeature.value)
+
+// Client-side mirror of the backend's replenishCycles(): the last synced
+// balance plus whatever whole cycles have accrued since `cyclesUpdatedAt`,
+// capped at MAX_CYCLES. Lets the HUD tick up on its own between server
+// syncs -- every action endpoint re-sends both fields, and refreshCycles()
+// re-pulls them on tab refocus.
+const displayedCycles = computed(() => {
+  if (cycles.value >= MAX_CYCLES) return MAX_CYCLES
+  const elapsed = nowMs.value / 1000 - cyclesUpdatedAt.value
+  const earned = Math.max(0, Math.floor(elapsed / CYCLE_REPLENISH_SECONDS))
+  return Math.min(MAX_CYCLES, cycles.value + earned)
+})
+
+// Whole seconds until the next cycle lands, or null at the cap. The anchor
+// only ever advances in whole intervals server-side, so the remainder of
+// (elapsed % interval) is genuine progress into the current interval.
+const nextCycleSeconds = computed(() => {
+  if (displayedCycles.value >= MAX_CYCLES) return null
+  const elapsed = nowMs.value / 1000 - cyclesUpdatedAt.value
+  const intoInterval = ((elapsed % CYCLE_REPLENISH_SECONDS) + CYCLE_REPLENISH_SECONDS) % CYCLE_REPLENISH_SECONDS
+  return Math.max(0, Math.ceil(CYCLE_REPLENISH_SECONDS - intoInterval))
+})
+
+const outOfCycles = computed(() => displayedCycles.value < 1)
+
+const cycleCountdownLabel = computed(() => {
+  const s = nextCycleSeconds.value
+  if (s == null) return ''
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+})
 
 // Same deterministic hue the space-view planet sphere already uses, reused
 // here so the sky color during/after atmospheric entry visibly matches the
@@ -366,6 +406,7 @@ async function purchaseItem(entry) {
     credits.value = data.credits
     rations.value = data.rations
     fuel.value = data.fuel
+    applyCycleState(data)
     inventory.value = data.inventory || []
     logLines.value.push(`Purchased 1 ${entry.name}. (-${entry.base_price} Credits)`)
     scrollLogToBottom()
@@ -622,6 +663,15 @@ function rewindLandingDebug10s() {
 }
 
 async function beginLandingSequence() {
+  // Landing spends a cycle (charged server-side at POST /dock, when the
+  // descent animation reaches 'docked'). Refuse to even start the ~17s
+  // montage without one in hand rather than let the player watch it play
+  // and then fail at the end.
+  if (outOfCycles.value) {
+    logLines.value.push(`Cannot begin descent: out of cycles. Next replenishes in ${cycleCountdownLabel.value}.`)
+    scrollLogToBottom()
+    return
+  }
   viewportMode.value = 'landing-sequence'
   selectedIndex.value = -1
   surfaceLog.value = []
@@ -682,7 +732,17 @@ async function notifyDocked() {
       credentials: 'include'
     })
     const data = await res.json()
-    if (res.ok) dockedFeatureId.value = data.dockedFeatureId
+    if (res.ok) {
+      dockedFeatureId.value = data.dockedFeatureId
+      applyCycleState(data)
+    } else if (data.cycles !== undefined) {
+      // Edge case -- cycles ran out during the descent animation. Surface it
+      // rather than silently swallowing it; the pilot stays shown as docked
+      // client-side but a reload would correctly put them back in orbit.
+      applyCycleState(data)
+      logLines.value.push('Docking clamps failed: out of cycles.')
+      scrollLogToBottom()
+    }
   } catch {
     // Best-effort -- see comment above.
   }
@@ -803,6 +863,7 @@ async function loadSurfaceMap() {
     if (!res.ok) throw new Error(data.message || 'Failed to exit craft')
     dockedFeatureId.value = data.dockedFeatureId
     surfaceMap.value = data.surfaceMap
+    applyCycleState(data)
   } catch (err) {
     mapError.value = err.message
   } finally {
@@ -842,6 +903,13 @@ async function returnToShip() {
 // hold-to-repeat.
 async function moveBuggy(direction) {
   if (buggyMoving.value || !surfaceMap.value) return
+  // Every buggy move to a new cell costs a cycle (server-enforced). Block
+  // all driving at zero -- which can strand the buggy away from the ship
+  // until a cycle replenishes; that's the intended weight of the budget.
+  if (outOfCycles.value) {
+    mapError.value = `Out of cycles -- next in ${cycleCountdownLabel.value}`
+    return
+  }
   buggyMoving.value = true
   try {
     const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/drive-buggy`, {
@@ -858,6 +926,7 @@ async function moveBuggy(direction) {
     // happen.
     if (data.buggyX !== surfaceMap.value.buggyX || data.buggyY !== surfaceMap.value.buggyY) buggyMoveCount.value++
     surfaceMap.value = { ...surfaceMap.value, buggyX: data.buggyX, buggyY: data.buggyY, revealed: data.revealed }
+    applyCycleState(data)
     // Arriving at a cell for the first time rolls one landing event
     // server-side (see POST /drive-buggy) -- narration is only present
     // when that happened.
@@ -903,6 +972,28 @@ function submitTerminalCommand() {
   scrollLogToBottom()
 }
 
+// Every action endpoint (navigate, dock, drive-buggy, purchase, drift,
+// exit-craft) re-sends the pilot's cycle balance and accrual anchor
+// alongside credits/rations/fuel -- fold whichever are present into the
+// local refs so displayedCycles/nextCycleSeconds stay accurate.
+function applyCycleState(data) {
+  if (typeof data.cycles === 'number') cycles.value = data.cycles
+  if (typeof data.cyclesUpdatedAt === 'number') cyclesUpdatedAt.value = data.cyclesUpdatedAt
+}
+
+// Lightweight re-sync (no full character reload) -- called on tab refocus
+// so a session left open for hours picks up wall-clock replenishment the
+// server has been accruing the whole time.
+async function refreshCycles() {
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/cycles`, { credentials: 'include' })
+    if (!res.ok) return
+    applyCycleState(await res.json())
+  } catch {
+    // Non-fatal -- the local countdown keeps running off the last sync.
+  }
+}
+
 async function loadCharacter() {
   loading.value = true
   error.value = ''
@@ -918,6 +1009,8 @@ async function loadCharacter() {
     credits.value = data.credits || 0
     rations.value = data.rations || 0
     fuel.value = data.fuel || 0
+    applyCycleState(data)
+    nowMs.value = Date.now()
     inventory.value = data.inventory || []
     // Restores "landed at a planet" across reloads/logins -- see
     // notifyDocked()/exitCraft()/returnToShip() for where these are also
@@ -974,6 +1067,15 @@ async function loadKnownLocations() {
 // blindly continuing.
 async function navigateTo(sector) {
   if (navigating.value) return false
+  // A warp costs a cycle -- blocked up front (the server re-enforces this)
+  // so an autopilot course also stops here rather than firing a doomed
+  // request per hop.
+  if (outOfCycles.value) {
+    navError.value = `Out of cycles -- next in ${cycleCountdownLabel.value}`
+    logLines.value.push(`Warp drive offline: out of cycles. Next replenishes in ${cycleCountdownLabel.value}.`)
+    scrollLogToBottom()
+    return false
+  }
   navigating.value = true
   navError.value = ''
   try {
@@ -993,6 +1095,7 @@ async function navigateTo(sector) {
     credits.value = data.credits || 0
     rations.value = data.rations || 0
     fuel.value = data.fuel || 0
+    applyCycleState(data)
     // Warping always undocks server-side (see /navigate) -- mirror that
     // here rather than leaving a stale dockedFeatureId/landingPhase behind
     // from wherever the ship was landed before this warp.
@@ -1077,6 +1180,11 @@ const DRIFT_THRESHOLD = 30
 // watching. A backgrounded tab is frozen in place, not silently racking
 // up drifts to unleash all at once when it regains focus.
 function driftTick() {
+  // Advance the clock the cycle countdown / displayedCycles read off,
+  // regardless of tab visibility or drift state (this is the only 1s timer
+  // in the view). A backgrounded tab throttles this, then snaps correct on
+  // the visibilitychange re-sync.
+  nowMs.value = Date.now()
   if (document.visibilityState !== 'visible') return
   if (!driftEligible.value) {
     if (driftVariance.value !== 0) driftVariance.value = 0
@@ -1110,6 +1218,7 @@ async function performDrift() {
     credits.value = data.credits || 0
     rations.value = data.rations || 0
     fuel.value = data.fuel || 0
+    applyCycleState(data)
     viewportMode.value = 'space'
     selectedIndex.value = -1
     regenerateStarfield()
@@ -1136,6 +1245,20 @@ watch(fuel, (newFuel, oldFuel) => {
     logLines.value.push('Fuel restored. Drift variance stabilizing.')
     scrollLogToBottom()
   }
+})
+
+// Announces a cycle coming back after the budget was empty -- gated on a
+// real prior "0" seen during play (lastSeenCycles starts null so the
+// initial mount jump from 0 to the loaded value stays silent). Depletion
+// itself is already narrated at each blocked action (navigateTo,
+// beginLandingSequence, moveBuggy).
+let lastSeenCycles = null
+watch(displayedCycles, (n) => {
+  if (lastSeenCycles === 0 && n > 0) {
+    logLines.value.push(`Cycle replenished. ${n}/${MAX_CYCLES} available.`)
+    scrollLogToBottom()
+  }
+  lastSeenCycles = n
 })
 
 function backToGames() {
@@ -1333,16 +1456,24 @@ function onKeydown(e) {
 
 let driftIntervalId = null
 
+// Re-pull the cycle balance when the tab regains focus -- a session parked
+// in the background for hours has real replenishment waiting server-side.
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible') refreshCycles()
+}
+
 onMounted(async () => {
   await Promise.all([loadCharacter(), loadItemsCatalog()])
   syncTerminalFocus()
   window.addEventListener('keydown', onKeydown)
+  document.addEventListener('visibilitychange', onVisibilityChange)
   driftIntervalId = setInterval(driftTick, 1000)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('resize', measureLandingScene)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
   stopLandingDebugLoop()
   if (driftIntervalId) clearInterval(driftIntervalId)
   if (landingTimeoutId) clearTimeout(landingTimeoutId)
@@ -1427,6 +1558,7 @@ onUnmounted(() => {
           <span class="resource-stat"><span class="resource-icon" aria-hidden="true">&#164;</span>{{ credits.toLocaleString() }} Credits</span>
           <span class="resource-stat"><span class="resource-icon" aria-hidden="true">&#8801;</span>{{ rations.toLocaleString() }} Rations</span>
           <span class="resource-stat"><span class="resource-icon" aria-hidden="true">&#9636;</span>{{ fuel.toLocaleString() }} Fuel</span>
+          <span class="resource-stat" :class="{ 'resource-empty': outOfCycles }"><span class="resource-icon" aria-hidden="true">&#8635;</span>{{ displayedCycles }}/{{ MAX_CYCLES }} Cycles<span v-if="nextCycleSeconds !== null" class="cycle-timer">(+1 in {{ cycleCountdownLabel }})</span></span>
         </div>
         <div class="surface-log">
           <p v-for="(line, i) in surfaceLog" :key="i" class="surface-log-line">{{ line }}</p>
@@ -1435,16 +1567,17 @@ onUnmounted(() => {
       </div>
 
       <div class="surface-controls">
-        <button class="surface-dir-btn surface-dir-north" @click="moveBuggy('up')" :disabled="buggyMoving">North</button>
+        <button class="surface-dir-btn surface-dir-north" @click="moveBuggy('up')" :disabled="buggyMoving || outOfCycles">North</button>
         <div class="surface-dir-row">
-          <button class="surface-dir-btn" @click="moveBuggy('left')" :disabled="buggyMoving">West</button>
+          <button class="surface-dir-btn" @click="moveBuggy('left')" :disabled="buggyMoving || outOfCycles">West</button>
           <button v-if="buggyAtShip" class="surface-btn surface-dock-btn" @click="returnToShip">
             <span class="surface-btn-hotkey" aria-hidden="true">1</span> Dock with Ship
           </button>
-          <button class="surface-dir-btn" @click="moveBuggy('right')" :disabled="buggyMoving">East</button>
+          <button class="surface-dir-btn" @click="moveBuggy('right')" :disabled="buggyMoving || outOfCycles">East</button>
         </div>
-        <button class="surface-dir-btn surface-dir-south" @click="moveBuggy('down')" :disabled="buggyMoving">South</button>
-        <p class="surface-controls-hint">(arrow keys also work)</p>
+        <button class="surface-dir-btn surface-dir-south" @click="moveBuggy('down')" :disabled="buggyMoving || outOfCycles">South</button>
+        <p v-if="outOfCycles" class="surface-controls-hint surface-cycles-out">Out of cycles &mdash; the buggy is parked. +1 in {{ cycleCountdownLabel }}</p>
+        <p v-else class="surface-controls-hint">(arrow keys also work)</p>
       </div>
 
       <button class="surface-exit-link" @click="backToGames">Exit to Games List</button>
@@ -1470,6 +1603,9 @@ onUnmounted(() => {
                   </span>
                   <span class="resource-stat" :class="{ 'resource-empty': fuel <= 0 }">
                     <span class="resource-icon" aria-hidden="true">&#9636;</span>{{ fuel.toLocaleString() }} <span class="resource-unit">Fuel</span>
+                  </span>
+                  <span class="resource-stat" :class="{ 'resource-empty': outOfCycles }">
+                    <span class="resource-icon" aria-hidden="true">&#8635;</span>{{ displayedCycles }}<span class="resource-unit">/{{ MAX_CYCLES }} Cycles</span><span v-if="nextCycleSeconds !== null" class="cycle-timer">+1 in {{ cycleCountdownLabel }}</span>
                   </span>
                   <span v-if="driftEligible" class="resource-stat drift-stat">
                     <span class="resource-icon" aria-hidden="true">&#9650;</span>{{ driftVariance }} <span class="resource-unit">Drift Variance</span>
@@ -1565,14 +1701,16 @@ onUnmounted(() => {
                         v-for="(entry, i) in planetMenuItems"
                         :key="entry.__leave ? '__leave' : entry.key"
                         class="outpost-item-btn"
-                        :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.__leave }"
+                        :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.__leave, 'outpost-item-blocked': entry.key === 'land' && outOfCycles }"
                         :aria-pressed="selectedIndex === i"
                         @click="activateViewportMenuItem(entry)"
                       >
                         <span class="outpost-item-hotkey" aria-hidden="true">{{ i + 1 }}</span>
                         <span class="outpost-item-name">{{ entry.name }}</span>
+                        <span v-if="entry.key === 'land'" class="outpost-item-price" aria-hidden="true">1 cycle</span>
                       </button>
                     </div>
+                    <p v-if="outOfCycles" class="outpost-error">Out of cycles &mdash; cannot land. +1 in {{ cycleCountdownLabel }}</p>
                   </div>
 
                   <div v-else-if="viewportMode === 'landing-sequence'" class="tui-panel-body landing-sequence-body">
@@ -1749,7 +1887,7 @@ onUnmounted(() => {
                           :key="s.id"
                           class="warp-btn"
                           :class="{ selected: selectedIndex === i, visited: s.visited }"
-                          :disabled="navigating || landingSequenceActive"
+                          :disabled="navigating || landingSequenceActive || outOfCycles"
                           :aria-label="`Warp to Sector ${s.sector_number} (key ${i + 1})${s.visited ? ', visited' : ', unexplored'}`"
                           :aria-pressed="selectedIndex === i"
                           @click="manualNavigateTo(s)"
@@ -1759,6 +1897,7 @@ onUnmounted(() => {
                       </template>
                       <span v-else class="navbar-none">no warps available</span>
                     </div>
+                    <p v-if="outOfCycles" class="navbar-cycles-out">Out of cycles &mdash; warp offline. +1 in {{ cycleCountdownLabel }}</p>
                   </div>
                 </div>
               </div>
@@ -2053,6 +2192,19 @@ onUnmounted(() => {
   color: #ff8a8a;
 }
 
+/* Cycles countdown -- the "+1 in m:ss" tail on the Cycles stat. Muted like
+   a unit label; picks up the red when the budget is empty. */
+.cycle-timer {
+  margin-left: 6px;
+  font-size: 0.62rem;
+  color: #5fae7c;
+  letter-spacing: 0.04em;
+}
+
+.resource-stat.resource-empty .cycle-timer {
+  color: #ff8a8a;
+}
+
 /* Drift Variance: only ever shown while driftEligible -- the label text
    and the blink are the primary cues, with the bright red as emphasis on
    top rather than the only signal. */
@@ -2325,6 +2477,10 @@ onUnmounted(() => {
 
 .outpost-item-price {
   flex-shrink: 0;
+}
+
+.outpost-item-blocked {
+  opacity: 0.45;
 }
 
 .outpost-item-btn:hover:not(:disabled) {
@@ -2801,6 +2957,12 @@ onUnmounted(() => {
   font-size: 0.8rem;
   color: #5fae7c;
   font-style: italic;
+}
+
+.navbar-cycles-out {
+  margin: 6px 0 0;
+  font-size: 0.7rem;
+  color: #ff8a8a;
 }
 
 .warp-btn {
@@ -3376,6 +3538,11 @@ onUnmounted(() => {
   font-size: 0.65rem;
   font-style: italic;
   color: rgba(255, 255, 255, 0.55);
+}
+
+.surface-cycles-out {
+  color: #ffb4b4;
+  font-style: normal;
 }
 
 .surface-btn {
