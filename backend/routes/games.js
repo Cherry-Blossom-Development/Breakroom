@@ -10,20 +10,32 @@ require('dotenv').config();
 const SECRET_KEY = process.env.SECRET_KEY;
 
 // A new pilot's starting stake, and what a single warp costs -- must stay
-// in sync with the haulonaut_pilots column defaults in migrations 059 and
-// 061, since both the self-heal spawn path and character creation insert a
-// pilot row without specifying credits/rations/fuel and rely on those
-// defaults matching these numbers. Rations and fuel both drain on warp (a
-// ship needs to feed its crew and burn reaction mass regardless of
-// distance); credits aren't touched by movement at all -- they'll only
-// ever be spent on something the player actually chooses to buy. Rations
-// and fuel are clamped at 0 in the /navigate UPDATE rather than going
-// negative -- ways to replenish them are a separate follow-up.
+// in sync with the haulonaut_pilots column defaults in migrations 059,
+// 061, and 067, since both the self-heal spawn path and character creation
+// insert a pilot row without specifying credits/rations/fuel/health and
+// rely on those defaults matching these numbers. Rations and fuel both
+// drain on warp (a ship needs to feed its crew and burn reaction mass
+// regardless of distance); credits aren't touched by movement at all --
+// they'll only ever be spent on something the player actually chooses to
+// buy. Rations and fuel are clamped at 0 in the /navigate UPDATE rather
+// than going negative -- ways to replenish them are a separate follow-up.
 const STARTING_CREDITS = 1000;
 const STARTING_RATIONS = 100;
 const STARTING_FUEL = 100;
 const WARP_RATIONS_COST = 1;
 const WARP_FUEL_COST = 1;
+
+// Crew health (see migration 067). Rations no longer block a warp -- fuel
+// and cycles do -- but each warp feeds the crew from that warp's rations
+// draw or, if rations were already empty, starves them. Health hitting 0
+// kills the character (game_users.status -> 'dead'). STARTING_HEALTH /
+// MAX_HEALTH must match the haulonaut_pilots.health column default (100),
+// for the same self-heal-spawn / character-creation reason as the stats
+// above.
+const STARTING_HEALTH = 100;
+const MAX_HEALTH = 100;
+const WARP_HEALTH_REGEN = 3;
+const WARP_STARVATION_DAMAGE = 15;
 
 // Cycles -- a wall-clock action budget (see migration 066). A pilot holds
 // at most MAX_CYCLES and regains one every CYCLE_REPLENISH_SECONDS of real
@@ -190,6 +202,48 @@ async function spendCycles(client, gameUserId, cost) {
   return { ok: true, cycles: cycles - cost, cyclesUpdatedAt };
 }
 
+// Whether a character is still playable. Health hitting 0 on a starved warp
+// (see applyWarpHealth) flips game_users.status to 'dead'; every mutating
+// action rechecks this so a lost pilot can't keep warping, trading, or
+// driving the buggy. The GET character endpoint deliberately does NOT gate
+// on this -- the play page still needs to load to show the "lost" screen.
+async function isAlive(client, gameUserId) {
+  const r = await client.query('SELECT status FROM game_users WHERE id = $1', [gameUserId]);
+  return r.rowCount > 0 && r.rows[0].status === 'active';
+}
+
+// Applies one warp's effect on crew health and returns the new value plus
+// whether that warp just killed the character. `hadRations` is whether the
+// pilot had at least WARP_RATIONS_COST in stock *before* this warp's draw:
+// if so the crew eats and health ticks back up toward MAX_HEALTH; if not
+// the crew goes hungry and health drops by WARP_STARVATION_DAMAGE. Health
+// reaching 0 sets game_users.status = 'dead' / died_at (guarded on the row
+// still being 'active' so a racing second warp can't re-stamp died_at).
+async function applyWarpHealth(client, gameUserId, hadRations) {
+  if (hadRations) {
+    await client.query(
+      'UPDATE haulonaut_pilots SET health = LEAST($1, health + $2) WHERE game_user_id = $3',
+      [MAX_HEALTH, WARP_HEALTH_REGEN, gameUserId]
+    );
+  } else {
+    await client.query(
+      'UPDATE haulonaut_pilots SET health = GREATEST(0, health - $1) WHERE game_user_id = $2',
+      [WARP_STARVATION_DAMAGE, gameUserId]
+    );
+  }
+  const r = await client.query('SELECT health FROM haulonaut_pilots WHERE game_user_id = $1', [gameUserId]);
+  const health = Number(r.rows[0].health);
+  let died = false;
+  if (health <= 0) {
+    const upd = await client.query(
+      "UPDATE game_users SET status = 'dead', died_at = NOW() WHERE id = $1 AND status = 'active'",
+      [gameUserId]
+    );
+    died = upd.affectedRows > 0;
+  }
+  return { health, died };
+}
+
 // Loads a character's current sector (with its description), every sector
 // directly reachable from it (haulonaut_sector_links stores both
 // directions of each connection, so this is a single indexed lookup), what
@@ -203,7 +257,7 @@ async function spendCycles(client, gameUserId, cost) {
 // state to the player.
 async function loadPilotLocation(client, gameUserId) {
   let pilotResult = await client.query(
-    `SELECT hs.id, hs.sector_number, hs.description, hp.credits, hp.rations, hp.fuel
+    `SELECT hs.id, hs.sector_number, hs.description, hp.credits, hp.rations, hp.fuel, hp.health
      FROM haulonaut_pilots hp
      JOIN haulonaut_sectors hs ON hs.id = hp.current_sector_id
      WHERE hp.game_user_id = $1`,
@@ -212,11 +266,11 @@ async function loadPilotLocation(client, gameUserId) {
 
   if (pilotResult.rowCount === 0) {
     const spawned = await spawnPilotAtRandomSector(client, gameUserId);
-    if (!spawned) return { currentSector: null, connectedSectors: [], features: [], playersHere: [], credits: 0, rations: 0, fuel: 0, cycles: 0, cyclesUpdatedAt: 0 };
+    if (!spawned) return { currentSector: null, connectedSectors: [], features: [], playersHere: [], credits: 0, rations: 0, fuel: 0, health: 0, cycles: 0, cyclesUpdatedAt: 0 };
     pilotResult = { rows: [spawned] };
   }
 
-  const { credits, rations, fuel, ...currentSector } = pilotResult.rows[0];
+  const { credits, rations, fuel, health, ...currentSector } = pilotResult.rows[0];
   const { cycles, cyclesUpdatedAt } = await replenishCycles(client, gameUserId);
 
   const linksResult = await client.query(
@@ -260,6 +314,7 @@ async function loadPilotLocation(client, gameUserId) {
     credits,
     rations,
     fuel,
+    health,
     cycles,
     cyclesUpdatedAt
   };
@@ -424,7 +479,7 @@ async function spawnPilotAtRandomSector(client, gameUserId) {
   // credits/rations/fuel aren't re-fetched here -- a just-inserted pilot
   // always has the column defaults, which match these constants (see the
   // comment by their declaration).
-  return { ...randomSector.rows[0], credits: STARTING_CREDITS, rations: STARTING_RATIONS, fuel: STARTING_FUEL };
+  return { ...randomSector.rows[0], credits: STARTING_CREDITS, rations: STARTING_RATIONS, fuel: STARTING_FUEL, health: STARTING_HEALTH };
 }
 
 /**
@@ -577,11 +632,11 @@ router.get('/:gameKey/characters/:id', authenticate, async (req, res) => {
 
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
 
-    const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel, cycles, cyclesUpdatedAt } = await loadPilotLocation(client, req.params.id);
+    const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel, health, cycles, cyclesUpdatedAt } = await loadPilotLocation(client, req.params.id);
     const inventory = await loadInventory(client, req.params.id);
     const { dockedFeatureId, onSurface, surfaceMap } = await loadSurfaceState(client, req.params.id);
 
-    res.json({ character: result.rows[0], currentSector, connectedSectors, features, playersHere, credits, rations, fuel, cycles, cyclesUpdatedAt, inventory, dockedFeatureId, onSurface, surfaceMap });
+    res.json({ character: result.rows[0], currentSector, connectedSectors, features, playersHere, credits, rations, fuel, health, cycles, cyclesUpdatedAt, inventory, dockedFeatureId, onSurface, surfaceMap });
   } catch (err) {
     console.error('Error loading character:', err);
     res.status(500).json({ message: 'Failed to load character' });
@@ -611,6 +666,7 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
       [req.params.id, req.user.id, req.params.gameKey]
     );
     if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+    if (!(await isAlive(client, req.params.id))) return res.status(409).json({ message: 'This pilot is lost.' });
 
     const pilotResult = await client.query(
       'SELECT current_sector_id, on_surface, rations, fuel FROM haulonaut_pilots WHERE game_user_id = $1',
@@ -631,18 +687,15 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
     );
     if (linkCheck.rowCount === 0) return res.status(400).json({ message: 'That sector is not reachable from here' });
 
-    // A warp can't be afforded once either resource has actually hit 0 --
-    // checked against the cost (not just > 0) so this stays correct if
-    // either cost is ever tuned above 1. The hop that brings a resource
-    // down TO 0 is still allowed; it's the next one, starting from 0,
-    // that gets rejected here.
-    const outOfRations = pilot.rations < WARP_RATIONS_COST;
-    const outOfFuel = pilot.fuel < WARP_FUEL_COST;
-    if (outOfRations && outOfFuel) {
-      return res.status(409).json({ message: 'Out of rations and fuel -- cannot warp' });
-    } else if (outOfRations) {
-      return res.status(409).json({ message: 'Out of rations -- cannot warp' });
-    } else if (outOfFuel) {
+    // Fuel is the only consumable that gates a warp (alongside cycles,
+    // below) -- checked against the cost (not just > 0) so this stays
+    // correct if WARP_FUEL_COST is ever tuned above 1. The hop that brings
+    // fuel down TO 0 is still allowed; it's the next one, starting from 0,
+    // that gets rejected here. Rations deliberately do NOT block a warp any
+    // more: running dry on rations costs crew health instead (see
+    // applyWarpHealth after the move below).
+    const hadRations = pilot.rations >= WARP_RATIONS_COST;
+    if (pilot.fuel < WARP_FUEL_COST) {
       return res.status(409).json({ message: 'Out of fuel -- cannot warp' });
     }
 
@@ -671,9 +724,15 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
     await markSectorVisited(client, req.params.id, toSectorId);
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
 
-    const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel, cycles, cyclesUpdatedAt } = await loadPilotLocation(client, req.params.id);
+    // The crew eats out of this warp's rations draw, or starves if there
+    // was nothing to draw -- and a starved warp can drop health to 0 and
+    // kill the character outright. Done after the move: thematically the
+    // ship still completes the jump; the crew just may not survive it.
+    const { died } = await applyWarpHealth(client, req.params.id, hadRations);
 
-    res.json({ currentSector, connectedSectors, features, playersHere, credits, rations, fuel, cycles, cyclesUpdatedAt, dockedFeatureId: null, onSurface: false, surfaceMap: null });
+    const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel, health, cycles, cyclesUpdatedAt } = await loadPilotLocation(client, req.params.id);
+
+    res.json({ currentSector, connectedSectors, features, playersHere, credits, rations, fuel, health, died, cycles, cyclesUpdatedAt, dockedFeatureId: null, onSurface: false, surfaceMap: null });
   } catch (err) {
     console.error('Error navigating:', err);
     res.status(500).json({ message: 'Failed to navigate' });
@@ -709,6 +768,7 @@ router.post('/:gameKey/characters/:id/drift', authenticate, async (req, res) => 
       [req.params.id, req.user.id, req.params.gameKey]
     );
     if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+    if (!(await isAlive(client, req.params.id))) return res.status(409).json({ message: 'This pilot is lost.' });
     const instanceId = ownerCheck.rows[0].game_instance_id;
 
     const pilotResult = await client.query(
@@ -770,9 +830,9 @@ router.post('/:gameKey/characters/:id/drift', authenticate, async (req, res) => 
     await markSectorVisited(client, req.params.id, nextSectorId);
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
 
-    const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel, cycles, cyclesUpdatedAt } = await loadPilotLocation(client, req.params.id);
+    const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel, health, cycles, cyclesUpdatedAt } = await loadPilotLocation(client, req.params.id);
 
-    res.json({ currentSector, connectedSectors, features, playersHere, credits, rations, fuel, cycles, cyclesUpdatedAt });
+    res.json({ currentSector, connectedSectors, features, playersHere, credits, rations, fuel, health, cycles, cyclesUpdatedAt });
   } catch (err) {
     console.error('Error drifting:', err);
     res.status(500).json({ message: 'Failed to drift' });
@@ -837,6 +897,7 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
       [req.params.id, req.user.id, req.params.gameKey]
     );
     if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+    if (!(await isAlive(client, req.params.id))) return res.status(409).json({ message: 'This pilot is lost.' });
 
     const pilotResult = await client.query(
       'SELECT current_sector_id, credits FROM haulonaut_pilots WHERE game_user_id = $1',
@@ -878,7 +939,7 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
 
     await client.commit();
 
-    const pilotAfter = await client.query('SELECT credits, rations, fuel FROM haulonaut_pilots WHERE game_user_id = $1', [req.params.id]);
+    const pilotAfter = await client.query('SELECT credits, rations, fuel, health FROM haulonaut_pilots WHERE game_user_id = $1', [req.params.id]);
     const inventory = await loadInventory(client, req.params.id);
     // Trading never spends a cycle -- this is just so the HUD stays in sync
     // (and picks up any time-based replenishment) after a purchase.
@@ -889,6 +950,7 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
       credits: pilotAfter.rows[0].credits,
       rations: pilotAfter.rows[0].rations,
       fuel: pilotAfter.rows[0].fuel,
+      health: pilotAfter.rows[0].health,
       cycles,
       cyclesUpdatedAt,
       inventory
@@ -925,6 +987,7 @@ router.post('/:gameKey/characters/:id/dock', authenticate, async (req, res) => {
       [req.params.id, req.user.id, req.params.gameKey]
     );
     if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+    if (!(await isAlive(client, req.params.id))) return res.status(409).json({ message: 'This pilot is lost.' });
 
     const pilotResult = await client.query(
       'SELECT current_sector_id, docked_feature_id FROM haulonaut_pilots WHERE game_user_id = $1',

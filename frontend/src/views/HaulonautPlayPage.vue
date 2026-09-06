@@ -15,6 +15,16 @@ const playersHere = ref([])
 const credits = ref(0)
 const rations = ref(0)
 const fuel = ref(0)
+// Crew health (see backend migration 067). 0-100. Rations no longer block a
+// warp -- fuel and cycles do -- but warping with an empty larder starves the
+// crew and drops health; warping with rations in stock heals it back a
+// little. Health reaching 0 kills the character (see `dead` below).
+const health = ref(100)
+const MAX_HEALTH = 100
+// Flips true when the character has died (health hit 0 on a starved warp, or
+// they were already 'dead' on load) -- swaps the whole UI for the lost
+// screen and blocks every action.
+const dead = ref(false)
 // Cycles -- a wall-clock action budget (see backend migration 066). `cycles`
 // / `cyclesUpdatedAt` (epoch seconds) are the server's last-known balance
 // and accrual anchor; `displayedCycles` / `nextCycleSeconds` below re-run
@@ -121,6 +131,17 @@ const nextCycleSeconds = computed(() => {
 })
 
 const outOfCycles = computed(() => displayedCycles.value < 1)
+
+// Health HUD state -- the bar fill and stat color step from green to amber
+// to red as the crew's condition worsens. Threshold-based, same "colour is
+// a supplementary cue, not the only signal" posture as resource-empty.
+const healthLow = computed(() => health.value <= 50)
+const healthCritical = computed(() => health.value <= 25)
+const healthBarClass = computed(() => healthCritical.value ? 'health-critical' : healthLow.value ? 'health-low' : '')
+
+// Rations no longer stop a warp, but an empty larder means the next warp
+// will cost health -- surfaced up front so it isn't a silent penalty.
+const rationsEmpty = computed(() => rations.value <= 0)
 
 const cycleCountdownLabel = computed(() => {
   const s = nextCycleSeconds.value
@@ -406,7 +427,7 @@ async function purchaseItem(entry) {
     credits.value = data.credits
     rations.value = data.rations
     fuel.value = data.fuel
-    applyCycleState(data)
+    applyPilotState(data)
     inventory.value = data.inventory || []
     logLines.value.push(`Purchased 1 ${entry.name}. (-${entry.base_price} Credits)`)
     scrollLogToBottom()
@@ -734,12 +755,12 @@ async function notifyDocked() {
     const data = await res.json()
     if (res.ok) {
       dockedFeatureId.value = data.dockedFeatureId
-      applyCycleState(data)
+      applyPilotState(data)
     } else if (data.cycles !== undefined) {
       // Edge case -- cycles ran out during the descent animation. Surface it
       // rather than silently swallowing it; the pilot stays shown as docked
       // client-side but a reload would correctly put them back in orbit.
-      applyCycleState(data)
+      applyPilotState(data)
       logLines.value.push('Docking clamps failed: out of cycles.')
       scrollLogToBottom()
     }
@@ -863,7 +884,7 @@ async function loadSurfaceMap() {
     if (!res.ok) throw new Error(data.message || 'Failed to exit craft')
     dockedFeatureId.value = data.dockedFeatureId
     surfaceMap.value = data.surfaceMap
-    applyCycleState(data)
+    applyPilotState(data)
   } catch (err) {
     mapError.value = err.message
   } finally {
@@ -926,7 +947,7 @@ async function moveBuggy(direction) {
     // happen.
     if (data.buggyX !== surfaceMap.value.buggyX || data.buggyY !== surfaceMap.value.buggyY) buggyMoveCount.value++
     surfaceMap.value = { ...surfaceMap.value, buggyX: data.buggyX, buggyY: data.buggyY, revealed: data.revealed }
-    applyCycleState(data)
+    applyPilotState(data)
     // Arriving at a cell for the first time rolls one landing event
     // server-side (see POST /drive-buggy) -- narration is only present
     // when that happened.
@@ -975,10 +996,14 @@ function submitTerminalCommand() {
 // Every action endpoint (navigate, dock, drive-buggy, purchase, drift,
 // exit-craft) re-sends the pilot's cycle balance and accrual anchor
 // alongside credits/rations/fuel -- fold whichever are present into the
-// local refs so displayedCycles/nextCycleSeconds stay accurate.
-function applyCycleState(data) {
+// local refs so displayedCycles/nextCycleSeconds stay accurate. navigate,
+// drift, purchase and the character load also carry `health`; navigate
+// additionally carries `died` when that warp just killed the crew.
+function applyPilotState(data) {
   if (typeof data.cycles === 'number') cycles.value = data.cycles
   if (typeof data.cyclesUpdatedAt === 'number') cyclesUpdatedAt.value = data.cyclesUpdatedAt
+  if (typeof data.health === 'number') health.value = data.health
+  if (data.died) dead.value = true
 }
 
 // Lightweight re-sync (no full character reload) -- called on tab refocus
@@ -988,7 +1013,7 @@ async function refreshCycles() {
   try {
     const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/cycles`, { credentials: 'include' })
     if (!res.ok) return
-    applyCycleState(await res.json())
+    applyPilotState(await res.json())
   } catch {
     // Non-fatal -- the local countdown keeps running off the last sync.
   }
@@ -1009,7 +1034,11 @@ async function loadCharacter() {
     credits.value = data.credits || 0
     rations.value = data.rations || 0
     fuel.value = data.fuel || 0
-    applyCycleState(data)
+    applyPilotState(data)
+    // A character that died in an earlier session loads straight into the
+    // lost screen -- the server still 409s every action, this just skips
+    // showing a live-looking ship UI that can't do anything.
+    dead.value = data.character?.status === 'dead'
     nowMs.value = Date.now()
     inventory.value = data.inventory || []
     // Restores "landed at a planet" across reloads/logins -- see
@@ -1066,7 +1095,7 @@ async function loadKnownLocations() {
 // failed hop apart from a successful one and stop the course instead of
 // blindly continuing.
 async function navigateTo(sector) {
-  if (navigating.value) return false
+  if (navigating.value || dead.value) return false
   // A warp costs a cycle -- blocked up front (the server re-enforces this)
   // so an autopilot course also stops here rather than firing a doomed
   // request per hop.
@@ -1095,7 +1124,7 @@ async function navigateTo(sector) {
     credits.value = data.credits || 0
     rations.value = data.rations || 0
     fuel.value = data.fuel || 0
-    applyCycleState(data)
+    applyPilotState(data)
     // Warping always undocks server-side (see /navigate) -- mirror that
     // here rather than leaving a stale dockedFeatureId/landingPhase behind
     // from wherever the ship was landed before this warp.
@@ -1106,6 +1135,15 @@ async function navigateTo(sector) {
     viewportMode.value = 'space'
     regenerateStarfield()
     logLines.value.push(`Arrived in Sector ${data.currentSector.sector_number}.`)
+    // A starved warp can kill the crew mid-jump -- applyPilotState already
+    // flipped `dead`, which swaps in the lost screen; leave a final line in
+    // the log for continuity and stop any autopilot course here.
+    if (data.died) {
+      logLines.value.push('The crew did not survive the jump. Life support flatlined.')
+      traveling.value = false
+      scrollLogToBottom()
+      return false
+    }
     selectedIndex.value = -1
     scrollLogToBottom()
     return true
@@ -1185,7 +1223,7 @@ function driftTick() {
   // in the view). A backgrounded tab throttles this, then snaps correct on
   // the visibilitychange re-sync.
   nowMs.value = Date.now()
-  if (document.visibilityState !== 'visible') return
+  if (document.visibilityState !== 'visible' || dead.value) return
   if (!driftEligible.value) {
     if (driftVariance.value !== 0) driftVariance.value = 0
     return
@@ -1218,7 +1256,7 @@ async function performDrift() {
     credits.value = data.credits || 0
     rations.value = data.rations || 0
     fuel.value = data.fuel || 0
-    applyCycleState(data)
+    applyPilotState(data)
     viewportMode.value = 'space'
     selectedIndex.value = -1
     regenerateStarfield()
@@ -1243,6 +1281,31 @@ watch(fuel, (newFuel, oldFuel) => {
     scrollLogToBottom()
   } else if (newFuel > 0 && oldFuel <= 0) {
     logLines.value.push('Fuel restored. Drift variance stabilizing.')
+    scrollLogToBottom()
+  }
+})
+
+// Rations running dry no longer strands the ship -- it can still warp --
+// but every warp from here on will cost crew health until the larder is
+// restocked. Logged once on each crossing so the consequence isn't silent.
+watch(rations, (newRations, oldRations) => {
+  if (newRations <= 0 && oldRations > 0) {
+    logLines.value.push('WARNING: Rations depleted. The crew goes hungry -- warping now costs health.')
+    scrollLogToBottom()
+  } else if (newRations > 0 && oldRations <= 0) {
+    logLines.value.push('Rations restocked. The crew eats again.')
+    scrollLogToBottom()
+  }
+})
+
+// Health milestones -- a hurt/critical warning on the way down, gated so
+// each fires once per crossing. Death itself is narrated in navigateTo.
+watch(health, (newHealth, oldHealth) => {
+  if (newHealth <= 25 && oldHealth > 25 && newHealth > 0) {
+    logLines.value.push('CRITICAL: Crew condition failing. Restock rations before the next warp.')
+    scrollLogToBottom()
+  } else if (newHealth <= 50 && oldHealth > 50) {
+    logLines.value.push('WARNING: Crew health is dropping.')
     scrollLogToBottom()
   }
 })
@@ -1489,6 +1552,17 @@ onUnmounted(() => {
       <button class="exit-link" @click="backToGames">Back to Games</button>
     </div>
 
+    <!-- Lost screen: the crew starved to death on a warp with no rations
+         (health hit 0), or this character was already dead on load. Every
+         server action 409s for a dead pilot; this replaces the whole live
+         UI with an end-state rather than a ship that can't do anything. -->
+    <div v-else-if="dead" class="crt-status lost-screen">
+      <p class="lost-title">PILOT LOST</p>
+      <p class="lost-name">{{ character ? character.display_name : '' }}</p>
+      <p class="lost-detail">The crew ran out of rations and did not survive the next jump.</p>
+      <button class="exit-link" @click="backToGames">Back to Games</button>
+    </div>
+
     <!-- Surface screen: replaces the entire ship UI once the craft is
          exited (see exitCraft()) -- a deliberately different, much
          simpler paradigm than the CRT monitor, per the request that
@@ -1558,6 +1632,7 @@ onUnmounted(() => {
           <span class="resource-stat"><span class="resource-icon" aria-hidden="true">&#164;</span>{{ credits.toLocaleString() }} Credits</span>
           <span class="resource-stat"><span class="resource-icon" aria-hidden="true">&#8801;</span>{{ rations.toLocaleString() }} Rations</span>
           <span class="resource-stat"><span class="resource-icon" aria-hidden="true">&#9636;</span>{{ fuel.toLocaleString() }} Fuel</span>
+          <span class="resource-stat health-stat" :class="{ 'resource-empty': healthCritical }"><span class="resource-icon" aria-hidden="true">&#9829;</span>{{ health }}/{{ MAX_HEALTH }} Health<span class="health-bar" :class="healthBarClass" aria-hidden="true"><span class="health-bar-fill" :style="{ width: Math.max(0, health) + '%' }"></span></span></span>
           <span class="resource-stat" :class="{ 'resource-empty': outOfCycles }"><span class="resource-icon" aria-hidden="true">&#8635;</span>{{ displayedCycles }}/{{ MAX_CYCLES }} Cycles<span v-if="nextCycleSeconds !== null" class="cycle-timer">(+1 in {{ cycleCountdownLabel }})</span></span>
         </div>
         <div class="surface-log">
@@ -1604,6 +1679,10 @@ onUnmounted(() => {
                   <span class="resource-stat" :class="{ 'resource-empty': fuel <= 0 }">
                     <span class="resource-icon" aria-hidden="true">&#9636;</span>{{ fuel.toLocaleString() }} <span class="resource-unit">Fuel</span>
                   </span>
+                  <span class="resource-stat health-stat" :class="{ 'resource-empty': healthCritical }">
+                    <span class="resource-icon" aria-hidden="true">&#9829;</span>{{ health }}<span class="resource-unit">/{{ MAX_HEALTH }} Health</span>
+                    <span class="health-bar" :class="healthBarClass" aria-hidden="true"><span class="health-bar-fill" :style="{ width: Math.max(0, health) + '%' }"></span></span>
+                  </span>
                   <span class="resource-stat" :class="{ 'resource-empty': outOfCycles }">
                     <span class="resource-icon" aria-hidden="true">&#8635;</span>{{ displayedCycles }}<span class="resource-unit">/{{ MAX_CYCLES }} Cycles</span><span v-if="nextCycleSeconds !== null" class="cycle-timer">+1 in {{ cycleCountdownLabel }}</span>
                   </span>
@@ -1611,7 +1690,7 @@ onUnmounted(() => {
                     <span class="resource-icon" aria-hidden="true">&#9650;</span>{{ driftVariance }} <span class="resource-unit">Drift Variance</span>
                   </span>
                 </div>
-                <span class="header-status">STATUS: <span class="status-active">{{ character.status.toUpperCase() }}</span></span>
+                <span class="header-status">STATUS: <span :class="'status-' + character.status">{{ character.status.toUpperCase() }}</span></span>
               </div>
 
               <div class="crt-grid">
@@ -2130,6 +2209,45 @@ onUnmounted(() => {
   font-weight: 700;
 }
 
+.status-dead {
+  color: #ff3b3b;
+  font-weight: 700;
+}
+
+.status-abandoned {
+  color: #8f8f96;
+  font-weight: 700;
+}
+
+/* ---- Lost screen ---- */
+.lost-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.lost-title {
+  font-size: clamp(1.4rem, 5vw, 2.4rem);
+  letter-spacing: 0.2em;
+  font-weight: 700;
+  color: #ff3b3b;
+  text-shadow: 0 0 12px rgba(255, 59, 59, 0.5);
+  margin: 0;
+}
+
+.lost-name {
+  font-size: 1.1rem;
+  color: #cfcfd4;
+  margin: 0;
+}
+
+.lost-detail {
+  max-width: 34ch;
+  color: #9a9aa2;
+  margin: 0;
+}
+
 /* ---- Header strip ---- */
 .crt-header {
   flex-shrink: 0;
@@ -2224,6 +2342,41 @@ onUnmounted(() => {
 
 @media (prefers-reduced-motion: reduce) {
   .drift-stat { animation: none; }
+}
+
+/* Health: a small inline bar beside the number. The bar is the "at a
+   glance" cue; the digits and the "/100 Health" label are the primary
+   signal, colour and fill are supplementary (same posture as
+   resource-empty). Fill steps green -> amber -> red via healthBarClass. */
+.health-stat {
+  display: inline-flex;
+  align-items: center;
+}
+
+.health-bar {
+  display: inline-block;
+  width: 44px;
+  height: 6px;
+  margin-left: 6px;
+  border: 1px solid #5fae7c;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.health-bar-fill {
+  display: block;
+  height: 100%;
+  background: #2fd66e;
+  transition: width 0.35s ease, background 0.35s ease;
+}
+
+.health-bar.health-low { border-color: #d6b13a; }
+.health-bar.health-low .health-bar-fill { background: #d6b13a; }
+.health-bar.health-critical { border-color: #ff8a8a; }
+.health-bar.health-critical .health-bar-fill { background: #ff5a5a; }
+
+@media (prefers-reduced-motion: reduce) {
+  .health-bar-fill { transition: none; }
 }
 
 /* ---- Panel grid ---- */
