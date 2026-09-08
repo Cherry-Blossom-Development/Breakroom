@@ -1,9 +1,57 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import HaulonautStatChip from '@/components/HaulonautStatChip.vue'
 
 const route = useRoute()
 const router = useRouter()
+
+// HUD resource strip. Each stat's icon + full label live here; the label
+// can be collapsed to an abbreviation per-stat (see statLabelModes below).
+// `credits` is shown as "Tokens" -- the underlying ref / API field / DB
+// column stay `credits`, only the visible word changed (it used to clash
+// with "Cycles" once both were abbreviated to "C").
+const STAT_META = {
+  credits: { icon: '¤', label: 'Tokens' },
+  rations: { icon: '≡', label: 'Rations' },
+  fuel: { icon: '▤', label: 'Fuel' },
+  health: { icon: '♥', label: 'Health' },
+  cycles: { icon: '↻', label: 'Cycles' },
+  drift: { icon: '▲', label: 'Drift Variance' },
+}
+const STAT_LABEL_STORAGE_KEY = 'haulonaut_stat_label_modes'
+// { credits: 'full' | 'short', ... } -- which stats are collapsed to their
+// abbreviation. Persisted per browser so the choice survives reloads.
+const statLabelModes = ref(loadStatLabelModes())
+// Which chip currently shows its +/- control, or null. One at a time;
+// cleared by clicking anywhere else (see the document listener in onMounted)
+// or pressing Escape.
+const selectedStatChip = ref(null)
+
+function loadStatLabelModes() {
+  const base = Object.fromEntries(Object.keys(STAT_META).map(k => [k, 'full']))
+  try {
+    const saved = JSON.parse(localStorage.getItem(STAT_LABEL_STORAGE_KEY) || '{}')
+    for (const k of Object.keys(base)) if (saved[k] === 'short') base[k] = 'short'
+  } catch {
+    // private mode / disabled storage -- fall back to all-full
+  }
+  return base
+}
+function selectStatChip(key) {
+  selectedStatChip.value = selectedStatChip.value === key ? null : key
+}
+function toggleStatLabel(key) {
+  statLabelModes.value[key] = statLabelModes.value[key] === 'full' ? 'short' : 'full'
+  try {
+    localStorage.setItem(STAT_LABEL_STORAGE_KEY, JSON.stringify(statLabelModes.value))
+  } catch {
+    // non-fatal -- the toggle still applies for this session
+  }
+}
+function clearStatChipSelection() {
+  selectedStatChip.value = null
+}
 
 const loading = ref(true)
 const error = ref('')
@@ -457,7 +505,7 @@ async function purchaseItem(entry) {
     fuel.value = data.fuel
     applyPilotState(data)
     inventory.value = data.inventory || []
-    logLines.value.push(`Purchased 1 ${entry.name}. (-${entry.base_price} Credits)`)
+    logLines.value.push(`Purchased 1 ${entry.name}. (-${entry.base_price} Tokens)`)
     scrollLogToBottom()
   } catch (err) {
     purchaseError.value = err.message
@@ -1000,7 +1048,7 @@ async function moveBuggy(direction) {
 // area, not a standalone button.
 function logLandingEvent(narration, effects) {
   const deltaParts = []
-  if (effects.credits) deltaParts.push(`${effects.credits > 0 ? '+' : ''}${effects.credits} Credits`)
+  if (effects.credits) deltaParts.push(`${effects.credits > 0 ? '+' : ''}${effects.credits} Tokens`)
   if (effects.rations) deltaParts.push(`${effects.rations > 0 ? '+' : ''}${effects.rations} Rations`)
   if (effects.fuel) deltaParts.push(`${effects.fuel > 0 ? '+' : ''}${effects.fuel} Fuel`)
   logLines.value.push(narration)
@@ -1358,6 +1406,13 @@ function backToGames() {
 }
 
 function onKeydown(e) {
+  // Escape closes an open stat-chip +/- control first (one Escape to close
+  // it, the next resumes normal Escape handling below).
+  if (e.key === 'Escape' && selectedStatChip.value) {
+    selectedStatChip.value = null
+    return
+  }
+
   // The surface screen has no box hierarchy at all -- it's a different,
   // much simpler paradigm than the ship UI it temporarily replaces.
   if (onSurface.value) {
@@ -1559,6 +1614,9 @@ onMounted(async () => {
   syncTerminalFocus()
   window.addEventListener('keydown', onKeydown)
   document.addEventListener('visibilitychange', onVisibilityChange)
+  // Any click that isn't on a stat chip (chips stopPropagation) closes the
+  // open +/- control.
+  document.addEventListener('click', clearStatChipSelection)
   driftIntervalId = setInterval(driftTick, 1000)
 })
 
@@ -1566,6 +1624,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('resize', measureLandingScene)
   document.removeEventListener('visibilitychange', onVisibilityChange)
+  document.removeEventListener('click', clearStatChipSelection)
   stopLandingDebugLoop()
   if (driftIntervalId) clearInterval(driftIntervalId)
   if (landingTimeoutId) clearTimeout(landingTimeoutId)
@@ -1657,12 +1716,26 @@ onUnmounted(() => {
 
       <div class="surface-hud">
         <h1 class="surface-heading">{{ planetFeature ? planetFeature.name.toUpperCase() : 'PLANET SURFACE' }}</h1>
-        <div class="surface-stats">
-          <span class="resource-stat"><span class="resource-icon" aria-hidden="true">&#164;</span>{{ credits.toLocaleString() }} Credits</span>
-          <span class="resource-stat"><span class="resource-icon" aria-hidden="true">&#8801;</span>{{ rations.toLocaleString() }} Rations</span>
-          <span class="resource-stat"><span class="resource-icon" aria-hidden="true">&#9636;</span>{{ fuel.toLocaleString() }} Fuel</span>
-          <span class="resource-stat health-stat" :class="{ 'resource-empty': healthCritical }"><span class="resource-icon" aria-hidden="true">&#9829;</span>{{ health }}/{{ MAX_HEALTH }} Health<span class="health-bar" :class="healthBarClass" aria-hidden="true"><span class="health-bar-fill" :style="{ width: Math.max(0, health) + '%' }"></span></span></span>
-          <span class="resource-stat" :class="{ 'resource-empty': outOfCycles }"><span class="resource-icon" aria-hidden="true">&#8635;</span>{{ displayedCycles }}/{{ MAX_CYCLES }} Cycles<span v-if="nextCycleSeconds !== null" class="cycle-timer">(+1 in {{ cycleCountdownLabel }})</span></span>
+        <div class="surface-stats" @click.stop>
+          <HaulonautStatChip stat-key="credits" :icon="STAT_META.credits.icon" :label="STAT_META.credits.label"
+            :value="credits.toLocaleString()" :mode="statLabelModes.credits" :selected="selectedStatChip === 'credits'"
+            @select="selectStatChip" @toggle="toggleStatLabel" />
+          <HaulonautStatChip stat-key="rations" :icon="STAT_META.rations.icon" :label="STAT_META.rations.label"
+            :value="rations.toLocaleString()" :mode="statLabelModes.rations" :selected="selectedStatChip === 'rations'"
+            @select="selectStatChip" @toggle="toggleStatLabel" />
+          <HaulonautStatChip stat-key="fuel" :icon="STAT_META.fuel.icon" :label="STAT_META.fuel.label"
+            :value="fuel.toLocaleString()" :mode="statLabelModes.fuel" :selected="selectedStatChip === 'fuel'"
+            @select="selectStatChip" @toggle="toggleStatLabel" />
+          <HaulonautStatChip stat-key="health" :icon="STAT_META.health.icon" :label="STAT_META.health.label"
+            :value="`${health}/${MAX_HEALTH}`" :mode="statLabelModes.health" :selected="selectedStatChip === 'health'"
+            :empty="healthCritical" tone-class="health-stat" @select="selectStatChip" @toggle="toggleStatLabel">
+            <span class="health-bar" :class="healthBarClass" aria-hidden="true"><span class="health-bar-fill" :style="{ width: Math.max(0, health) + '%' }"></span></span>
+          </HaulonautStatChip>
+          <HaulonautStatChip stat-key="cycles" :icon="STAT_META.cycles.icon" :label="STAT_META.cycles.label"
+            :value="`${displayedCycles}/${MAX_CYCLES}`" :mode="statLabelModes.cycles" :selected="selectedStatChip === 'cycles'"
+            :empty="outOfCycles" @select="selectStatChip" @toggle="toggleStatLabel">
+            <span v-if="nextCycleSeconds !== null" class="cycle-timer">(+1 in {{ cycleCountdownLabel }})</span>
+          </HaulonautStatChip>
         </div>
         <div class="surface-log">
           <p v-for="(line, i) in surfaceLog" :key="i" class="surface-log-line">{{ line }}</p>
@@ -1698,26 +1771,29 @@ onUnmounted(() => {
             <div class="crt-content">
               <div class="crt-header">
                 <span class="header-name">{{ character.display_name }}</span>
-                <div class="header-resources">
-                  <span class="resource-stat" :class="{ 'resource-empty': credits <= 0 }">
-                    <span class="resource-icon" aria-hidden="true">&#164;</span>{{ credits.toLocaleString() }} <span class="resource-unit">Credits</span>
-                  </span>
-                  <span class="resource-stat" :class="{ 'resource-empty': rations <= 0 }">
-                    <span class="resource-icon" aria-hidden="true">&#8801;</span>{{ rations.toLocaleString() }} <span class="resource-unit">Rations</span>
-                  </span>
-                  <span class="resource-stat" :class="{ 'resource-empty': fuel <= 0 }">
-                    <span class="resource-icon" aria-hidden="true">&#9636;</span>{{ fuel.toLocaleString() }} <span class="resource-unit">Fuel</span>
-                  </span>
-                  <span class="resource-stat health-stat" :class="{ 'resource-empty': healthCritical }">
-                    <span class="resource-icon" aria-hidden="true">&#9829;</span>{{ health }}<span class="resource-unit">/{{ MAX_HEALTH }} Health</span>
+                <div class="header-resources" @click.stop>
+                  <HaulonautStatChip stat-key="credits" :icon="STAT_META.credits.icon" :label="STAT_META.credits.label"
+                    :value="credits.toLocaleString()" :mode="statLabelModes.credits" :selected="selectedStatChip === 'credits'"
+                    :empty="credits <= 0" @select="selectStatChip" @toggle="toggleStatLabel" />
+                  <HaulonautStatChip stat-key="rations" :icon="STAT_META.rations.icon" :label="STAT_META.rations.label"
+                    :value="rations.toLocaleString()" :mode="statLabelModes.rations" :selected="selectedStatChip === 'rations'"
+                    :empty="rations <= 0" @select="selectStatChip" @toggle="toggleStatLabel" />
+                  <HaulonautStatChip stat-key="fuel" :icon="STAT_META.fuel.icon" :label="STAT_META.fuel.label"
+                    :value="fuel.toLocaleString()" :mode="statLabelModes.fuel" :selected="selectedStatChip === 'fuel'"
+                    :empty="fuel <= 0" @select="selectStatChip" @toggle="toggleStatLabel" />
+                  <HaulonautStatChip stat-key="health" :icon="STAT_META.health.icon" :label="STAT_META.health.label"
+                    :value="`${health}/${MAX_HEALTH}`" :mode="statLabelModes.health" :selected="selectedStatChip === 'health'"
+                    :empty="healthCritical" tone-class="health-stat" @select="selectStatChip" @toggle="toggleStatLabel">
                     <span class="health-bar" :class="healthBarClass" aria-hidden="true"><span class="health-bar-fill" :style="{ width: Math.max(0, health) + '%' }"></span></span>
-                  </span>
-                  <span class="resource-stat" :class="{ 'resource-empty': !canAffordWarp }">
-                    <span class="resource-icon" aria-hidden="true">&#8635;</span>{{ displayedCycles }}<span class="resource-unit">/{{ MAX_CYCLES }} Cycles</span><span v-if="nextCycleSeconds !== null" class="cycle-timer">+1 in {{ cycleCountdownLabel }}</span>
-                  </span>
-                  <span v-if="driftEligible" class="resource-stat drift-stat">
-                    <span class="resource-icon" aria-hidden="true">&#9650;</span>{{ driftVariance }} <span class="resource-unit">Drift Variance</span>
-                  </span>
+                  </HaulonautStatChip>
+                  <HaulonautStatChip stat-key="cycles" :icon="STAT_META.cycles.icon" :label="STAT_META.cycles.label"
+                    :value="`${displayedCycles}/${MAX_CYCLES}`" :mode="statLabelModes.cycles" :selected="selectedStatChip === 'cycles'"
+                    :empty="!canAffordWarp" @select="selectStatChip" @toggle="toggleStatLabel">
+                    <span v-if="nextCycleSeconds !== null" class="cycle-timer">+1 in {{ cycleCountdownLabel }}</span>
+                  </HaulonautStatChip>
+                  <HaulonautStatChip v-if="driftEligible" stat-key="drift" :icon="STAT_META.drift.icon" :label="STAT_META.drift.label"
+                    :value="driftVariance" :mode="statLabelModes.drift" :selected="selectedStatChip === 'drift'"
+                    tone-class="drift-stat" @select="selectStatChip" @toggle="toggleStatLabel" />
                 </div>
                 <span class="header-status">STATUS: <span :class="'status-' + character.status">{{ character.status.toUpperCase() }}</span></span>
               </div>

@@ -930,7 +930,7 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
     const item = itemResult.rows[0];
 
     const totalCost = item.base_price * quantity;
-    if (pilotResult.rows[0].credits < totalCost) return res.status(400).json({ message: 'Not enough credits' });
+    if (pilotResult.rows[0].credits < totalCost) return res.status(400).json({ message: 'Not enough tokens' });
 
     await client.beginTransaction();
 
