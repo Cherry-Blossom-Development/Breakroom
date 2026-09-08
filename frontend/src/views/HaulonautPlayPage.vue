@@ -1795,7 +1795,6 @@ onUnmounted(() => {
                     :value="driftVariance" :mode="statLabelModes.drift" :selected="selectedStatChip === 'drift'"
                     tone-class="drift-stat" @select="selectStatChip" @toggle="toggleStatLabel" />
                 </div>
-                <span class="header-status">STATUS: <span :class="'status-' + character.status">{{ character.status.toUpperCase() }}</span></span>
               </div>
 
               <div class="crt-grid">
@@ -2309,21 +2308,6 @@ onUnmounted(() => {
   50%, 100% { opacity: 0; }
 }
 
-.status-active {
-  color: #2fd66e;
-  font-weight: 700;
-}
-
-.status-dead {
-  color: #ff3b3b;
-  font-weight: 700;
-}
-
-.status-abandoned {
-  color: #8f8f96;
-  font-weight: 700;
-}
-
 /* ---- Lost screen ---- */
 .lost-screen {
   display: flex;
@@ -2374,16 +2358,13 @@ onUnmounted(() => {
   text-overflow: ellipsis;
 }
 
-.header-status {
-  flex-shrink: 0;
-  font-size: 0.7rem;
-  letter-spacing: 0.05em;
-  color: #5fae7c;
-}
-
+/* With STATUS: removed, the resource strip takes the whole width left of
+   the character name and spreads its chips across it (gap is the floor). */
 .header-resources {
+  flex: 1;
   display: flex;
   align-items: baseline;
+  justify-content: space-between;
   gap: clamp(8px, 2vw, 18px);
   font-size: 0.75rem;
   color: #baffcf;
