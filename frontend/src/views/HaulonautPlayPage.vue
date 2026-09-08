@@ -23,10 +23,6 @@ const STAT_LABEL_STORAGE_KEY = 'haulonaut_stat_label_modes'
 // { credits: 'full' | 'short', ... } -- which stats are collapsed to their
 // abbreviation. Persisted per browser so the choice survives reloads.
 const statLabelModes = ref(loadStatLabelModes())
-// Which chip currently shows its +/- control, or null. One at a time;
-// cleared by clicking anywhere else (see the document listener in onMounted)
-// or pressing Escape.
-const selectedStatChip = ref(null)
 
 function loadStatLabelModes() {
   const base = Object.fromEntries(Object.keys(STAT_META).map(k => [k, 'full']))
@@ -38,9 +34,6 @@ function loadStatLabelModes() {
   }
   return base
 }
-function selectStatChip(key) {
-  selectedStatChip.value = selectedStatChip.value === key ? null : key
-}
 function toggleStatLabel(key) {
   statLabelModes.value[key] = statLabelModes.value[key] === 'full' ? 'short' : 'full'
   try {
@@ -48,9 +41,6 @@ function toggleStatLabel(key) {
   } catch {
     // non-fatal -- the toggle still applies for this session
   }
-}
-function clearStatChipSelection() {
-  selectedStatChip.value = null
 }
 
 const loading = ref(true)
@@ -137,7 +127,46 @@ const terminalInputEl = ref(null)
 // activates EXIT at the chrome level). Starts 'inside' the terminal.
 const level = ref('inside')
 const activeBox = ref('terminal')
-const BOX_ORDER = ['viewport', 'scan', 'actions', 'terminal', 'nav']
+
+// The header stat chips are navigable "boxes" too: arrow to one (it goes
+// amber like a selected panel and reveals its +/- label control) and Enter
+// toggles the label. Left/Right/Tab cycle the whole strip below in order;
+// ArrowUp jumps from a panel to the chip row, ArrowDown from a chip back to
+// the viewport. 'drift' only joins the order while the Drift Variance chip
+// is actually showing.
+const STAT_CHIP_KEYS = ['credits', 'rations', 'fuel', 'health', 'cycles']
+const PANEL_BOX_KEYS = ['viewport', 'scan', 'actions', 'terminal', 'nav']
+const boxOrder = computed(() => [
+  ...STAT_CHIP_KEYS,
+  ...(driftEligible.value ? ['drift'] : []),
+  ...PANEL_BOX_KEYS,
+])
+function isStatChip(key) {
+  return key === 'drift' || STAT_CHIP_KEYS.includes(key)
+}
+// So ArrowUp from a panel returns to whichever chip was last active.
+let lastChipKey = 'credits'
+
+// Non-null when a stat chip is the current box -- drives the chip's amber
+// highlight and its +/- control. Mirrors boxStateClass() for the panels.
+const selectedStatChip = computed(() =>
+  (level.value === 'box' || level.value === 'inside') && isStatChip(activeBox.value) ? activeBox.value : null
+)
+
+// Mouse path (the chip's own click) mirrors the keyboard path: first click
+// selects the chip, a click on the already-selected chip (or its +/- button)
+// toggles the label.
+function selectStatChip(key) {
+  if (level.value === 'box' && activeBox.value === key) {
+    toggleStatLabel(key)
+    return
+  }
+  if (activeBox.value !== key) selectedIndex.value = -1
+  activeBox.value = key
+  level.value = 'box'
+  lastChipKey = key
+  syncTerminalFocus()
+}
 
 const FEATURE_LABELS = { planet: 'PLANET', trading_outpost: 'OUTPOST' }
 
@@ -428,8 +457,12 @@ function focusBox(box) {
 }
 
 function cycleBox(direction) {
-  const idx = BOX_ORDER.indexOf(activeBox.value)
-  activeBox.value = BOX_ORDER[(idx + direction + BOX_ORDER.length) % BOX_ORDER.length]
+  const order = boxOrder.value
+  const idx = order.indexOf(activeBox.value)
+  // idx === -1 (activeBox fell out of the order, e.g. 'drift' after refuel)
+  // resolves to order[0] going forward -- a safe recovery.
+  activeBox.value = order[(idx + direction + order.length) % order.length]
+  if (isStatChip(activeBox.value)) lastChipKey = activeBox.value
   selectedIndex.value = -1
 }
 
@@ -1401,18 +1434,21 @@ watch(displayedCycles, (n) => {
   lastSeenCycles = n
 })
 
+// If the Drift Variance chip was the active box and it stops showing (fuel
+// restored), hand focus back to Cycles rather than leaving an invisible box
+// selected.
+watch(driftEligible, (eligible) => {
+  if (!eligible && activeBox.value === 'drift') {
+    activeBox.value = 'cycles'
+    lastChipKey = 'cycles'
+  }
+})
+
 function backToGames() {
   router.push('/games')
 }
 
 function onKeydown(e) {
-  // Escape closes an open stat-chip +/- control first (one Escape to close
-  // it, the next resumes normal Escape handling below).
-  if (e.key === 'Escape' && selectedStatChip.value) {
-    selectedStatChip.value = null
-    return
-  }
-
   // The surface screen has no box hierarchy at all -- it's a different,
   // much simpler paradigm than the ship UI it temporarily replaces.
   if (onSurface.value) {
@@ -1464,28 +1500,55 @@ function onKeydown(e) {
     return
   }
 
-  // Box level: arrows (any direction) or Tab cycle between boxes; Enter
-  // descends into the highlighted one.
+  // Box level: Left/Right (and Tab) cycle the whole strip -- the header
+  // stat chips followed by the panels -- in order. ArrowUp jumps from a
+  // panel up to the header chip row; ArrowDown from a chip drops back to
+  // the viewport (and otherwise steps forward, as Right does). Enter
+  // descends into a panel, or toggles a chip's label.
   if (level.value === 'box') {
+    const onChip = isStatChip(activeBox.value)
+
     if (e.key === 'Tab') {
       e.preventDefault()
       cycleBox(e.shiftKey ? -1 : 1)
       return
     }
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+    if (e.key === 'ArrowRight') {
       e.preventDefault()
       cycleBox(1)
       return
     }
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+    if (e.key === 'ArrowLeft') {
       e.preventDefault()
       cycleBox(-1)
       return
     }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (!onChip) {
+        activeBox.value = lastChipKey
+        selectedIndex.value = -1
+      }
+      return
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      if (onChip) {
+        activeBox.value = 'viewport'
+        selectedIndex.value = -1
+      } else {
+        cycleBox(1)
+      }
+      return
+    }
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault()
-      level.value = 'inside'
-      syncTerminalFocus()
+      if (onChip) {
+        toggleStatLabel(activeBox.value)
+      } else {
+        level.value = 'inside'
+        syncTerminalFocus()
+      }
     }
     return
   }
@@ -1614,9 +1677,6 @@ onMounted(async () => {
   syncTerminalFocus()
   window.addEventListener('keydown', onKeydown)
   document.addEventListener('visibilitychange', onVisibilityChange)
-  // Any click that isn't on a stat chip (chips stopPropagation) closes the
-  // open +/- control.
-  document.addEventListener('click', clearStatChipSelection)
   driftIntervalId = setInterval(driftTick, 1000)
 })
 
@@ -1624,7 +1684,6 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('resize', measureLandingScene)
   document.removeEventListener('visibilitychange', onVisibilityChange)
-  document.removeEventListener('click', clearStatChipSelection)
   stopLandingDebugLoop()
   if (driftIntervalId) clearInterval(driftIntervalId)
   if (landingTimeoutId) clearTimeout(landingTimeoutId)
@@ -1716,24 +1775,19 @@ onUnmounted(() => {
 
       <div class="surface-hud">
         <h1 class="surface-heading">{{ planetFeature ? planetFeature.name.toUpperCase() : 'PLANET SURFACE' }}</h1>
-        <div class="surface-stats" @click.stop>
-          <HaulonautStatChip stat-key="credits" :icon="STAT_META.credits.icon" :label="STAT_META.credits.label"
-            :value="credits.toLocaleString()" :mode="statLabelModes.credits" :selected="selectedStatChip === 'credits'"
-            @select="selectStatChip" @toggle="toggleStatLabel" />
-          <HaulonautStatChip stat-key="rations" :icon="STAT_META.rations.icon" :label="STAT_META.rations.label"
-            :value="rations.toLocaleString()" :mode="statLabelModes.rations" :selected="selectedStatChip === 'rations'"
-            @select="selectStatChip" @toggle="toggleStatLabel" />
-          <HaulonautStatChip stat-key="fuel" :icon="STAT_META.fuel.icon" :label="STAT_META.fuel.label"
-            :value="fuel.toLocaleString()" :mode="statLabelModes.fuel" :selected="selectedStatChip === 'fuel'"
-            @select="selectStatChip" @toggle="toggleStatLabel" />
-          <HaulonautStatChip stat-key="health" :icon="STAT_META.health.icon" :label="STAT_META.health.label"
-            :value="`${health}/${MAX_HEALTH}`" :mode="statLabelModes.health" :selected="selectedStatChip === 'health'"
-            :empty="healthCritical" tone-class="health-stat" @select="selectStatChip" @toggle="toggleStatLabel">
+        <div class="surface-stats">
+          <HaulonautStatChip :interactive="false" stat-key="credits" :icon="STAT_META.credits.icon" :label="STAT_META.credits.label"
+            :value="credits.toLocaleString()" :mode="statLabelModes.credits" />
+          <HaulonautStatChip :interactive="false" stat-key="rations" :icon="STAT_META.rations.icon" :label="STAT_META.rations.label"
+            :value="rations.toLocaleString()" :mode="statLabelModes.rations" />
+          <HaulonautStatChip :interactive="false" stat-key="fuel" :icon="STAT_META.fuel.icon" :label="STAT_META.fuel.label"
+            :value="fuel.toLocaleString()" :mode="statLabelModes.fuel" />
+          <HaulonautStatChip :interactive="false" stat-key="health" :icon="STAT_META.health.icon" :label="STAT_META.health.label"
+            :value="`${health}/${MAX_HEALTH}`" :mode="statLabelModes.health" :empty="healthCritical" tone-class="health-stat">
             <span class="health-bar" :class="healthBarClass" aria-hidden="true"><span class="health-bar-fill" :style="{ width: Math.max(0, health) + '%' }"></span></span>
           </HaulonautStatChip>
-          <HaulonautStatChip stat-key="cycles" :icon="STAT_META.cycles.icon" :label="STAT_META.cycles.label"
-            :value="`${displayedCycles}/${MAX_CYCLES}`" :mode="statLabelModes.cycles" :selected="selectedStatChip === 'cycles'"
-            :empty="outOfCycles" @select="selectStatChip" @toggle="toggleStatLabel">
+          <HaulonautStatChip :interactive="false" stat-key="cycles" :icon="STAT_META.cycles.icon" :label="STAT_META.cycles.label"
+            :value="`${displayedCycles}/${MAX_CYCLES}`" :mode="statLabelModes.cycles" :empty="outOfCycles">
             <span v-if="nextCycleSeconds !== null" class="cycle-timer">(+1 in {{ cycleCountdownLabel }})</span>
           </HaulonautStatChip>
         </div>

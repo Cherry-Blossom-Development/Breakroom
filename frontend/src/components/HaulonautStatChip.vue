@@ -2,11 +2,11 @@
 import { computed } from 'vue'
 
 // One resource in the Haulonaut HUD strip (Tokens / Rations / Fuel /
-// Health / Cycles / Drift Variance). Clicking the chip selects it and
-// reveals a single +/- control; that control toggles the chip's label
-// between its full word and its abbreviation. The parent owns both the
-// selection and the per-stat mode (and persists the mode); this component
-// is purely presentational.
+// Health / Cycles / Drift Variance). It's a navigable "box" in the ship
+// UI's keyboard system: arrow to it (or click it) and it goes amber and
+// reveals a single +/- control; that control toggles the label between its
+// full word and its abbreviation. The parent owns selection + per-stat
+// mode (and persists the mode); this component is presentational.
 const props = defineProps({
   statKey: { type: String, required: true },
   icon: { type: String, required: true },
@@ -16,6 +16,9 @@ const props = defineProps({
   mode: { type: String, default: 'full' }, // 'full' | 'short'
   selected: { type: Boolean, default: false },
   empty: { type: Boolean, default: false },
+  // false on the surface HUD -- there's no box-nav there, so the chip is a
+  // plain read-out that still honours the persisted abbreviation.
+  interactive: { type: Boolean, default: true },
   // Extra class carried through to the root (e.g. 'health-stat' for the
   // inline health bar layout, 'drift-stat' for the warning blink).
   toneClass: { type: String, default: '' },
@@ -32,6 +35,15 @@ const shownLabel = computed(() => (props.mode === 'short' ? abbrev.value : props
 
 <template>
   <span
+    v-if="!interactive"
+    class="resource-stat"
+    :class="[toneClass, { 'resource-empty': empty }]"
+    :aria-label="`${label}: ${value}`"
+  >
+    <span class="resource-icon" aria-hidden="true">{{ icon }}</span>{{ value }} <span class="resource-unit">{{ shownLabel }}</span><slot />
+  </span>
+  <span
+    v-else
     class="resource-stat stat-chip"
     :class="[toneClass, { 'resource-empty': empty, 'stat-chip-selected': selected }]"
     role="button"
@@ -45,11 +57,10 @@ const shownLabel = computed(() => (props.mode === 'short' ? abbrev.value : props
     <button
       v-if="selected"
       type="button"
+      tabindex="-1"
       class="stat-toggle"
       :aria-label="mode === 'full' ? `Abbreviate ${label} to ${abbrev}` : `Show full label for ${label}`"
       @click.stop="emit('toggle', statKey)"
-      @keydown.enter.stop.prevent="emit('toggle', statKey)"
-      @keydown.space.stop.prevent="emit('toggle', statKey)"
     >{{ mode === 'full' ? '−' : '+' }}</button>
   </span>
 </template>
@@ -69,10 +80,12 @@ const shownLabel = computed(() => (props.mode === 'short' ? abbrev.value : props
   outline: 1px solid #8fe6ab;
   outline-offset: 1px;
 }
+/* Selected as a keyboard box -- amber, matching the panels' .box-selected
+   so the two share one "this is highlighted" language. */
 .stat-chip-selected,
 .stat-chip-selected:hover {
-  background: rgba(143, 230, 171, 0.16);
-  box-shadow: inset 0 0 0 1px rgba(143, 230, 171, 0.5);
+  background: rgba(255, 204, 85, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(255, 204, 85, 0.7), 0 0 8px 1px rgba(255, 204, 85, 0.4);
 }
 .stat-toggle {
   margin-left: 6px;
@@ -83,12 +96,13 @@ const shownLabel = computed(() => (props.mode === 'short' ? abbrev.value : props
   font-size: 0.8rem;
   line-height: 14px;
   color: #061a0e;
-  background: #8fe6ab;
+  background: #ffcc55;
   border: none;
   border-radius: 3px;
   cursor: pointer;
   vertical-align: middle;
+  box-shadow: 0 0 6px 1px rgba(255, 204, 85, 0.6);
 }
-.stat-toggle:hover { background: #baffcf; }
-.stat-toggle:focus-visible { outline: 1px solid #baffcf; outline-offset: 1px; }
+.stat-toggle:hover { background: #ffdd88; }
+.stat-toggle:focus-visible { outline: 1px solid #ffdd88; outline-offset: 1px; }
 </style>
