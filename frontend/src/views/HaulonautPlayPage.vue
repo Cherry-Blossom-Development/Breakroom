@@ -25,16 +25,22 @@ const MAX_HEALTH = 100
 // they were already 'dead' on load) -- swaps the whole UI for the lost
 // screen and blocks every action.
 const dead = ref(false)
-// Cycles -- a wall-clock action budget (see backend migration 066). `cycles`
-// / `cyclesUpdatedAt` (epoch seconds) are the server's last-known balance
-// and accrual anchor; `displayedCycles` / `nextCycleSeconds` below re-run
-// the server's replenishment math locally against `nowMs` so the HUD keeps
-// counting up between the syncs every real action already does.
+// Cycles -- a wall-clock action budget (see backend migrations 066 + 068).
+// `cycles` / `cyclesUpdatedAt` (epoch seconds) are the server's last-known
+// balance and accrual anchor; `displayedCycles` / `nextCycleSeconds` below
+// re-run the server's replenishment math locally against `nowMs` so the HUD
+// keeps counting up between the syncs every real action already does.
+// These four must match the constants of the same name in
+// backend/routes/games.js -- warp and landing are the big spends, a buggy
+// move is cheap local exploration.
 const cycles = ref(0)
 const cyclesUpdatedAt = ref(0)
 const nowMs = ref(Date.now())
-const MAX_CYCLES = 24
-const CYCLE_REPLENISH_SECONDS = 3600
+const MAX_CYCLES = 120
+const CYCLE_REPLENISH_SECONDS = 720
+const WARP_CYCLE_COST = 5
+const DOCK_CYCLE_COST = 5
+const BUGGY_CYCLE_COST = 1
 const inventory = ref([])
 const itemsCatalog = ref([])
 const knownLocations = ref([])
@@ -130,7 +136,29 @@ const nextCycleSeconds = computed(() => {
   return Math.max(0, Math.ceil(CYCLE_REPLENISH_SECONDS - intoInterval))
 })
 
+// Three tiers of "not enough cycles", since actions no longer cost the
+// same: `outOfCycles` (< 1) gates the 1-cost buggy and drives the HUD's
+// red state; `canAffordWarp` / `canAffordLanding` gate the 5-cost
+// maneuvers. The server re-enforces every one of these.
 const outOfCycles = computed(() => displayedCycles.value < 1)
+const canAffordWarp = computed(() => displayedCycles.value >= WARP_CYCLE_COST)
+const canAffordLanding = computed(() => displayedCycles.value >= DOCK_CYCLE_COST)
+
+// Whole seconds until the pilot will have `target` cycles: time to the next
+// one, then a full interval for each after that. Used for the "warp in
+// m:ss" hint when the bar is positive but below a maneuver's cost.
+function secondsUntilCycles(target) {
+  if (displayedCycles.value >= target) return 0
+  const more = target - displayedCycles.value
+  return (nextCycleSeconds.value || 0) + (more - 1) * CYCLE_REPLENISH_SECONDS
+}
+function formatCycleWait(seconds) {
+  const s = Math.max(0, Math.ceil(seconds))
+  const m = Math.floor(s / 60)
+  return `${m}:${String(s % 60).padStart(2, '0')}`
+}
+const warpReadyLabel = computed(() => formatCycleWait(secondsUntilCycles(WARP_CYCLE_COST)))
+const landingReadyLabel = computed(() => formatCycleWait(secondsUntilCycles(DOCK_CYCLE_COST)))
 
 // Health HUD state -- the bar fill and stat color step from green to amber
 // to red as the crew's condition worsens. Threshold-based, same "colour is
@@ -684,12 +712,12 @@ function rewindLandingDebug10s() {
 }
 
 async function beginLandingSequence() {
-  // Landing spends a cycle (charged server-side at POST /dock, when the
-  // descent animation reaches 'docked'). Refuse to even start the ~17s
-  // montage without one in hand rather than let the player watch it play
-  // and then fail at the end.
-  if (outOfCycles.value) {
-    logLines.value.push(`Cannot begin descent: out of cycles. Next replenishes in ${cycleCountdownLabel.value}.`)
+  // Landing spends DOCK_CYCLE_COST cycles (charged server-side at POST
+  // /dock, when the descent animation reaches 'docked'). Refuse to even
+  // start the ~17s montage without enough in hand rather than let the
+  // player watch it play and then fail at the end.
+  if (!canAffordLanding.value) {
+    logLines.value.push(`Cannot begin descent: landing needs ${DOCK_CYCLE_COST} cycles, you have ${displayedCycles.value}. Ready in ${landingReadyLabel.value}.`)
     scrollLogToBottom()
     return
   }
@@ -1096,12 +1124,12 @@ async function loadKnownLocations() {
 // blindly continuing.
 async function navigateTo(sector) {
   if (navigating.value || dead.value) return false
-  // A warp costs a cycle -- blocked up front (the server re-enforces this)
-  // so an autopilot course also stops here rather than firing a doomed
-  // request per hop.
-  if (outOfCycles.value) {
-    navError.value = `Out of cycles -- next in ${cycleCountdownLabel.value}`
-    logLines.value.push(`Warp drive offline: out of cycles. Next replenishes in ${cycleCountdownLabel.value}.`)
+  // A warp costs WARP_CYCLE_COST cycles -- blocked up front (the server
+  // re-enforces this) so an autopilot course also stops here rather than
+  // firing a doomed request per hop.
+  if (!canAffordWarp.value) {
+    navError.value = `Warp needs ${WARP_CYCLE_COST} cycles (you have ${displayedCycles.value}) -- ready in ${warpReadyLabel.value}`
+    logLines.value.push(`Warp drive offline: needs ${WARP_CYCLE_COST} cycles, ${displayedCycles.value} available. Ready in ${warpReadyLabel.value}.`)
     scrollLogToBottom()
     return false
   }
@@ -1310,15 +1338,16 @@ watch(health, (newHealth, oldHealth) => {
   }
 })
 
-// Announces a cycle coming back after the budget was empty -- gated on a
-// real prior "0" seen during play (lastSeenCycles starts null so the
-// initial mount jump from 0 to the loaded value stays silent). Depletion
-// itself is already narrated at each blocked action (navigateTo,
-// beginLandingSequence, moveBuggy).
+// Announces the budget climbing back to warp range after it dropped below
+// -- the "you can travel again" moment now that a warp costs 5, not 1.
+// Gated on a real prior sub-cost reading seen during play (lastSeenCycles
+// starts null so the initial mount jump stays silent). Depletion itself is
+// already narrated at each blocked action (navigateTo, beginLandingSequence,
+// moveBuggy).
 let lastSeenCycles = null
 watch(displayedCycles, (n) => {
-  if (lastSeenCycles === 0 && n > 0) {
-    logLines.value.push(`Cycle replenished. ${n}/${MAX_CYCLES} available.`)
+  if (lastSeenCycles !== null && lastSeenCycles < WARP_CYCLE_COST && n >= WARP_CYCLE_COST) {
+    logLines.value.push(`Cycles replenished -- ${n}/${MAX_CYCLES}, warp drive back online.`)
     scrollLogToBottom()
   }
   lastSeenCycles = n
@@ -1683,7 +1712,7 @@ onUnmounted(() => {
                     <span class="resource-icon" aria-hidden="true">&#9829;</span>{{ health }}<span class="resource-unit">/{{ MAX_HEALTH }} Health</span>
                     <span class="health-bar" :class="healthBarClass" aria-hidden="true"><span class="health-bar-fill" :style="{ width: Math.max(0, health) + '%' }"></span></span>
                   </span>
-                  <span class="resource-stat" :class="{ 'resource-empty': outOfCycles }">
+                  <span class="resource-stat" :class="{ 'resource-empty': !canAffordWarp }">
                     <span class="resource-icon" aria-hidden="true">&#8635;</span>{{ displayedCycles }}<span class="resource-unit">/{{ MAX_CYCLES }} Cycles</span><span v-if="nextCycleSeconds !== null" class="cycle-timer">+1 in {{ cycleCountdownLabel }}</span>
                   </span>
                   <span v-if="driftEligible" class="resource-stat drift-stat">
@@ -1780,16 +1809,16 @@ onUnmounted(() => {
                         v-for="(entry, i) in planetMenuItems"
                         :key="entry.__leave ? '__leave' : entry.key"
                         class="outpost-item-btn"
-                        :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.__leave, 'outpost-item-blocked': entry.key === 'land' && outOfCycles }"
+                        :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.__leave, 'outpost-item-blocked': entry.key === 'land' && !canAffordLanding }"
                         :aria-pressed="selectedIndex === i"
                         @click="activateViewportMenuItem(entry)"
                       >
                         <span class="outpost-item-hotkey" aria-hidden="true">{{ i + 1 }}</span>
                         <span class="outpost-item-name">{{ entry.name }}</span>
-                        <span v-if="entry.key === 'land'" class="outpost-item-price" aria-hidden="true">1 cycle</span>
+                        <span v-if="entry.key === 'land'" class="outpost-item-price" aria-hidden="true">{{ DOCK_CYCLE_COST }} cycles</span>
                       </button>
                     </div>
-                    <p v-if="outOfCycles" class="outpost-error">Out of cycles &mdash; cannot land. +1 in {{ cycleCountdownLabel }}</p>
+                    <p v-if="!canAffordLanding" class="outpost-error">Landing needs {{ DOCK_CYCLE_COST }} cycles &mdash; {{ displayedCycles }} available. Ready in {{ landingReadyLabel }}.</p>
                   </div>
 
                   <div v-else-if="viewportMode === 'landing-sequence'" class="tui-panel-body landing-sequence-body">
@@ -1959,14 +1988,14 @@ onUnmounted(() => {
                       SECTOR <span class="navbar-location-num">{{ currentSector ? currentSector.sector_number : '—' }}</span>
                     </div>
                     <div class="navbar-warps">
-                      <span class="navbar-label">WARP TO:</span>
+                      <span class="navbar-label">WARP TO: <span class="navbar-label-cost">({{ WARP_CYCLE_COST }} cycles)</span></span>
                       <template v-if="connectedSectors.length > 0">
                         <button
                           v-for="(s, i) in connectedSectors"
                           :key="s.id"
                           class="warp-btn"
                           :class="{ selected: selectedIndex === i, visited: s.visited }"
-                          :disabled="navigating || landingSequenceActive || outOfCycles"
+                          :disabled="navigating || landingSequenceActive || !canAffordWarp"
                           :aria-label="`Warp to Sector ${s.sector_number} (key ${i + 1})${s.visited ? ', visited' : ', unexplored'}`"
                           :aria-pressed="selectedIndex === i"
                           @click="manualNavigateTo(s)"
@@ -1976,7 +2005,7 @@ onUnmounted(() => {
                       </template>
                       <span v-else class="navbar-none">no warps available</span>
                     </div>
-                    <p v-if="outOfCycles" class="navbar-cycles-out">Out of cycles &mdash; warp offline. +1 in {{ cycleCountdownLabel }}</p>
+                    <p v-if="!canAffordWarp" class="navbar-cycles-out">Warp needs {{ WARP_CYCLE_COST }} cycles &mdash; {{ displayedCycles }} available. Ready in {{ warpReadyLabel }}.</p>
                   </div>
                 </div>
               </div>
@@ -3104,6 +3133,11 @@ onUnmounted(() => {
   color: #5fae7c;
   letter-spacing: 0.05em;
   margin-right: 2px;
+}
+
+.navbar-label-cost {
+  color: #3d7a56;
+  letter-spacing: 0.02em;
 }
 
 .navbar-none {

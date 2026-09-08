@@ -37,20 +37,30 @@ const MAX_HEALTH = 100;
 const WARP_HEALTH_REGEN = 3;
 const WARP_STARVATION_DAMAGE = 15;
 
-// Cycles -- a wall-clock action budget (see migration 066). A pilot holds
-// at most MAX_CYCLES and regains one every CYCLE_REPLENISH_SECONDS of real
-// time, whether online or not (replenishCycles below does this lazily on
-// read). STARTING_CYCLES / MAX_CYCLES must match the haulonaut_pilots.cycles
-// column default in migration 066 -- the self-heal spawn and character
-// creation paths insert a pilot row without naming cycles and rely on that
-// default. Only piloted travel spends a cycle: warping, landing on a
-// planet, and driving the buggy onto a new surface cell. Trading, course
-// plotting, launching, exiting the craft, and passive drift cost nothing.
-const MAX_CYCLES = 24;
-const STARTING_CYCLES = 24;
-const CYCLE_REPLENISH_SECONDS = 3600;
-const WARP_CYCLE_COST = 1;
-const DOCK_CYCLE_COST = 1;
+// Cycles -- a wall-clock action budget (see migrations 066 and 068). A
+// pilot holds at most MAX_CYCLES and regains one every
+// CYCLE_REPLENISH_SECONDS of real time, whether online or not
+// (replenishCycles below does this lazily on read). STARTING_CYCLES /
+// MAX_CYCLES must match the haulonaut_pilots.cycles column default in
+// migration 068 (120) -- the self-heal spawn and character creation paths
+// insert a pilot row without naming cycles and rely on that default.
+//
+// Only piloted travel spends cycles, and not all of it at the same rate:
+// warping to another sector and landing on a planet are the big maneuvers
+// (WARP/DOCK_CYCLE_COST), while nudging the buggy one surface cell is cheap
+// local exploration (BUGGY_CYCLE_COST). Trading, course plotting,
+// launching, exiting the craft, and passive drift cost nothing.
+//
+// The 5x jump from the original 24/1-per-hour/1-per-action economy (see
+// migration 066) keeps a warp exactly as scarce as it was -- 5 of 120, one
+// warp's worth regained every hour -- while making a buggy move a fifth as
+// costly in relative terms, so surface exploration stops competing with
+// interstellar travel for the same tight budget.
+const MAX_CYCLES = 120;
+const STARTING_CYCLES = 120;
+const CYCLE_REPLENISH_SECONDS = 720; // one cycle per 12 min -> 5/hour; full 120 bar in 24h
+const WARP_CYCLE_COST = 5;
+const DOCK_CYCLE_COST = 5;
 const BUGGY_CYCLE_COST = 1;
 
 // A planet surface's exploration grid -- low-res and small on purpose (see
@@ -699,13 +709,14 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
       return res.status(409).json({ message: 'Out of fuel -- cannot warp' });
     }
 
-    // A warp costs a cycle (see MAX_CYCLES). Checked last, after the move is
-    // known to be otherwise valid, so nothing is spent on a warp that would
-    // have been rejected anyway. The client blocks this case up front too,
-    // but it's re-enforced here like every other movement guard.
+    // A warp costs WARP_CYCLE_COST cycles (the biggest single cycle spend --
+    // see the constants block). Checked last, after the move is known to be
+    // otherwise valid, so nothing is spent on a warp that would have been
+    // rejected anyway. The client blocks this case up front too, but it's
+    // re-enforced here like every other movement guard.
     const spent = await spendCycles(client, req.params.id, WARP_CYCLE_COST);
     if (!spent.ok) {
-      return res.status(409).json({ message: 'Out of cycles -- wait for replenishment', cycles: spent.cycles, cyclesUpdatedAt: spent.cyclesUpdatedAt });
+      return res.status(409).json({ message: `Not enough cycles to warp (need ${WARP_CYCLE_COST})`, cycles: spent.cycles, cyclesUpdatedAt: spent.cyclesUpdatedAt });
     }
 
     // Every warp costs a small, fixed amount of rations and fuel (clamped
@@ -973,8 +984,8 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
  * (never trusted from the client). Idempotent: landing again while already
  * docked at the same planet just re-confirms it -- and, because it's
  * idempotent, only a landing that actually changes docked_feature_id
- * spends a cycle (so a retried/duplicate call after a network hiccup
- * doesn't double-charge).
+ * spends cycles (DOCK_CYCLE_COST -- a big maneuver, same as a warp), so a
+ * retried/duplicate call after a network hiccup doesn't double-charge.
  */
 router.post('/:gameKey/characters/:id/dock', authenticate, async (req, res) => {
   const client = await getClient();
@@ -1005,11 +1016,11 @@ router.post('/:gameKey/characters/:id/dock', authenticate, async (req, res) => {
     if (featureResult.rowCount === 0) return res.status(409).json({ message: 'No planet in this sector' });
     const featureId = featureResult.rows[0].id;
 
-    // A genuinely new landing spends a cycle; re-confirming a dock the pilot
-    // is already parked at (idempotent retry, or re-boarding then re-landing
-    // without launching) spends nothing. The client blocks starting the
-    // descent with no cycle in hand, so hitting the out-of-cycles branch
-    // here is an edge case -- but it's still enforced rather than trusted.
+    // A genuinely new landing spends DOCK_CYCLE_COST; re-confirming a dock
+    // the pilot is already parked at (idempotent retry, or re-boarding then
+    // re-landing without launching) spends nothing. The client blocks
+    // starting the descent without the cycles to afford it, so hitting the
+    // branch below is an edge case -- but it's still enforced, not trusted.
     const alreadyDocked = pilotResult.rows[0].docked_feature_id === featureId;
     let cycleState;
     if (alreadyDocked) {
@@ -1017,7 +1028,7 @@ router.post('/:gameKey/characters/:id/dock', authenticate, async (req, res) => {
     } else {
       const spent = await spendCycles(client, req.params.id, DOCK_CYCLE_COST);
       if (!spent.ok) {
-        return res.status(409).json({ message: 'Out of cycles -- cannot land', cycles: spent.cycles, cyclesUpdatedAt: spent.cyclesUpdatedAt });
+        return res.status(409).json({ message: `Not enough cycles to land (need ${DOCK_CYCLE_COST})`, cycles: spent.cycles, cyclesUpdatedAt: spent.cyclesUpdatedAt });
       }
       cycleState = spent;
     }
