@@ -69,6 +69,9 @@ const io = new Server(server, {
 
 startCustomDomainCache();
 
+const { startHaulonautNpcScheduler } = require('./jobs/haulonautNpcScheduler');
+startHaulonautNpcScheduler();
+
 app.use(cors({
   origin: corsOriginCheck,
   credentials: true

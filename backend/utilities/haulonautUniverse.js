@@ -172,6 +172,16 @@ function randomOutpostName() {
   return `${pick(OUTPOST_NAMES)} ${pick(OUTPOST_DESIGNATORS)}`;
 }
 
+const NPC_CALLSIGN_FIRST = ['Rook', 'Talon', 'Sable', 'Juno', 'Kestrel', 'Vesper', 'Ash', 'Brix', 'Nova', 'Cass', 'Orin', 'Wren'];
+const NPC_CALLSIGN_LAST = ['Drift', 'Vane', 'Crane', 'Hollow', 'Marsh', 'Voss', 'Kade', 'Rill', 'Storm', 'Vale'];
+
+// A flavor callsign for a system-controlled pilot -- see games.js's NPC
+// admin/spawn route. Not guaranteed unique; duplicate callsigns are fine,
+// same as two human players both naming their character "Rex".
+function randomNpcName() {
+  return `${pick(NPC_CALLSIGN_FIRST)} ${pick(NPC_CALLSIGN_LAST)}`;
+}
+
 // Generates per-sector flavor description + a features list, independently
 // rolled per sector. Returns an array indexed the same way as
 // buildUniverseGraph's sectors (0..sectorCount-1):
@@ -196,4 +206,4 @@ function generateSectorContent(sectorCount, { planetChance = 0.05, outpostChance
   return content;
 }
 
-module.exports = { buildUniverseGraph, generateSectorContent };
+module.exports = { buildUniverseGraph, generateSectorContent, randomNpcName };

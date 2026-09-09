@@ -2052,7 +2052,7 @@ onUnmounted(() => {
                     <p v-else class="scan-row scan-empty">No contacts.</p>
                     <template v-if="playersHere.length > 0">
                       <p class="scan-row scan-divider">PILOTS:</p>
-                      <p v-for="p in playersHere" :key="p.id" class="scan-row">{{ p.display_name }}</p>
+                      <p v-for="p in playersHere" :key="p.id" class="scan-row">{{ p.display_name }}<span v-if="p.is_npc"> [NPC]</span></p>
                     </template>
                   </div>
                 </div>

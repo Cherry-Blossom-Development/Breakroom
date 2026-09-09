@@ -3,7 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
-const { buildUniverseGraph, generateSectorContent } = require('../utilities/haulonautUniverse');
+const { buildUniverseGraph, generateSectorContent, randomNpcName } = require('../utilities/haulonautUniverse');
 const { rollLandingEvent } = require('../utilities/haulonautLandingEvents');
 require('dotenv').config();
 
@@ -302,7 +302,7 @@ async function loadPilotLocation(client, gameUserId) {
   );
 
   const playersResult = await client.query(
-    `SELECT gu.id, gu.display_name
+    `SELECT gu.id, gu.display_name, gu.is_npc
      FROM game_users gu
      JOIN haulonaut_pilots hp ON hp.game_user_id = gu.id
      WHERE hp.current_sector_id = $1 AND gu.id != $2 AND gu.status = 'active'`,
@@ -514,7 +514,7 @@ router.get('/:gameKey', authenticate, async (req, res) => {
     const instancesResult = await client.query(
       `SELECT gi.id, gi.name, gi.started_at,
               (SELECT COUNT(*) FROM haulonaut_sectors hs WHERE hs.game_instance_id = gi.id) AS sector_count,
-              (SELECT COUNT(*) FROM game_users gu WHERE gu.game_instance_id = gi.id) AS player_count
+              (SELECT COUNT(*) FROM game_users gu WHERE gu.game_instance_id = gi.id AND gu.is_npc = 0) AS player_count
        FROM game_instances gi
        WHERE gi.game_id = $1 AND gi.status = 'active'
        ORDER BY gi.started_at DESC`,
@@ -1483,7 +1483,8 @@ router.get('/:gameKey/admin/overview', authenticate, requireGameAdmin, async (re
     const instancesResult = await client.query(
       `SELECT gi.id, gi.name, gi.status, gi.started_at, gi.ended_at,
               (SELECT COUNT(*) FROM haulonaut_sectors hs WHERE hs.game_instance_id = gi.id) AS sector_count,
-              (SELECT COUNT(*) FROM game_users gu WHERE gu.game_instance_id = gi.id) AS player_count
+              (SELECT COUNT(*) FROM game_users gu WHERE gu.game_instance_id = gi.id AND gu.is_npc = 0) AS player_count,
+              (SELECT COUNT(*) FROM game_users gu WHERE gu.game_instance_id = gi.id AND gu.is_npc = 1) AS npc_count
        FROM game_instances gi
        WHERE gi.game_id = $1
        ORDER BY gi.started_at DESC
@@ -1514,7 +1515,7 @@ router.get('/:gameKey/admin/instances/:instanceId/roster', authenticate, require
     if (instanceCheck.rowCount === 0) return res.status(404).json({ message: 'Instance not found' });
 
     const rosterResult = await client.query(
-      `SELECT gu.id, gu.display_name, gu.status, gu.created_at, gu.last_played_at, u.handle AS owner_handle
+      `SELECT gu.id, gu.display_name, gu.status, gu.created_at, gu.last_played_at, gu.is_npc, u.handle AS owner_handle
        FROM game_users gu
        LEFT JOIN users u ON u.id = gu.user_id
        WHERE gu.game_instance_id = $1
@@ -1526,6 +1527,47 @@ router.get('/:gameKey/admin/instances/:instanceId/roster', authenticate, require
   } catch (err) {
     console.error('Error loading instance roster:', err);
     res.status(500).json({ message: 'Failed to load roster' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/admin/instances/:instanceId/npcs
+ * Game-admin only: spawn `count` NPC pilots into an active instance. Each
+ * is an ordinary game_users row (user_id/visitor_id both NULL, is_npc = 1)
+ * with a normal haulonaut_pilots row at a random sector -- same starting
+ * credits/rations/fuel/health/cycles as a freshly created human character.
+ * jobs/haulonautNpcScheduler.js is what actually moves them from there;
+ * this endpoint only creates the roster entries. Body: { count } -- default
+ * 1, clamped to 1-50 per call so a fat-fingered number can't flood a
+ * universe in one request.
+ */
+router.post('/:gameKey/admin/instances/:instanceId/npcs', authenticate, requireGameAdmin, async (req, res) => {
+  const count = Math.min(50, Math.max(1, parseInt(req.body.count, 10) || 1));
+  const client = await getClient();
+  try {
+    const instanceResult = await client.query(
+      `SELECT id FROM game_instances WHERE id = $1 AND game_id = $2 AND status = 'active'`,
+      [req.params.instanceId, req.gameId]
+    );
+    if (instanceResult.rowCount === 0) return res.status(404).json({ message: 'Active instance not found' });
+
+    const created = [];
+    for (let i = 0; i < count; i++) {
+      const displayName = randomNpcName();
+      const insertResult = await client.query(
+        `INSERT INTO game_users (game_instance_id, display_name, status, is_npc) VALUES ($1, $2, 'active', 1)`,
+        [req.params.instanceId, displayName]
+      );
+      const spawned = await spawnPilotAtRandomSector(client, insertResult.insertId);
+      if (spawned) created.push({ id: insertResult.insertId, display_name: displayName });
+    }
+
+    res.status(201).json({ created });
+  } catch (err) {
+    console.error('Error spawning NPCs:', err);
+    res.status(500).json({ message: 'Failed to spawn NPCs' });
   } finally {
     client.release();
   }
@@ -1714,3 +1756,17 @@ router.post('/:gameKey/admin/universe', authenticate, requireGameAdmin, async (r
 });
 
 module.exports = router;
+
+// Exposed for jobs/haulonautNpcScheduler.js -- NPC movement reuses the same
+// warp/cycles/fuel/rations/health rules real players are bound by, rather
+// than a second copy of them, so tuning the economy in one place (see the
+// constants block up top) stays authoritative for bots too.
+module.exports.internals = {
+  replenishCycles,
+  spendCycles,
+  applyWarpHealth,
+  markSectorVisited,
+  WARP_CYCLE_COST,
+  WARP_FUEL_COST,
+  WARP_RATIONS_COST
+};

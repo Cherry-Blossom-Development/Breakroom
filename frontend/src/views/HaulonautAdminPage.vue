@@ -18,6 +18,10 @@ const generateResult = ref('')
 
 const endingId = ref(null)
 
+const npcCounts = ref({}) // instanceId -> pending spawn count input
+const spawningNpcsFor = ref(null)
+const npcError = ref('')
+
 async function loadOverview() {
   loading.value = true
   error.value = ''
@@ -51,6 +55,32 @@ async function toggleRoster(instanceId) {
     rosters.value = { ...rosters.value, [instanceId]: data.roster || [] }
   } finally {
     loadingRoster.value = false
+  }
+}
+
+async function spawnNpcs(inst) {
+  npcError.value = ''
+  const count = npcCounts.value[inst.id] || 1
+  spawningNpcsFor.value = inst.id
+  try {
+    const res = await fetch(`/api/games/haulonaut/admin/instances/${inst.id}/npcs`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ count })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Failed to spawn NPCs')
+    if (expandedId.value === inst.id) {
+      const rosterRes = await fetch(`/api/games/haulonaut/admin/instances/${inst.id}/roster`, { credentials: 'include' })
+      const rosterData = await rosterRes.json()
+      rosters.value = { ...rosters.value, [inst.id]: rosterData.roster || [] }
+    }
+    await loadOverview()
+  } catch (err) {
+    npcError.value = err.message
+  } finally {
+    spawningNpcsFor.value = null
   }
 }
 
@@ -123,7 +153,7 @@ onMounted(loadOverview)
               </div>
               <div class="instance-actions">
                 <button class="link-btn" @click="toggleRoster(inst.id)">
-                  {{ expandedId === inst.id ? 'Hide Roster' : 'View Roster' }} ({{ inst.player_count }})
+                  {{ expandedId === inst.id ? 'Hide Roster' : 'View Roster' }} ({{ inst.player_count }}<span v-if="inst.npc_count"> + {{ inst.npc_count }} NPC</span>)
                 </button>
                 <button
                   v-if="inst.status === 'active'"
@@ -159,8 +189,8 @@ onMounted(loadOverview)
                 </thead>
                 <tbody>
                   <tr v-for="c in rosters[inst.id]" :key="c.id">
-                    <td>{{ c.display_name }}</td>
-                    <td>{{ c.owner_handle || '(guest)' }}</td>
+                    <td>{{ c.display_name }} <span v-if="c.is_npc" class="npc-badge">NPC</span></td>
+                    <td>{{ c.is_npc ? '(system)' : (c.owner_handle || '(guest)') }}</td>
                     <td class="status-cell" :class="`status-${c.status}`">{{ c.status }}</td>
                     <td>{{ formatDate(c.last_played_at) }}</td>
                   </tr>
@@ -168,8 +198,23 @@ onMounted(loadOverview)
               </table>
               <div v-else class="empty-state">No characters yet.</div>
             </div>
+
+            <div v-if="inst.status === 'active'" class="npc-spawn-row">
+              <label>
+                Spawn NPCs
+                <input v-model.number="npcCounts[inst.id]" type="number" min="1" max="50" placeholder="1" />
+              </label>
+              <button
+                class="link-btn"
+                :disabled="spawningNpcsFor === inst.id"
+                @click="spawnNpcs(inst)"
+              >
+                {{ spawningNpcsFor === inst.id ? 'Spawning...' : 'Spawn' }}
+              </button>
+            </div>
           </div>
         </div>
+        <p v-if="npcError" class="error">{{ npcError }}</p>
       </section>
 
       <section class="admin-section">
@@ -298,6 +343,40 @@ h2 { color: var(--color-text); font-size: 1.1rem; margin: 0 0 12px; }
 }
 
 .roster-table thead { background: var(--color-background-soft); }
+
+.npc-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--color-background-soft);
+  color: var(--color-text-muted);
+  vertical-align: middle;
+}
+
+.npc-spawn-row {
+  margin-top: 12px;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.npc-spawn-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--color-text-light);
+}
+
+.npc-spawn-row input {
+  width: 70px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-background-input);
+  color: var(--color-text);
+}
 
 .status-cell { text-transform: capitalize; font-weight: 600; }
 .status-active { color: var(--color-success, #2e7d32); }
