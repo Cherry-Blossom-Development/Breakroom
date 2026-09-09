@@ -1118,6 +1118,32 @@ function connectSectorSocket() {
     scrollLogToBottom()
   })
 
+  // Trading (see /give and /trade-offers in games.js). Both notifications
+  // carry the recipient's post-transfer credit balance directly, so the
+  // HUD updates without a round-trip back to the server to re-fetch it.
+  sectorSocket.on('haulonaut_gift_received', (data) => {
+    logLines.value.push(`${data.fromDisplayName} gave you ${data.credits} Tokens.`)
+    if (typeof data.newBalance === 'number') credits.value = data.newBalance
+    scrollLogToBottom()
+  })
+
+  sectorSocket.on('haulonaut_trade_offer', (data) => {
+    logLines.value.push(
+      `[TRADE OFFER #${data.offerId}] ${data.fromDisplayName} offers ${data.quantity} ${data.itemName} for ${data.credits} Tokens. Type /accept ${data.offerId} or /decline ${data.offerId}.`
+    )
+    scrollLogToBottom()
+  })
+
+  sectorSocket.on('haulonaut_trade_resolved', (data) => {
+    if (data.accepted) {
+      logLines.value.push(`Trade #${data.offerId} accepted: you received ${data.credits} Tokens for ${data.quantity} ${data.itemName}.`)
+      if (typeof data.newBalance === 'number') credits.value = data.newBalance
+    } else {
+      logLines.value.push(`Trade #${data.offerId} declined.`)
+    }
+    scrollLogToBottom()
+  })
+
   sectorSocket.connect()
 }
 
@@ -1135,12 +1161,129 @@ watch(() => currentSector.value?.id, (sectorId) => {
   if (sectorId) joinSectorRoom()
 })
 
+// Pops the last token and parses it as a finite number, or returns null
+// (and leaves the token popped) if it isn't one -- used to peel numeric
+// arguments off the end of a slash command, where names-with-spaces make
+// splitting from the front ambiguous.
+function popNumber(tokens) {
+  const n = Number(tokens.pop())
+  return Number.isFinite(n) ? n : null
+}
+
+function findPlayerHereByName(name) {
+  const lower = name.toLowerCase()
+  return playersHere.value.find(p => p.display_name.toLowerCase() === lower) || null
+}
+
+// Trading commands, typed straight into the terminal: /give, /offer,
+// /accept, /decline. Anything else (including a bare non-slash message)
+// falls through to the sector broadcast in submitTerminalCommand. Trade
+// state itself lives entirely server-side (see /give and /trade-offers in
+// games.js) -- this just parses input, calls the matching endpoint, and
+// logs the result. No confirmation dialog: the terminal IS the
+// confirmation, same as every other typed command here.
+async function handleTerminalSlashCommand(rest) {
+  const tokens = rest.trim().split(/\s+/).filter(Boolean)
+  const cmd = (tokens.shift() || '').toLowerCase()
+  const charId = route.params.characterId
+
+  if (cmd === 'give') {
+    const amount = popNumber(tokens)
+    const targetName = tokens.join(' ')
+    if (!targetName || amount === null || amount <= 0) {
+      logLines.value.push('Usage: /give <pilot name> <credits>')
+      return scrollLogToBottom()
+    }
+    const target = findPlayerHereByName(targetName)
+    if (!target) {
+      logLines.value.push(`No pilot named "${targetName}" in this sector.`)
+      return scrollLogToBottom()
+    }
+    try {
+      const res = await fetch(`/api/games/haulonaut/characters/${charId}/give`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to_character_id: target.id, credits: amount })
+      })
+      const data = await res.json()
+      logLines.value.push(data.message || 'Failed to give tokens.')
+      if (res.ok && typeof data.credits === 'number') credits.value = data.credits
+    } catch {
+      logLines.value.push('Transmission failed.')
+    }
+    return scrollLogToBottom()
+  }
+
+  if (cmd === 'offer') {
+    const offerCredits = popNumber(tokens)
+    const forWord = tokens.pop()
+    const quantity = popNumber(tokens)
+    const itemKey = tokens.pop()
+    const targetName = tokens.join(' ')
+    if (!targetName || !itemKey || quantity === null || quantity <= 0 || offerCredits === null || offerCredits < 0 || (forWord || '').toLowerCase() !== 'for') {
+      logLines.value.push('Usage: /offer <pilot name> <item_key> <qty> for <credits>')
+      return scrollLogToBottom()
+    }
+    const target = findPlayerHereByName(targetName)
+    if (!target) {
+      logLines.value.push(`No pilot named "${targetName}" in this sector.`)
+      return scrollLogToBottom()
+    }
+    try {
+      const res = await fetch(`/api/games/haulonaut/characters/${charId}/trade-offers`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to_character_id: target.id, item_key: itemKey, quantity, credits: offerCredits })
+      })
+      const data = await res.json()
+      logLines.value.push(data.message || 'Failed to send trade offer.')
+    } catch {
+      logLines.value.push('Transmission failed.')
+    }
+    return scrollLogToBottom()
+  }
+
+  if (cmd === 'accept' || cmd === 'decline') {
+    const offerId = popNumber(tokens)
+    if (offerId === null) {
+      logLines.value.push(`Usage: /${cmd} <offer id>`)
+      return scrollLogToBottom()
+    }
+    try {
+      const res = await fetch(`/api/games/haulonaut/characters/${charId}/trade-offers/${offerId}/${cmd}`, {
+        method: 'POST',
+        credentials: 'include'
+      })
+      const data = await res.json()
+      logLines.value.push(data.message || `Failed to ${cmd} trade offer.`)
+      if (res.ok && cmd === 'accept') {
+        if (typeof data.credits === 'number') credits.value = data.credits
+        if (data.inventory) inventory.value = data.inventory
+      }
+    } catch {
+      logLines.value.push('Transmission failed.')
+    }
+    return scrollLogToBottom()
+  }
+
+  logLines.value.push('Command not recognized.')
+  scrollLogToBottom()
+}
+
 function submitTerminalCommand() {
   const text = terminalInput.value.trim()
   if (!text) return
   logLines.value.push(text)
   terminalInput.value = ''
   scrollLogToBottom()
+
+  if (text.startsWith('/')) {
+    handleTerminalSlashCommand(text.slice(1))
+    return
+  }
+
   sectorSocket?.emit('haulonaut_sector_message', { characterId: route.params.characterId, message: text })
 }
 
@@ -1211,13 +1354,37 @@ async function loadCharacter() {
     logLines.value = [
       'Docking confirmed.',
       data.currentSector ? `Arrived in Sector ${data.currentSector.sector_number}.` : null,
-      'Local comms channel open -- type below to broadcast to this sector.'
+      'Local comms channel open -- type below to broadcast to this sector.',
+      'Trading: /give <pilot> <credits>, /offer <pilot> <item_key> <qty> for <credits>, /accept <id>, /decline <id>.'
     ].filter(Boolean)
     scrollLogToBottom()
+    loadPendingTradeOffers()
   } catch (err) {
     error.value = err.message
   } finally {
     loading.value = false
+  }
+}
+
+// Catches up on trade offers that arrived while this character wasn't
+// connected (offline, or reloaded mid-conversation) -- the live socket
+// notification (haulonaut_trade_offer) only reaches an open tab, but
+// offers themselves don't expire server-side, so this is the only way an
+// incoming one would otherwise go unnoticed.
+async function loadPendingTradeOffers() {
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/trade-offers`, { credentials: 'include' })
+    if (!res.ok) return
+    const data = await res.json()
+    const incoming = (data.offers || []).filter(o => o.to_game_user_id === Number(route.params.characterId))
+    for (const o of incoming) {
+      logLines.value.push(
+        `[TRADE OFFER #${o.id}] ${o.from_display_name} offers ${o.quantity} ${o.item_name} for ${o.credits} Tokens. Type /accept ${o.id} or /decline ${o.id}.`
+      )
+    }
+    if (incoming.length > 0) scrollLogToBottom()
+  } catch {
+    // Non-fatal -- offers still resolve fine via /accept or /decline once known some other way.
   }
 }
 

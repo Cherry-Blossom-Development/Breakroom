@@ -5,6 +5,7 @@ const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { buildUniverseGraph, generateSectorContent, randomNpcName } = require('../utilities/haulonautUniverse');
 const { rollLandingEvent } = require('../utilities/haulonautLandingEvents');
+const { emitToUser } = require('../utilities/socket');
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -492,6 +493,25 @@ async function spawnPilotAtRandomSector(client, gameUserId) {
   return { ...randomSector.rows[0], credits: STARTING_CREDITS, rations: STARTING_RATIONS, fuel: STARTING_FUEL, health: STARTING_HEALTH };
 }
 
+// Resolves a gift/trade target: a different, active character currently in
+// the same sector as the acting character (self-joins haulonaut_pilots on
+// current_sector_id, so "same sector" and "target still active" are both
+// checked in one query). Returns null if any of that doesn't hold --
+// callers turn that into a single 404/409 rather than distinguishing "no
+// such character" from "not here anymore".
+async function loadSameSectorTarget(client, actingGameUserId, targetGameUserId) {
+  if (!targetGameUserId || Number(targetGameUserId) === Number(actingGameUserId)) return null;
+  const result = await client.query(
+    `SELECT tgu.id, tgu.user_id, tgu.display_name, tgu.is_npc
+     FROM haulonaut_pilots ahp
+     JOIN haulonaut_pilots thp ON thp.current_sector_id = ahp.current_sector_id
+     JOIN game_users tgu ON tgu.id = thp.game_user_id
+     WHERE ahp.game_user_id = $1 AND thp.game_user_id = $2 AND tgu.status = 'active'`,
+    [actingGameUserId, targetGameUserId]
+  );
+  return result.rowCount > 0 ? result.rows[0] : null;
+}
+
 /**
  * GET /api/games/:gameKey
  * Game info, every currently-active universe instance (a game can have
@@ -970,6 +990,328 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
     await client.rollback();
     console.error('Error purchasing item:', err);
     res.status(500).json({ message: 'Failed to purchase item' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/characters/:id/give
+ * Instant credit gift to another active character in the same sector -- no
+ * acceptance needed (receiving free credits can't hurt anyone), unlike
+ * /trade-offers below which moves an item and needs the recipient to agree
+ * first. Body: { to_character_id, credits }.
+ */
+router.post('/:gameKey/characters/:id/give', authenticate, async (req, res) => {
+  const toCharacterId = parseInt(req.body.to_character_id, 10);
+  const amount = parseInt(req.body.credits, 10);
+  if (!toCharacterId) return res.status(400).json({ message: 'to_character_id is required' });
+  if (!amount || amount <= 0) return res.status(400).json({ message: 'credits must be a positive number' });
+
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id, gu.display_name FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+    if (!(await isAlive(client, req.params.id))) return res.status(409).json({ message: 'This pilot is lost.' });
+
+    const target = await loadSameSectorTarget(client, req.params.id, toCharacterId);
+    if (!target) return res.status(404).json({ message: 'That pilot is not in this sector' });
+
+    await client.beginTransaction();
+    const spend = await client.query(
+      'UPDATE haulonaut_pilots SET credits = credits - $1 WHERE game_user_id = $2 AND credits >= $1',
+      [amount, req.params.id]
+    );
+    if (!spend.affectedRows) {
+      await client.rollback();
+      return res.status(400).json({ message: 'Not enough tokens' });
+    }
+    await client.query('UPDATE haulonaut_pilots SET credits = credits + $1 WHERE game_user_id = $2', [amount, toCharacterId]);
+    await client.commit();
+
+    const pilotAfter = await client.query('SELECT credits FROM haulonaut_pilots WHERE game_user_id = $1', [req.params.id]);
+
+    if (target.user_id) {
+      const targetAfter = await client.query('SELECT credits FROM haulonaut_pilots WHERE game_user_id = $1', [toCharacterId]);
+      emitToUser(target.user_id, 'haulonaut_gift_received', {
+        fromDisplayName: ownerCheck.rows[0].display_name,
+        credits: amount,
+        newBalance: targetAfter.rows[0]?.credits
+      });
+    }
+
+    res.json({ message: `Gave ${amount} Tokens to ${target.display_name}`, credits: pilotAfter.rows[0].credits });
+  } catch (err) {
+    await client.rollback();
+    console.error('Error giving credits:', err);
+    res.status(500).json({ message: 'Failed to give credits' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/characters/:id/trade-offers
+ * Offers a quantity of one item from this character's own inventory to
+ * another active character in the same sector, in exchange for a set
+ * amount of credits. Nothing moves yet -- the target has to /accept it
+ * (see the route below) before either side's balance changes. Body:
+ * { to_character_id, item_key, quantity, credits }.
+ */
+router.post('/:gameKey/characters/:id/trade-offers', authenticate, async (req, res) => {
+  const toCharacterId = parseInt(req.body.to_character_id, 10);
+  const itemKey = (req.body.item_key || '').trim();
+  const quantity = parseInt(req.body.quantity, 10);
+  const credits = parseInt(req.body.credits, 10);
+  if (!toCharacterId) return res.status(400).json({ message: 'to_character_id is required' });
+  if (!itemKey) return res.status(400).json({ message: 'item_key is required' });
+  if (!quantity || quantity <= 0) return res.status(400).json({ message: 'quantity must be a positive number' });
+  if (!Number.isInteger(credits) || credits < 0) return res.status(400).json({ message: 'credits must be zero or a positive number' });
+
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id, gu.display_name FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+    if (!(await isAlive(client, req.params.id))) return res.status(409).json({ message: 'This pilot is lost.' });
+
+    const target = await loadSameSectorTarget(client, req.params.id, toCharacterId);
+    if (!target) return res.status(404).json({ message: 'That pilot is not in this sector' });
+    if (target.is_npc) return res.status(400).json({ message: 'NPCs cannot respond to trade offers' });
+
+    const itemResult = await client.query('SELECT id, name FROM haulonaut_items WHERE item_key = $1', [itemKey]);
+    if (itemResult.rowCount === 0) return res.status(404).json({ message: 'Item not found' });
+    const item = itemResult.rows[0];
+
+    const invResult = await client.query(
+      'SELECT quantity FROM haulonaut_pilot_inventory WHERE game_user_id = $1 AND item_id = $2',
+      [req.params.id, item.id]
+    );
+    const owned = invResult.rowCount > 0 ? invResult.rows[0].quantity : 0;
+    if (owned < quantity) return res.status(400).json({ message: `You only have ${owned} ${item.name}` });
+
+    const insertResult = await client.query(
+      `INSERT INTO haulonaut_trade_offers (from_game_user_id, to_game_user_id, item_id, quantity, credits)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [req.params.id, toCharacterId, item.id, quantity, credits]
+    );
+
+    if (target.user_id) {
+      emitToUser(target.user_id, 'haulonaut_trade_offer', {
+        offerId: insertResult.insertId,
+        fromCharacterId: Number(req.params.id),
+        fromDisplayName: ownerCheck.rows[0].display_name,
+        itemKey,
+        itemName: item.name,
+        quantity,
+        credits
+      });
+    }
+
+    res.status(201).json({
+      message: `Offered ${quantity} ${item.name} to ${target.display_name} for ${credits} Tokens`,
+      offerId: insertResult.insertId
+    });
+  } catch (err) {
+    console.error('Error creating trade offer:', err);
+    res.status(500).json({ message: 'Failed to create trade offer' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * GET /api/games/:gameKey/characters/:id/trade-offers
+ * Every pending trade offer involving this character, either direction --
+ * lets a client that missed the real-time socket notification (was
+ * offline, reloaded, ...) catch up on what's waiting for a response.
+ */
+router.get('/:gameKey/characters/:id/trade-offers', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+
+    const offersResult = await client.query(
+      `SELECT o.id, o.from_game_user_id, o.to_game_user_id, o.quantity, o.credits, o.created_at,
+              i.item_key, i.name AS item_name,
+              fromGu.display_name AS from_display_name, toGu.display_name AS to_display_name
+       FROM haulonaut_trade_offers o
+       JOIN haulonaut_items i ON i.id = o.item_id
+       JOIN game_users fromGu ON fromGu.id = o.from_game_user_id
+       JOIN game_users toGu ON toGu.id = o.to_game_user_id
+       WHERE o.status = 'pending' AND (o.from_game_user_id = $1 OR o.to_game_user_id = $1)
+       ORDER BY o.created_at DESC`,
+      [req.params.id]
+    );
+
+    res.json({ offers: offersResult.rows });
+  } catch (err) {
+    console.error('Error loading trade offers:', err);
+    res.status(500).json({ message: 'Failed to load trade offers' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/characters/:id/trade-offers/:offerId/accept
+ * Completes a pending trade offer -- only the offer's target may accept.
+ * Re-validates everything at this moment rather than trusting the state
+ * from when the offer was created: the proposer must still be in this
+ * sector and still hold enough of the item, and this character must still
+ * have enough credits. Either failing declines the offer outright rather
+ * than leaving it pending against assumptions that are no longer true.
+ */
+router.post('/:gameKey/characters/:id/trade-offers/:offerId/accept', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+    if (!(await isAlive(client, req.params.id))) return res.status(409).json({ message: 'This pilot is lost.' });
+
+    const offerResult = await client.query(
+      `SELECT o.*, i.name AS item_name
+       FROM haulonaut_trade_offers o
+       JOIN haulonaut_items i ON i.id = o.item_id
+       WHERE o.id = $1 AND o.to_game_user_id = $2 AND o.status = 'pending'`,
+      [req.params.offerId, req.params.id]
+    );
+    if (offerResult.rowCount === 0) return res.status(404).json({ message: 'Trade offer not found' });
+    const offer = offerResult.rows[0];
+
+    const proposer = await loadSameSectorTarget(client, req.params.id, offer.from_game_user_id);
+    if (!proposer) {
+      await client.query(`UPDATE haulonaut_trade_offers SET status = 'declined', resolved_at = NOW() WHERE id = $1`, [offer.id]);
+      return res.status(409).json({ message: 'They are no longer in this sector' });
+    }
+
+    await client.beginTransaction();
+
+    const takeItem = await client.query(
+      'UPDATE haulonaut_pilot_inventory SET quantity = quantity - $1 WHERE game_user_id = $2 AND item_id = $3 AND quantity >= $1',
+      [offer.quantity, offer.from_game_user_id, offer.item_id]
+    );
+    if (!takeItem.affectedRows) {
+      await client.rollback();
+      await client.query(`UPDATE haulonaut_trade_offers SET status = 'declined', resolved_at = NOW() WHERE id = $1`, [offer.id]);
+      return res.status(409).json({ message: `They no longer have enough ${offer.item_name}` });
+    }
+
+    const takeCredits = await client.query(
+      'UPDATE haulonaut_pilots SET credits = credits - $1 WHERE game_user_id = $2 AND credits >= $1',
+      [offer.credits, req.params.id]
+    );
+    if (!takeCredits.affectedRows) {
+      await client.rollback();
+      return res.status(400).json({ message: 'Not enough tokens' });
+    }
+
+    await client.query(
+      `INSERT INTO haulonaut_pilot_inventory (game_user_id, item_id, quantity) VALUES ($1, $2, $3)
+       ON DUPLICATE KEY UPDATE quantity = quantity + $3`,
+      [req.params.id, offer.item_id, offer.quantity]
+    );
+    await client.query('UPDATE haulonaut_pilots SET credits = credits + $1 WHERE game_user_id = $2', [offer.credits, offer.from_game_user_id]);
+    await client.query(`UPDATE haulonaut_trade_offers SET status = 'accepted', resolved_at = NOW() WHERE id = $1`, [offer.id]);
+
+    await client.commit();
+
+    const pilotAfter = await client.query('SELECT credits FROM haulonaut_pilots WHERE game_user_id = $1', [req.params.id]);
+    const inventory = await loadInventory(client, req.params.id);
+
+    if (proposer.user_id) {
+      const proposerAfter = await client.query('SELECT credits FROM haulonaut_pilots WHERE game_user_id = $1', [offer.from_game_user_id]);
+      emitToUser(proposer.user_id, 'haulonaut_trade_resolved', {
+        offerId: offer.id,
+        accepted: true,
+        itemName: offer.item_name,
+        quantity: offer.quantity,
+        credits: offer.credits,
+        newBalance: proposerAfter.rows[0]?.credits
+      });
+    }
+
+    res.json({
+      message: `Trade complete: ${offer.quantity} ${offer.item_name} for ${offer.credits} Tokens`,
+      credits: pilotAfter.rows[0].credits,
+      inventory
+    });
+  } catch (err) {
+    await client.rollback();
+    console.error('Error accepting trade offer:', err);
+    res.status(500).json({ message: 'Failed to accept trade offer' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/characters/:id/trade-offers/:offerId/decline
+ * Rejects a pending trade offer -- only the offer's target may decline.
+ */
+router.post('/:gameKey/characters/:id/trade-offers/:offerId/decline', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+
+    const offerResult = await client.query(
+      `SELECT o.from_game_user_id, i.name AS item_name, o.quantity, o.credits
+       FROM haulonaut_trade_offers o
+       JOIN haulonaut_items i ON i.id = o.item_id
+       WHERE o.id = $1 AND o.to_game_user_id = $2 AND o.status = 'pending'`,
+      [req.params.offerId, req.params.id]
+    );
+    if (offerResult.rowCount === 0) return res.status(404).json({ message: 'Trade offer not found' });
+    const offer = offerResult.rows[0];
+
+    await client.query(`UPDATE haulonaut_trade_offers SET status = 'declined', resolved_at = NOW() WHERE id = $1`, [req.params.offerId]);
+
+    const fromResult = await client.query('SELECT user_id FROM game_users WHERE id = $1', [offer.from_game_user_id]);
+    if (fromResult.rows[0]?.user_id) {
+      emitToUser(fromResult.rows[0].user_id, 'haulonaut_trade_resolved', {
+        offerId: Number(req.params.offerId),
+        accepted: false,
+        itemName: offer.item_name,
+        quantity: offer.quantity,
+        credits: offer.credits
+      });
+    }
+
+    res.json({ message: 'Trade offer declined' });
+  } catch (err) {
+    console.error('Error declining trade offer:', err);
+    res.status(500).json({ message: 'Failed to decline trade offer' });
   } finally {
     client.release();
   }
