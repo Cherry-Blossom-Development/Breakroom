@@ -135,4 +135,4 @@ async function checkAndFilterContent(contentType, contentId, texts, authorId) {
   return false;
 }
 
-module.exports = { checkAndFilterContent, invalidateCache };
+module.exports = { checkAndFilterContent, invalidateCache, getActiveKeywords, matchesKeyword };

@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { getClient } = require('./db');
-const { checkAndFilterContent } = require('./contentFilter');
+const { checkAndFilterContent, getActiveKeywords, matchesKeyword } = require('./contentFilter');
 const { sendToUsers } = require('./fcm');
 const { logCreation } = require('./creationLogger');
 
@@ -313,6 +313,83 @@ const initializeSocket = (io) => {
     socket.on('leave_post', (postId) => {
       socket.leave(`post_${postId}`);
       console.log(`${socket.user.handle} left post ${postId} comments`);
+    });
+
+    // Haulonaut: sector presence + live chat between characters sharing a
+    // sector. Not persisted anywhere -- a sector's "comms channel" only
+    // exists for whoever is in it right now, same as the existing
+    // playersHere sector scan (see routes/games.js). A socket can only ever
+    // be in one sector room at a time (haulonautSectorRoom tracks it), so
+    // joining a new sector implicitly leaves the old one; joining/sending
+    // both re-verify the character's actual current_sector_id server-side
+    // rather than trusting whatever the client last told us, since a warp
+    // can happen without this socket knowing about it yet.
+    socket.on('haulonaut_join_sector', async ({ characterId }) => {
+      const client = await getClient();
+      try {
+        const charResult = await client.query(
+          `SELECT hp.current_sector_id
+           FROM game_users gu
+           JOIN haulonaut_pilots hp ON hp.game_user_id = gu.id
+           WHERE gu.id = $1 AND gu.user_id = $2 AND gu.status = 'active'`,
+          [characterId, socket.user.id]
+        );
+        if (charResult.rowCount === 0) return;
+
+        if (socket.haulonautSectorRoom) socket.leave(socket.haulonautSectorRoom);
+        const room = `haulonaut_sector_${charResult.rows[0].current_sector_id}`;
+        socket.join(room);
+        socket.haulonautSectorRoom = room;
+        socket.haulonautCharacterId = characterId;
+      } catch (err) {
+        console.error('Error joining Haulonaut sector:', err);
+      } finally {
+        client.release();
+      }
+    });
+
+    // Broadcast a short message to every other socket currently in the same
+    // sector room. Sender doesn't get their own message echoed back --
+    // the client already shows its own line optimistically when it sends.
+    socket.on('haulonaut_sector_message', async ({ characterId, message }) => {
+      const text = (message || '').toString().trim().slice(0, 280);
+      if (!text || !socket.haulonautSectorRoom || socket.haulonautCharacterId !== characterId) return;
+
+      const client = await getClient();
+      try {
+        const charResult = await client.query(
+          `SELECT gu.display_name, hp.current_sector_id
+           FROM game_users gu
+           JOIN haulonaut_pilots hp ON hp.game_user_id = gu.id
+           WHERE gu.id = $1 AND gu.user_id = $2 AND gu.status = 'active'`,
+          [characterId, socket.user.id]
+        );
+        if (charResult.rowCount === 0) return;
+        const { display_name, current_sector_id } = charResult.rows[0];
+        const room = `haulonaut_sector_${current_sector_id}`;
+        // Stale room membership -- the character warped since this socket
+        // last joined a sector, and hasn't re-joined yet. Drop rather than
+        // broadcast into a sector the character isn't actually in.
+        if (room !== socket.haulonautSectorRoom) return;
+
+        const keywords = await getActiveKeywords();
+        if (matchesKeyword(text, keywords)) {
+          socket.emit('error', { message: 'Message blocked by content filter' });
+          return;
+        }
+
+        socket.to(room).emit('haulonaut_sector_message', {
+          sectorId: current_sector_id,
+          characterId,
+          displayName: display_name,
+          message: text,
+          sentAt: new Date().toISOString()
+        });
+      } catch (err) {
+        console.error('Error sending Haulonaut sector message:', err);
+      } finally {
+        client.release();
+      }
     });
 
     // Handle disconnect

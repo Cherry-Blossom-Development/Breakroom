@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { io } from 'socket.io-client'
 import HaulonautStatChip from '@/components/HaulonautStatChip.vue'
 
 const route = useRoute()
@@ -1093,13 +1094,54 @@ function logLandingEvent(narration, effects) {
   scrollLogToBottom()
 }
 
+// Sector comms -- the terminal doubles as a local radio: anything typed
+// here that isn't a recognized command (none exist yet) goes out as a
+// broadcast to every other pilot currently in this sector, the same crowd
+// listed in SECTOR SCAN. One socket connection per page visit, joining
+// whatever sector the character is currently in and re-joining on every
+// warp/drift (see the currentSector watcher below). Not persisted --
+// there's nothing to load if you weren't listening when it was sent.
+let sectorSocket = null
+
+function connectSectorSocket() {
+  if (sectorSocket) return
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
+  sectorSocket = io(baseUrl, { withCredentials: true, autoConnect: false })
+
+  sectorSocket.on('connect', () => {
+    if (currentSector.value) joinSectorRoom()
+  })
+
+  sectorSocket.on('haulonaut_sector_message', (data) => {
+    if (!currentSector.value || data.sectorId !== currentSector.value.id) return
+    logLines.value.push(`${data.displayName}: ${data.message}`)
+    scrollLogToBottom()
+  })
+
+  sectorSocket.connect()
+}
+
+// The server derives the actual sector from the character's row -- this
+// just tells it "re-check and join wherever I am now".
+function joinSectorRoom() {
+  if (!sectorSocket?.connected) return
+  sectorSocket.emit('haulonaut_join_sector', { characterId: route.params.characterId })
+}
+
+// Re-joins the sector comms room every time the ship actually moves
+// (warp, drift, or the initial load setting currentSector for the first
+// time) -- covers all three without repeating this call at each call site.
+watch(() => currentSector.value?.id, (sectorId) => {
+  if (sectorId) joinSectorRoom()
+})
+
 function submitTerminalCommand() {
   const text = terminalInput.value.trim()
   if (!text) return
   logLines.value.push(text)
-  logLines.value.push('Command not recognized.')
   terminalInput.value = ''
   scrollLogToBottom()
+  sectorSocket?.emit('haulonaut_sector_message', { characterId: route.params.characterId, message: text })
 }
 
 // Every action endpoint (navigate, dock, drive-buggy, purchase, drift,
@@ -1168,7 +1210,8 @@ async function loadCharacter() {
     regenerateStarfield()
     logLines.value = [
       'Docking confirmed.',
-      data.currentSector ? `Arrived in Sector ${data.currentSector.sector_number}.` : null
+      data.currentSector ? `Arrived in Sector ${data.currentSector.sector_number}.` : null,
+      'Local comms channel open -- type below to broadcast to this sector.'
     ].filter(Boolean)
     scrollLogToBottom()
   } catch (err) {
@@ -1678,6 +1721,7 @@ onMounted(async () => {
   window.addEventListener('keydown', onKeydown)
   document.addEventListener('visibilitychange', onVisibilityChange)
   driftIntervalId = setInterval(driftTick, 1000)
+  connectSectorSocket()
 })
 
 onUnmounted(() => {
@@ -1688,6 +1732,7 @@ onUnmounted(() => {
   if (driftIntervalId) clearInterval(driftIntervalId)
   if (landingTimeoutId) clearTimeout(landingTimeoutId)
   if (launchTimeoutId) clearTimeout(launchTimeoutId)
+  sectorSocket?.disconnect()
 })
 </script>
 
