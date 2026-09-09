@@ -6,7 +6,6 @@ import { chat } from '@/stores/chat.js'
 import { breakroom } from '@/stores/breakroom.js'
 import { friends } from '@/stores/friends.js'
 import { badges } from '@/stores/badges.js'
-import { features } from '@/stores/features.js'
 import InviteModal from './InviteModal.vue'
 
 const props = defineProps({
@@ -500,7 +499,7 @@ function handleNavClick() {
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <span>Discover</span>
         </RouterLink>
-        <RouterLink v-if="features.has('games')" to="/games" class="nav-item" @click="handleNavClick">
+        <RouterLink to="/games" class="nav-item" @click="handleNavClick">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="6"/><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><circle cx="15" cy="10.5" r="1"/><circle cx="18" cy="13.5" r="1"/></svg>
           <span>Games</span>
         </RouterLink>
