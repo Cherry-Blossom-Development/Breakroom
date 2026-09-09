@@ -1144,6 +1144,25 @@ function connectSectorSocket() {
     scrollLogToBottom()
   })
 
+  // Combat (see /attack in games.js) -- one broadcast to the whole sector
+  // room covers attacker, target, and bystanders, each phrased from their
+  // own point of view; the attacker's own /attack call deliberately logs
+  // nothing on success so this is the only line they see too.
+  sectorSocket.on('haulonaut_combat_event', (data) => {
+    if (!currentSector.value || data.sectorId !== currentSector.value.id) return
+    const myId = Number(route.params.characterId)
+    if (data.toCharacterId === myId) {
+      logLines.value.push(`${data.fromDisplayName} attacks you for ${data.damage} damage! Health: ${data.targetHealth}.`)
+      health.value = data.targetHealth
+      if (data.died) dead.value = true
+    } else if (data.fromCharacterId === myId) {
+      logLines.value.push(`You hit ${data.toDisplayName} for ${data.damage} damage. Their health: ${data.targetHealth}.`)
+    } else {
+      logLines.value.push(`${data.fromDisplayName} attacks ${data.toDisplayName} for ${data.damage} damage.`)
+    }
+    scrollLogToBottom()
+  })
+
   sectorSocket.connect()
 }
 
@@ -1268,6 +1287,37 @@ async function handleTerminalSlashCommand(rest) {
     return scrollLogToBottom()
   }
 
+  if (cmd === 'attack') {
+    const targetName = tokens.join(' ')
+    if (!targetName) {
+      logLines.value.push('Usage: /attack <pilot name>')
+      return scrollLogToBottom()
+    }
+    const target = findPlayerHereByName(targetName)
+    if (!target) {
+      logLines.value.push(`No pilot named "${targetName}" in this sector.`)
+      return scrollLogToBottom()
+    }
+    try {
+      const res = await fetch(`/api/games/haulonaut/characters/${charId}/attack`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to_character_id: target.id })
+      })
+      // Success says nothing here -- the haulonaut_combat_event broadcast
+      // (sent to the whole sector, attacker included) is what logs the hit.
+      if (!res.ok) {
+        const data = await res.json()
+        logLines.value.push(data.message || 'Attack failed.')
+        if (typeof data.cycles === 'number') cycles.value = data.cycles
+      }
+    } catch {
+      logLines.value.push('Transmission failed.')
+    }
+    return scrollLogToBottom()
+  }
+
   logLines.value.push('Command not recognized.')
   scrollLogToBottom()
 }
@@ -1355,7 +1405,8 @@ async function loadCharacter() {
       'Docking confirmed.',
       data.currentSector ? `Arrived in Sector ${data.currentSector.sector_number}.` : null,
       'Local comms channel open -- type below to broadcast to this sector.',
-      'Trading: /give <pilot> <credits>, /offer <pilot> <item_key> <qty> for <credits>, /accept <id>, /decline <id>.'
+      'Trading: /give <pilot> <credits>, /offer <pilot> <item_key> <qty> for <credits>, /accept <id>, /decline <id>.',
+      'Combat: /attack <pilot> -- requires a Laser Cannon in your cargo.'
     ].filter(Boolean)
     scrollLogToBottom()
     loadPendingTradeOffers()

@@ -5,7 +5,7 @@ const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { buildUniverseGraph, generateSectorContent, randomNpcName } = require('../utilities/haulonautUniverse');
 const { rollLandingEvent } = require('../utilities/haulonautLandingEvents');
-const { emitToUser } = require('../utilities/socket');
+const { emitToUser, getIO } = require('../utilities/socket');
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -63,6 +63,24 @@ const CYCLE_REPLENISH_SECONDS = 720; // one cycle per 12 min -> 5/hour; full 120
 const WARP_CYCLE_COST = 5;
 const DOCK_CYCLE_COST = 5;
 const BUGGY_CYCLE_COST = 1;
+
+// Combat -- open PvP, health-only stakes (see /attack below): no consent
+// needed to attack another active, non-NPC character in the same sector,
+// and losing costs health rather than credits/cargo, reusing the exact
+// death mechanic starvation already uses (health to 0 -> game_users.status
+// = 'dead'). Requires owning a laser_cannon (see haulonaut_items, migration
+// 060) rather than a separate "combat power" stat -- your ship needs a
+// mounted weapon to fight, and the item already existed in the catalog
+// unused. ATTACK_CYCLE_COST is cheaper than a warp/dock (the big
+// maneuvers) but still draws from the same scarce budget, which is what
+// actually throttles how often anyone can fight -- there's no separate
+// combat cooldown. Damage is randomized within a range comparable to a
+// single starved warp (WARP_STARVATION_DAMAGE), so a fight plays out over
+// several hits rather than one-shotting from full health.
+const ATTACK_CYCLE_COST = 3;
+const ATTACK_MIN_DAMAGE = 15;
+const ATTACK_MAX_DAMAGE = 30;
+const ATTACK_WEAPON_ITEM_KEY = 'laser_cannon';
 
 // A planet surface's exploration grid -- low-res and small on purpose (see
 // haulonaut_surface_maps in migration 063). Reveal radius 1 means a 3x3
@@ -1312,6 +1330,98 @@ router.post('/:gameKey/characters/:id/trade-offers/:offerId/decline', authentica
   } catch (err) {
     console.error('Error declining trade offer:', err);
     res.status(500).json({ message: 'Failed to decline trade offer' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/characters/:id/attack
+ * Open PvP -- no consent needed, just a shared sector, an active
+ * (non-NPC) target, a mounted weapon, and enough cycles. Deals randomized
+ * damage to the target's health and can kill them outright, exactly like a
+ * starved warp does (see applyWarpHealth above) -- there's no separate
+ * combat-death path. Body: { to_character_id }.
+ *
+ * Doesn't notify the target directly (no emitToUser here) -- the result is
+ * broadcast to the whole sector room instead (haulonaut_combat_event, see
+ * utilities/socket.js's haulonaut_join_sector), which reaches the
+ * attacker, the target, and any bystanders identically, all already
+ * listening there for sector chat. The HTTP response only carries back
+ * validation errors; a successful hit's outcome is told to everyone,
+ * attacker included, by that one broadcast rather than a duplicated
+ * success message.
+ */
+router.post('/:gameKey/characters/:id/attack', authenticate, async (req, res) => {
+  const toCharacterId = parseInt(req.body.to_character_id, 10);
+  if (!toCharacterId) return res.status(400).json({ message: 'to_character_id is required' });
+
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id, gu.display_name FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+    if (!(await isAlive(client, req.params.id))) return res.status(409).json({ message: 'This pilot is lost.' });
+
+    const target = await loadSameSectorTarget(client, req.params.id, toCharacterId);
+    if (!target) return res.status(404).json({ message: 'That pilot is not in this sector' });
+    if (target.is_npc) return res.status(400).json({ message: 'NPCs cannot be attacked' });
+
+    const weaponResult = await client.query(
+      `SELECT hi.quantity FROM haulonaut_pilot_inventory hi
+       JOIN haulonaut_items i ON i.id = hi.item_id
+       WHERE hi.game_user_id = $1 AND i.item_key = $2`,
+      [req.params.id, ATTACK_WEAPON_ITEM_KEY]
+    );
+    if (!weaponResult.rowCount || weaponResult.rows[0].quantity < 1) {
+      return res.status(400).json({ message: 'You need a weapon to attack -- buy a Laser Cannon at a trading outpost.' });
+    }
+
+    const pilotResult = await client.query('SELECT current_sector_id FROM haulonaut_pilots WHERE game_user_id = $1', [req.params.id]);
+    const sectorId = pilotResult.rows[0].current_sector_id;
+
+    const spent = await spendCycles(client, req.params.id, ATTACK_CYCLE_COST);
+    if (!spent.ok) {
+      return res.status(409).json({ message: `Not enough cycles to attack (need ${ATTACK_CYCLE_COST})`, cycles: spent.cycles, cyclesUpdatedAt: spent.cyclesUpdatedAt });
+    }
+
+    const damage = ATTACK_MIN_DAMAGE + Math.floor(Math.random() * (ATTACK_MAX_DAMAGE - ATTACK_MIN_DAMAGE + 1));
+    await client.query('UPDATE haulonaut_pilots SET health = GREATEST(0, health - $1) WHERE game_user_id = $2', [damage, toCharacterId]);
+    const healthResult = await client.query('SELECT health FROM haulonaut_pilots WHERE game_user_id = $1', [toCharacterId]);
+    const targetHealth = Number(healthResult.rows[0].health);
+
+    let died = false;
+    if (targetHealth <= 0) {
+      const killUpdate = await client.query(
+        "UPDATE game_users SET status = 'dead', died_at = NOW() WHERE id = $1 AND status = 'active'",
+        [toCharacterId]
+      );
+      died = killUpdate.affectedRows > 0;
+    }
+
+    const io = getIO();
+    if (io) {
+      io.to(`haulonaut_sector_${sectorId}`).emit('haulonaut_combat_event', {
+        sectorId,
+        fromCharacterId: Number(req.params.id),
+        fromDisplayName: ownerCheck.rows[0].display_name,
+        toCharacterId,
+        toDisplayName: target.display_name,
+        damage,
+        targetHealth,
+        died
+      });
+    }
+
+    res.json({ message: `Hit ${target.display_name} for ${damage} damage.`, damage, targetHealth, died });
+  } catch (err) {
+    console.error('Error attacking:', err);
+    res.status(500).json({ message: 'Failed to attack' });
   } finally {
     client.release();
   }
