@@ -191,29 +191,30 @@ function teardownNotificationSocket() {
 
 recordVisit()
 
+// Guests are game-only accounts — they never see chat/blog/friends, so skip
+// all the notification/badge/event machinery that backs those surfaces.
+function initLoggedInServices() {
+  notificationStore.fetchNotifications()
+  moderationStore.fetchBlockList()
+  badges.fetchAll()
+  features.load()
+  initEventService()
+  setupNotificationSocket()
+}
+
 user.fetchUser().then(() => {
   checkAdminPermission()
   checkMarketingPermission()
-  if (user.username) {
-    notificationStore.fetchNotifications()
-    moderationStore.fetchBlockList()
-    badges.fetchAll()
-    features.load()
-    initEventService()
-    setupNotificationSocket()
+  if (user.username && !user.isGuest) {
+    initLoggedInServices()
   }
 })
 
 watch(() => user.username, (newUsername) => {
   checkAdminPermission()
   checkMarketingPermission()
-  if (newUsername) {
-    notificationStore.fetchNotifications()
-    moderationStore.fetchBlockList()
-    badges.fetchAll()
-    features.load()
-    initEventService()
-    setupNotificationSocket()
+  if (newUsername && !user.isGuest) {
+    initLoggedInServices()
   } else {
     destroyEventService()
     teardownNotificationSocket()
@@ -342,8 +343,24 @@ setInterval(() => {
     </div>
   </div>
 
+  <!-- Guest (game-only account): stripped chrome, no sidebar/tab bar -->
+  <template v-if="user.username && user.isGuest && !route.meta.publicLayout">
+    <header class="guest-header">
+      <div class="guest-header-inner">
+        <img src="/logo-192x192-no-text.png" alt="Prosaurus" class="guest-logo" />
+        <span class="guest-tag">Guest</span>
+        <span class="guest-spacer"></span>
+        <RouterLink to="/signup" class="guest-header-link">Create a full account</RouterLink>
+        <a href="#" class="guest-header-link" @click.prevent="logout">Logout</a>
+      </div>
+    </header>
+    <div class="guest-content">
+      <RouterView />
+    </div>
+  </template>
+
   <!-- Logged-in: sidebar + bottom bar navigation -->
-  <template v-if="user.username && !route.meta.publicLayout">
+  <template v-else-if="user.username && !route.meta.publicLayout">
     <!-- Impersonation banner -->
     <div v-if="impersonatedUser" class="impersonation-banner">
       <span>⚠ Admin impersonation of <strong>{{ impersonatedUser }}</strong> — all actions are real</span>
@@ -662,6 +679,63 @@ body {
   width: 32px;
   height: 32px;
   border-radius: 50%;
+}
+
+/* ============================================
+   GUEST (GAME-ONLY) HEADER
+   ============================================ */
+
+.guest-header {
+  background: var(--color-header-bg);
+  color: var(--color-header-text);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.guest-header-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 8px 16px;
+}
+
+.guest-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+}
+
+.guest-tag {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border: 1px solid currentColor;
+  border-radius: 10px;
+  opacity: 0.8;
+}
+
+.guest-spacer {
+  flex: 1;
+}
+
+.guest-header-link {
+  color: var(--color-header-text);
+  text-decoration: none;
+  font-size: 0.85rem;
+  opacity: 0.9;
+}
+
+.guest-header-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.guest-content {
+  max-width: 1100px;
+  margin: 0 auto;
 }
 
 /* ============================================

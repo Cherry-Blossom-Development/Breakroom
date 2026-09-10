@@ -153,6 +153,12 @@ const router = createRouter({
       component: () => import('../views/SignupPage.vue'),
     },
     {
+      path: '/play',
+      name: 'guestPlay',
+      component: () => import('../views/GuestPlayPage.vue'),
+      meta: { publicLayout: true }, // No requiresAuth - guest onboarding for Haulonaut
+    },
+    {
       path: '/verify',
       name: 'verify',
       component: () => import('../views/VerifyPage.vue'),
@@ -417,6 +423,18 @@ router.beforeEach(async (to, from, next) => {
   // Fetch user if not already loaded
   if (!user.username) {
     await user.fetchUser()
+  }
+
+  // Guests are game-only accounts — confine them to Haulonaut and a few
+  // supporting pages. Everything else bounces to the Games hub.
+  if (user.isGuest) {
+    const guestAllowed = ['guestPlay', 'games', 'haulonautPlay', 'eula', 'login']
+    if (!guestAllowed.includes(to.name)) {
+      next({ name: 'games' })
+    } else {
+      next()
+    }
+    return
   }
 
   // Redirect logged-in users away from home page to breakroom

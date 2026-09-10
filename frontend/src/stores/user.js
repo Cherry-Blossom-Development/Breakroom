@@ -4,6 +4,7 @@ import { sessions } from './sessions'
 const state = reactive({
   username: null,
   timezone: null,
+  isGuest: false,
 })
 
 export const user = reactive({
@@ -12,6 +13,9 @@ export const user = reactive({
   },
   get timezone() {
     return state.timezone
+  },
+  get isGuest() {
+    return state.isGuest
   },
   async fetchUser() {
     try {
@@ -24,6 +28,7 @@ export const user = reactive({
       const data = await res.json();
       state.username = data.username;
       state.timezone = data.timezone ?? null;
+      state.isGuest = data.isGuest ?? false;
 
       // Auto-detect and save timezone on first login (when DB value is null)
       if (!state.timezone) {
@@ -44,6 +49,7 @@ export const user = reactive({
       console.log(err);
       state.username = null;
       state.timezone = null;
+      state.isGuest = false;
     }
   },
 
@@ -59,5 +65,6 @@ export const user = reactive({
     sessions.reset();
     state.username = null;
     state.timezone = null;
+    state.isGuest = false;
   }
 });

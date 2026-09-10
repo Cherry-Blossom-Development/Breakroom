@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { user } from '@/stores/user.js'
 
 const router = useRouter()
 
@@ -111,7 +112,7 @@ onMounted(loadGame)
         >
           {{ mostRecentCharacter ? 'RESUME ▶' : (instances.length > 0 ? 'PLAY NOW ▶' : 'NO UNIVERSES ONLINE') }}
         </button>
-        <button v-if="isAdmin" class="admin-link-btn" @click="router.push('/games/haulonaut/admin')">⚙ Manage Universe</button>
+        <button v-if="isAdmin && !user.isGuest" class="admin-link-btn" @click="router.push('/games/haulonaut/admin')">⚙ Manage Universe</button>
       </div>
 
       <!-- Active universes -->
@@ -125,7 +126,7 @@ onMounted(loadGame)
                 {{ inst.sector_count }} sectors · {{ inst.player_count }} player{{ inst.player_count == 1 ? '' : 's' }} · since {{ formatDate(inst.started_at) }}
               </span>
             </div>
-            <button class="new-game-btn" @click="openCreateModal(inst.id)">+ New Character</button>
+            <button v-if="!user.isGuest" class="new-game-btn" @click="openCreateModal(inst.id)">+ New Character</button>
           </div>
         </div>
       </section>

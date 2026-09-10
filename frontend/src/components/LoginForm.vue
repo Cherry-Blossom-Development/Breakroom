@@ -26,6 +26,10 @@
     <p class="signup-prompt">
       Don't have an account? <RouterLink to="/signup">Sign up</RouterLink>
     </p>
+    <p class="guest-prompt">
+      Just want to play a game?
+      <RouterLink to="/play">Play Haulonaut &mdash; no account needed</RouterLink>
+    </p>
   </form>
 </template>
 
@@ -228,5 +232,16 @@ export default {
   .signup-prompt a:hover {
     background: var(--color-accent);
     color: white;
+  }
+  .guest-prompt {
+    margin-top: 16px;
+    text-align: center;
+    color: var(--color-text-light);
+    font-size: 0.85em;
+  }
+  .guest-prompt a {
+    color: var(--color-accent);
+    text-decoration: underline;
+    font-weight: bold;
   }
 </style>

@@ -38,7 +38,7 @@ router.get('/all', async (req, res) => {
   try {
     const users = await client.query(
       `SELECT
-         u.id, u.handle, u.first_name, u.last_name, u.email, u.is_internal,
+         u.id, u.handle, u.first_name, u.last_name, u.email, u.is_internal, u.is_guest,
          u.alternate_email, u.alternate_email_verified, u.send_notices_to_alternate_email,
          us.platform  AS sub_platform,
          us.status    AS sub_status,

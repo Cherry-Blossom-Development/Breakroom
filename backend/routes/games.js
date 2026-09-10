@@ -102,7 +102,7 @@ const authenticate = async (req, res, next) => {
 
     const payload = jwt.verify(token, SECRET_KEY);
     const client = await getClient();
-    const result = await client.query('SELECT id, handle FROM users WHERE handle = $1', [payload.username]);
+    const result = await client.query('SELECT id, handle, is_guest FROM users WHERE handle = $1', [payload.username]);
     client.release();
 
     if (result.rowCount === 0) return res.status(401).json({ message: 'User not found' });
@@ -617,6 +617,23 @@ router.post('/:gameKey/characters', authenticate, async (req, res) => {
     );
     if (instanceResult.rowCount === 0) {
       return res.status(409).json({ message: 'That universe is not active' });
+    }
+
+    // Guests get one captain at a time: a single living character in an active
+    // universe. Once it dies (permadeath) or its universe ends they can launch
+    // a fresh one, but they can't run a fleet.
+    if (req.user.is_guest) {
+      const existing = await client.query(
+        `SELECT COUNT(*) AS n FROM game_users gu
+         JOIN game_instances gi ON gi.id = gu.game_instance_id
+         JOIN games g ON g.id = gi.game_id
+         WHERE g.game_key = $1 AND gu.user_id = $2
+           AND gu.status = 'active' AND gi.status = 'active'`,
+        [req.params.gameKey, req.user.id]
+      );
+      if (Number(existing.rows[0].n) >= 1) {
+        return res.status(409).json({ message: 'Guests can only have one captain at a time.' });
+      }
     }
 
     const startSector = await client.query(

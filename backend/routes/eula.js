@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getClient } = require('../utilities/db');
+const { getOrCreateEulaNotification } = require('../utilities/eulaNotification');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
@@ -24,36 +25,6 @@ const authenticate = async (req, res, next) => {
     return res.status(401).json({ message: 'Invalid token' });
   }
 };
-
-// Helper: find or create the EULA notification row for a user.
-// Returns the notification row { id, status, updated_at } or null if no eula_required type exists.
-async function getOrCreateEulaNotification(client, userId) {
-  const eulaType = await client.query(
-    `SELECT nt.id FROM notification_types nt
-     JOIN event_types et ON nt.event_id = et.id
-     WHERE et.type = 'eula_required' AND nt.is_active = TRUE
-     LIMIT 1`
-  );
-  if (eulaType.rowCount === 0) return null;
-  const eulaTypeId = eulaType.rows[0].id;
-
-  const existing = await client.query(
-    'SELECT id, status, updated_at FROM notifications WHERE notif_id = $1 AND user_id = $2',
-    [eulaTypeId, userId]
-  );
-  if (existing.rowCount > 0) return existing.rows[0];
-
-  // Row doesn't exist — create it
-  await client.query(
-    'INSERT INTO notifications (notif_id, user_id, status) VALUES ($1, $2, $3)',
-    [eulaTypeId, userId, 'unviewed']
-  );
-  const created = await client.query(
-    'SELECT id, status, updated_at FROM notifications WHERE notif_id = $1 AND user_id = $2',
-    [eulaTypeId, userId]
-  );
-  return created.rowCount > 0 ? created.rows[0] : null;
-}
 
 /**
  * GET /api/eula/status

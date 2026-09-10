@@ -8,6 +8,7 @@ const { sendMail } = require('../utilities/aws-ses-email');
 const { getPlatform } = require('../utilities/platform');
 const { getIO } = require('../utilities/socket');
 const { findIdentifierCollision } = require('../utilities/userIdentifiers');
+const { acceptEulaForUser } = require('../utilities/eulaNotification');
 
 const { v4: uuidv4 } = require('uuid');
 const jwt = require('jsonwebtoken');
@@ -362,6 +363,124 @@ router.post('/resend-verification', async (req, res) => {
   });
 });
 
+// ─── Guest accounts (game-only, no Prosaurus signup) ─────────────────────────
+// A guest is a real users row flagged is_guest, created so someone can play
+// Haulonaut without joining Prosaurus. The game authenticates purely off the
+// jwtToken cookie / users.id, so everything downstream (game routes, sockets,
+// gifts/trades/attacks, notifications) works unchanged. See migration 071.
+
+// Coarse in-memory abuse guard: at most GUEST_MAX_PER_WINDOW new guest accounts
+// per IP per GUEST_WINDOW_MS. There's no rate-limit library in the app; this is
+// deliberately minimal. Returning guests (same visitorId) reuse their existing
+// row and don't count against this.
+const GUEST_WINDOW_MS = 60 * 60 * 1000;
+const GUEST_MAX_PER_WINDOW = 5;
+const guestCreateHits = new Map(); // ip -> number[] (timestamps)
+
+function guestRateLimited(ip) {
+  const now = Date.now();
+  const hits = (guestCreateHits.get(ip) || []).filter(t => now - t < GUEST_WINDOW_MS);
+  if (hits.length >= GUEST_MAX_PER_WINDOW) {
+    guestCreateHits.set(ip, hits);
+    return true;
+  }
+  hits.push(now);
+  guestCreateHits.set(ip, hits);
+  return false;
+}
+
+function setAuthCookie(res, handle) {
+  const token = jwt.sign({ username: handle }, SECRET_KEY, { expiresIn: '30d' });
+  res.cookie('jwtToken', token, {
+    maxAge: 2592000000, // 30 days
+    domain: process.env.NODE_ENV === 'production' ? '.prosaurus.com' : undefined,
+    path: '/',
+    httpOnly: false,
+    secure: process.env.CORS_ORIGIN?.startsWith('https') || process.env.NODE_ENV === 'production',
+    sameSite: 'lax'
+  });
+  return token;
+}
+
+router.post('/guest', async (req, res) => {
+  const displayName = (req.body.displayName || '').trim();
+  const visitorId = (req.body.visitorId || '').trim() || null;
+  const acceptedEula = req.body.acceptedEula === true;
+
+  if (!acceptedEula) {
+    return res.status(400).json({ message: 'You must accept the EULA to play as a guest.' });
+  }
+  if (displayName.length < 1 || displayName.length > 64) {
+    return res.status(400).json({ message: 'Captain name must be 1 to 64 characters.' });
+  }
+
+  const client = await getClient();
+  try {
+    // Returning guest on the same browser: reuse the existing account (and its
+    // one captain) rather than piling up rows.
+    if (visitorId) {
+      const existing = await client.query(
+        'SELECT handle FROM users WHERE is_guest = true AND signup_visitor_id = $1 LIMIT 1',
+        [visitorId]
+      );
+      if (existing.rowCount > 0) {
+        const token = setAuthCookie(res, existing.rows[0].handle);
+        return res.status(200).json({ message: 'Welcome back', handle: existing.rows[0].handle, token });
+      }
+    }
+
+    const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket?.remoteAddress || 'unknown';
+    if (guestRateLimited(ip)) {
+      return res.status(429).json({ message: 'Too many guest sessions from here. Try again later.' });
+    }
+
+    // Unique synthetic identifiers. handle is VARCHAR(32) UNIQUE; email is
+    // NOT NULL UNIQUE. Retry once on the astronomically unlikely handle clash.
+    let handle;
+    let insertResult;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      handle = 'guest-' + uuidv4().replace(/-/g, '').slice(0, 12);
+      const email = `guest-${uuidv4()}@guests.prosaurus.com`;
+      try {
+        insertResult = await client.query(
+          `INSERT INTO "users" (handle, first_name, email, is_guest, signup_platform, signup_visitor_id)
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+          [handle, 'Guest', email, true, getPlatform(req), visitorId]
+        );
+        break;
+      } catch (err) {
+        if (attempt === 1) throw err;
+      }
+    }
+    const newUserId = insertResult.insertId;
+
+    // Guests keep a real_user_number and count as real users (unlike is_internal).
+    const maxNumberResult = await client.query('SELECT MAX(real_user_number) AS max_number FROM users');
+    const nextRealUserNumber = (maxNumberResult.rows[0].max_number || 0) + 1;
+    await client.query('UPDATE users SET real_user_number = $1 WHERE id = $2', [nextRealUserNumber, newUserId]);
+
+    // Standard group, for permission parity with a normal signup.
+    const standardGroup = await client.query('SELECT id FROM "groups" WHERE name = $1', ['Standard']);
+    if (standardGroup.rowCount > 0) {
+      await client.query('INSERT INTO user_groups (user_id, group_id) VALUES ($1, $2)', [newUserId, standardGroup.rows[0].id]);
+    }
+
+    // EULA acceptance is a precondition of the account existing.
+    await acceptEulaForUser(newUserId, client);
+
+    // Deliberately NOT done for guests: General Chatter membership + welcome
+    // messages, breakroom_blocks, user_blog, verification email.
+
+    const token = setAuthCookie(res, handle);
+    res.status(201).json({ message: 'Guest account created', handle, token });
+  } catch (err) {
+    console.error('Guest signup error:', err);
+    res.status(500).json({ message: 'Failed to create guest account' });
+  } finally {
+    client.release();
+  }
+});
+
 function hashPasswordWithSalt(password, salt) {
   return new Promise((resolve, reject) => {
     const encoder = new TextEncoder();
@@ -492,7 +611,7 @@ router.get('/me', async (req, res) => {
     // Fetch user ID from database
     const client = await getClient();
     const user = await client.query(
-      'SELECT id, timezone FROM users WHERE handle = $1',
+      'SELECT id, timezone, is_guest FROM users WHERE handle = $1',
       [payload.username]
     );
     client.release();
@@ -504,7 +623,8 @@ router.get('/me', async (req, res) => {
     return res.json({
       username: payload.username,
       userId: user.rows[0].id,
-      timezone: user.rows[0].timezone ?? null
+      timezone: user.rows[0].timezone ?? null,
+      isGuest: !!user.rows[0].is_guest
     });
   } catch (err) {
     return res.status(401).json({ message: 'Invalid token' });

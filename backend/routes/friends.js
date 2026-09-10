@@ -132,11 +132,16 @@ router.post('/request/:userId', authenticate, async (req, res) => {
   try {
     // Check if target user exists
     const targetUser = await client.query(
-      'SELECT id, handle FROM users WHERE id = $1',
+      'SELECT id, handle, is_guest FROM users WHERE id = $1',
       [targetUserId]
     );
 
     if (targetUser.rowCount === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Guest accounts are game-only and not real community members.
+    if (targetUser.rows[0].is_guest) {
       return res.status(404).json({ message: 'User not found' });
     }
 
