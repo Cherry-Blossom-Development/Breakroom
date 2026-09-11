@@ -474,6 +474,29 @@ async function computeSectorDistances(client, instanceId, startSectorId) {
   return distances;
 }
 
+// Every sector in `instanceId` that is EXACTLY `distance` warps from
+// startSectorId (BFS hop count, via computeSectorDistances above -- distance
+// 0 means startSectorId itself). Used by the admin NPC-spawn route's "near a
+// player" placement, where an admin asks for a sector some exact number of
+// warps from a chosen player rather than "anywhere" or one specific sector.
+// Returns [{ id, sector_number, description }] -- empty if nothing in the
+// instance sits at that exact distance (e.g. it's farther than the universe's
+// diameter in every direction from that start).
+async function sectorsExactlyNWarpsAway(client, instanceId, startSectorId, distance) {
+  const distances = await computeSectorDistances(client, instanceId, startSectorId);
+  const matchIds = [];
+  for (const [sectorId, info] of distances) {
+    if (info.distance === distance) matchIds.push(sectorId);
+  }
+  if (matchIds.length === 0) return [];
+
+  const result = await client.query(
+    `SELECT id, sector_number, description FROM haulonaut_sectors WHERE id IN (${matchIds.map((_, i) => `$${i + 1}`).join(',')})`,
+    matchIds
+  );
+  return result.rows;
+}
+
 // Records that a character has been to a sector (first visit creates the
 // row; later visits just bump last_visited_at). Drives the "you've been
 // here before" highlight on the warp buttons.
@@ -485,10 +508,26 @@ async function markSectorVisited(client, gameUserId, sectorId) {
   );
 }
 
+// Creates gameUserId's haulonaut_pilots row at a specific, already-resolved
+// `sector` ({ id, sector_number, description }) and marks it visited. Shared
+// by spawnPilotAtRandomSector below and the admin NPC-spawn route, which
+// resolves its own target sector (random / near a player / an exact sector
+// number) before calling this. credits/rations/fuel aren't re-fetched -- a
+// just-inserted pilot always has the column defaults, which match the
+// STARTING_* constants declared near the top of this file.
+async function spawnPilotAtSector(client, gameUserId, sector) {
+  await client.query(
+    'INSERT IGNORE INTO haulonaut_pilots (game_user_id, current_sector_id) VALUES ($1, $2)',
+    [gameUserId, sector.id]
+  );
+  await markSectorVisited(client, gameUserId, sector.id);
+  return { ...sector, credits: STARTING_CREDITS, rations: STARTING_RATIONS, fuel: STARTING_FUEL, health: STARTING_HEALTH };
+}
+
 // Picks a random sector in the character's instance and creates their
 // haulonaut_pilots row there. Returns the sector { id, sector_number,
-// description }, or null if the character or its instance has no sectors
-// at all.
+// description, credits, rations, fuel, health }, or null if the character or
+// its instance has no sectors at all.
 async function spawnPilotAtRandomSector(client, gameUserId) {
   const gameUserResult = await client.query('SELECT game_instance_id FROM game_users WHERE id = $1', [gameUserId]);
   if (gameUserResult.rowCount === 0) return null;
@@ -499,16 +538,7 @@ async function spawnPilotAtRandomSector(client, gameUserId) {
   );
   if (randomSector.rowCount === 0) return null;
 
-  await client.query(
-    'INSERT IGNORE INTO haulonaut_pilots (game_user_id, current_sector_id) VALUES ($1, $2)',
-    [gameUserId, randomSector.rows[0].id]
-  );
-  await markSectorVisited(client, gameUserId, randomSector.rows[0].id);
-
-  // credits/rations/fuel aren't re-fetched here -- a just-inserted pilot
-  // always has the column defaults, which match these constants (see the
-  // comment by their declaration).
-  return { ...randomSector.rows[0], credits: STARTING_CREDITS, rations: STARTING_RATIONS, fuel: STARTING_FUEL, health: STARTING_HEALTH };
+  return spawnPilotAtSector(client, gameUserId, randomSector.rows[0]);
 }
 
 // Resolves a gift/trade target: a different, active character currently in
@@ -2005,15 +2035,34 @@ router.get('/:gameKey/admin/instances/:instanceId/roster', authenticate, require
  * POST /api/games/:gameKey/admin/instances/:instanceId/npcs
  * Game-admin only: spawn `count` NPC pilots into an active instance. Each
  * is an ordinary game_users row (user_id/visitor_id both NULL, is_npc = 1)
- * with a normal haulonaut_pilots row at a random sector -- same starting
- * credits/rations/fuel/health/cycles as a freshly created human character.
- * jobs/haulonautNpcScheduler.js is what actually moves them from there;
- * this endpoint only creates the roster entries. Body: { count } -- default
- * 1, clamped to 1-50 per call so a fat-fingered number can't flood a
- * universe in one request.
+ * with a normal haulonaut_pilots row -- same starting credits/rations/fuel/
+ * health/cycles as a freshly created human character. jobs/haulonautNpcScheduler.js
+ * is what actually moves them from there; this endpoint only creates the
+ * roster entries. Body: { count, placement, targetGameUserId, sectorsAway,
+ * sectorNumber }.
+ *
+ * `placement` (default 'anywhere') picks where each spawned NPC starts:
+ *   - 'anywhere': the original behavior -- a uniformly random sector.
+ *   - 'near_user': a random sector EXACTLY `sectorsAway` (0-10) warps from
+ *     `targetGameUserId`'s current sector. Resolved once, up front, as the
+ *     full set of candidate sectors at that exact BFS distance (0 means "the
+ *     player's own sector"), then each NPC independently picks one at random
+ *     from that set -- so several NPCs spawned in one call scatter across the
+ *     ring rather than all stacking in the same sector. 400s before creating
+ *     anything if no sector in the instance sits at that exact distance.
+ *   - 'in_sector': every spawned NPC starts at the single sector numbered
+ *     `sectorNumber` (1..instance's sector_count). 400s up front if that
+ *     sector doesn't exist in this instance.
+ * Each created entry in the response includes the sector it actually landed
+ * in, so the admin UI can display where "near_user"/"in_sector" resolved to.
+ *
+ * count defaults to 1, clamped to 1-50 per call so a fat-fingered number
+ * can't flood a universe in one request.
  */
 router.post('/:gameKey/admin/instances/:instanceId/npcs', authenticate, requireGameAdmin, async (req, res) => {
   const count = Math.min(50, Math.max(1, parseInt(req.body.count, 10) || 1));
+  const placement = ['anywhere', 'near_user', 'in_sector'].includes(req.body.placement) ? req.body.placement : 'anywhere';
+
   const client = await getClient();
   try {
     const instanceResult = await client.query(
@@ -2022,6 +2071,49 @@ router.post('/:gameKey/admin/instances/:instanceId/npcs', authenticate, requireG
     );
     if (instanceResult.rowCount === 0) return res.status(404).json({ message: 'Active instance not found' });
 
+    // Resolve placement up front -- before creating any NPCs -- so a bad
+    // target/sector fails the whole request cleanly rather than leaving a
+    // partial batch behind.
+    let fixedSector = null; // 'in_sector': every NPC lands here
+    let nearCandidates = null; // 'near_user': each NPC independently picks one of these
+
+    if (placement === 'in_sector') {
+      const sectorNumber = parseInt(req.body.sectorNumber, 10);
+      if (!Number.isInteger(sectorNumber)) {
+        return res.status(400).json({ message: 'sectorNumber is required' });
+      }
+      const sectorResult = await client.query(
+        'SELECT id, sector_number, description FROM haulonaut_sectors WHERE game_instance_id = $1 AND sector_number = $2',
+        [req.params.instanceId, sectorNumber]
+      );
+      if (sectorResult.rowCount === 0) {
+        return res.status(400).json({ message: `Sector ${sectorNumber} does not exist in this universe` });
+      }
+      fixedSector = sectorResult.rows[0];
+    } else if (placement === 'near_user') {
+      const targetGameUserId = parseInt(req.body.targetGameUserId, 10);
+      const sectorsAway = parseInt(req.body.sectorsAway, 10);
+      if (!targetGameUserId) {
+        return res.status(400).json({ message: 'targetGameUserId is required' });
+      }
+      if (!Number.isInteger(sectorsAway) || sectorsAway < 0 || sectorsAway > 10) {
+        return res.status(400).json({ message: 'sectorsAway must be a whole number from 0 to 10' });
+      }
+      const targetPilot = await client.query(
+        `SELECT hp.current_sector_id FROM haulonaut_pilots hp
+         JOIN game_users gu ON gu.id = hp.game_user_id
+         WHERE gu.id = $1 AND gu.game_instance_id = $2 AND gu.is_npc = 0`,
+        [targetGameUserId, req.params.instanceId]
+      );
+      if (targetPilot.rowCount === 0) {
+        return res.status(400).json({ message: 'Selected pilot has no location in this universe' });
+      }
+      nearCandidates = await sectorsExactlyNWarpsAway(client, req.params.instanceId, targetPilot.rows[0].current_sector_id, sectorsAway);
+      if (nearCandidates.length === 0) {
+        return res.status(400).json({ message: `No sector exactly ${sectorsAway} warp${sectorsAway === 1 ? '' : 's'} away from that pilot was found.` });
+      }
+    }
+
     const created = [];
     for (let i = 0; i < count; i++) {
       const displayName = randomNpcName();
@@ -2029,8 +2121,19 @@ router.post('/:gameKey/admin/instances/:instanceId/npcs', authenticate, requireG
         `INSERT INTO game_users (game_instance_id, display_name, status, is_npc) VALUES ($1, $2, 'active', 1)`,
         [req.params.instanceId, displayName]
       );
-      const spawned = await spawnPilotAtRandomSector(client, insertResult.insertId);
-      if (spawned) created.push({ id: insertResult.insertId, display_name: displayName });
+      const newGameUserId = insertResult.insertId;
+
+      let spawned;
+      if (fixedSector) {
+        spawned = await spawnPilotAtSector(client, newGameUserId, fixedSector);
+      } else if (nearCandidates) {
+        const target = nearCandidates[Math.floor(Math.random() * nearCandidates.length)];
+        spawned = await spawnPilotAtSector(client, newGameUserId, target);
+      } else {
+        spawned = await spawnPilotAtRandomSector(client, newGameUserId);
+      }
+
+      if (spawned) created.push({ id: newGameUserId, display_name: displayName, sector_number: spawned.sector_number });
     }
 
     res.status(201).json({ created });
