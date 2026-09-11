@@ -83,10 +83,28 @@ const BUGGY_CYCLE_COST = 1
 const inventory = ref([])
 const itemsCatalog = ref([])
 const knownLocations = ref([])
-const viewportMode = ref('space') // 'space', 'outpost' (browsing what's for sale), 'cargo' (owned inventory), 'charts' (known planets/outposts), 'planet' (overview menu), or 'landing-sequence' (animated descent)
+const viewportMode = ref('space') // 'space', 'outpost' (browsing what's for sale), 'cargo' (owned inventory), 'charts' (known planets/outposts), 'planet' (overview menu), 'encounter'/'encounter-attack'/'encounter-trade' (Hail -- see below), or 'landing-sequence' (animated descent)
 const purchasing = ref(false)
 const purchaseError = ref('')
 const chartsError = ref('')
+
+// Hail: message/trade/attack menu shown when another pilot is in the sector
+// (see actionItems' 'hail' entry). 'encounter' is the top-level 3-option
+// menu; 'encounter-attack' is a target-select list (list-nav, like outpost);
+// 'encounter-trade' is a real form (target/item/qty/credits), so it doesn't
+// participate in the digit-hotkey list-nav -- viewportMenuItems returns []
+// for it and the fields are plain click/tab-driven inputs. Trade and attack
+// reuse the existing /trade-offers and /attack routes (the same ones the
+// terminal's /offer and /attack slash commands already call); message just
+// closes the overlay and focuses the Terminal, which already broadcasts
+// plain typed text to the sector.
+const encounterTargetId = ref(null) // selected pilot's game_users.id, for encounter-trade
+const encounterItemKey = ref('')
+const encounterQuantity = ref(1)
+const encounterCredits = ref(0)
+const encounterTradeError = ref('')
+const proposingTrade = ref(false)
+const attackingId = ref(null) // guards overlapping /attack requests while set to the target's id
 const landingPhase = ref(null) // null | 'approaching' | 'closing' | 'sweeping' | 'entry' | 'docked' -- drives the landing-sequence animation
 const landingSceneEl = ref(null)
 const landingSceneHeightPx = ref(280) // measured; see measureLandingScene() -- sane fallback before the first measurement
@@ -349,10 +367,17 @@ const actionItems = computed(() => {
   const items = []
   if (outpostFeature.value) items.push({ key: 'visit_outpost', label: 'Visit Outpost' })
   if (planetFeature.value) items.push({ key: 'planet_overview', label: 'Planet Overview' })
+  if (playersHere.value.length > 0) items.push({ key: 'hail', label: 'Hail' })
   items.push({ key: 'view_cargo', label: 'Cargo' })
   items.push({ key: 'view_charts', label: 'Star Charts' })
   return items
 })
+
+// Other pilots actually eligible for trade/attack -- NPCs can be seen and
+// hailed (the message broadcast doesn't distinguish), but the backend
+// rejects both /trade-offers and /attack against one, so they're left out
+// of those two target lists rather than offering a click that always fails.
+const humanPlayersHere = computed(() => playersHere.value.filter(p => !p.is_npc))
 
 // The catalog plus a trailing "leave" entry, so the outpost view's list
 // uses the same 1-based hotkey/arrow-cycle convention as the nav and
@@ -382,6 +407,14 @@ const planetMenuItems = computed(() => [
   { __leave: true, name: 'Leave Planet Overview' }
 ])
 
+// Hail's top-level menu -- see the comment by encounterTargetId above.
+const encounterMenuItems = computed(() => [
+  { key: 'message', name: 'Send a Message' },
+  { key: 'trade', name: 'Propose a Trade' },
+  { key: 'attack', name: 'Attack' },
+  { __leave: true, name: 'Close Hail' }
+])
+
 // What the viewport box's keyboard handling should treat as "the current
 // list" -- depends on which overlay (if any) is showing. Cargo's own view
 // is otherwise static (just a read-only list), so its only interactive
@@ -395,6 +428,14 @@ const viewportMenuItems = computed(() => {
   if (viewportMode.value === 'cargo') return [{ __leave: true, name: 'Close Cargo' }]
   if (viewportMode.value === 'charts') return chartsMenuItems.value
   if (viewportMode.value === 'planet') return planetMenuItems.value
+  if (viewportMode.value === 'encounter') return encounterMenuItems.value
+  if (viewportMode.value === 'encounter-attack') {
+    return [...humanPlayersHere.value.map(p => ({ id: p.id, name: p.display_name })), { __leave: true, name: 'Back' }]
+  }
+  // encounter-trade is a real form (target/item/qty/credits), not a
+  // list-nav overlay -- nothing here for the viewport box's arrow/hotkey
+  // handling to act on, same as landing-sequence mid-animation below.
+  if (viewportMode.value === 'encounter-trade') return []
   if (viewportMode.value === 'landing-sequence') {
     return landingPhase.value === 'docked' ? [{ key: 'exit_craft', name: 'Exit Craft' }, { key: 'launch', name: 'Launch' }] : []
   }
@@ -500,6 +541,11 @@ function performAction(item) {
     chartsError.value = ''
     logLines.value.push('Pulling up star charts.')
     loadKnownLocations()
+  } else if (item.key === 'hail') {
+    viewportMode.value = 'encounter'
+    selectedIndex.value = -1
+    encounterTradeError.value = ''
+    logLines.value.push('Hailing frequencies open.')
   }
   scrollLogToBottom()
 }
@@ -508,7 +554,10 @@ const OVERLAY_CLOSE_MESSAGES = {
   outpost: 'Departing the outpost.',
   cargo: 'Closing the cargo manifest.',
   charts: 'Closing star charts.',
-  planet: 'Breaking orbit.'
+  planet: 'Breaking orbit.',
+  encounter: 'Closing hailing frequencies.',
+  'encounter-attack': 'Standing down.',
+  'encounter-trade': 'Trade proposal cancelled.'
 }
 
 function exitViewportOverlay() {
@@ -558,9 +607,136 @@ function activateViewportMenuItem(entry) {
   } else if (viewportMode.value === 'planet') {
     if (entry.key === 'trade') enterTrade()
     else if (entry.key === 'land') beginLandingSequence()
+  } else if (viewportMode.value === 'encounter') {
+    if (entry.key === 'message') enterEncounterMessage()
+    else if (entry.key === 'trade') enterEncounterTrade()
+    else if (entry.key === 'attack') enterEncounterAttack()
+  } else if (viewportMode.value === 'encounter-attack') {
+    attackTarget(entry)
   } else if (viewportMode.value === 'landing-sequence') {
     if (entry.key === 'exit_craft') exitCraft()
     else if (entry.key === 'launch') beginLaunchSequence()
+  }
+}
+
+// "Send a Message" doesn't need its own screen -- the Terminal already
+// broadcasts any plain (non-slash) text typed into it to everyone in the
+// sector (see submitTerminalCommand), so this just closes Hail and hands
+// keyboard focus straight to the Terminal, ready to type.
+function enterEncounterMessage() {
+  viewportMode.value = 'space'
+  selectedIndex.value = -1
+  logLines.value.push('Channel open -- type your message in the Terminal below.')
+  scrollLogToBottom()
+  focusBox('terminal')
+}
+
+function enterEncounterTrade() {
+  if (humanPlayersHere.value.length === 0) {
+    logLines.value.push('No pilots here to trade with.')
+    scrollLogToBottom()
+    return
+  }
+  viewportMode.value = 'encounter-trade'
+  selectedIndex.value = -1
+  encounterTargetId.value = humanPlayersHere.value.length === 1 ? humanPlayersHere.value[0].id : null
+  encounterItemKey.value = ''
+  encounterQuantity.value = 1
+  encounterCredits.value = 0
+  encounterTradeError.value = ''
+  logLines.value.push('Opening a trade channel.')
+  scrollLogToBottom()
+}
+
+function enterEncounterAttack() {
+  if (humanPlayersHere.value.length === 0) {
+    logLines.value.push('No pilots here to attack -- NPCs are off-limits.')
+    scrollLogToBottom()
+    return
+  }
+  viewportMode.value = 'encounter-attack'
+  selectedIndex.value = -1
+  logLines.value.push('Targeting systems online.')
+  scrollLogToBottom()
+}
+
+// Fires immediately on selecting a target -- no separate confirm step,
+// matching every other list-select action in this UI (an outpost purchase,
+// setting a course, ...). Success isn't logged here: the haulonaut_combat_event
+// socket broadcast (sent to the whole sector, attacker included -- see
+// connectSectorSocket) is what prints the hit, same as the /attack terminal
+// command. Stays on the target list afterward so another hit can follow
+// immediately if cycles allow.
+async function attackTarget(entry) {
+  if (attackingId.value) return
+  attackingId.value = entry.id
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/attack`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to_character_id: entry.id })
+    })
+    if (!res.ok) {
+      const data = await res.json()
+      logLines.value.push(data.message || 'Attack failed.')
+      if (typeof data.cycles === 'number') cycles.value = data.cycles
+      scrollLogToBottom()
+    }
+  } catch {
+    logLines.value.push('Transmission failed.')
+    scrollLogToBottom()
+  } finally {
+    attackingId.value = null
+  }
+}
+
+// Same /trade-offers route the terminal's /offer command calls -- nothing
+// moves until the target /accepts it (see haulonaut_trade_offer handling in
+// connectSectorSocket). Re-validated server-side regardless of what this
+// form allowed client-side, same posture as every other action here.
+async function proposeTrade() {
+  if (proposingTrade.value) return
+  encounterTradeError.value = ''
+
+  const targetId = encounterTargetId.value
+  const itemKey = encounterItemKey.value
+  const quantity = Math.round(Number(encounterQuantity.value))
+  const creditsWanted = Math.round(Number(encounterCredits.value))
+
+  if (!targetId) { encounterTradeError.value = 'Choose a pilot.'; return }
+  if (!itemKey) { encounterTradeError.value = 'Choose an item to offer.'; return }
+  const owned = inventoryQuantity(itemKey)
+  if (!Number.isInteger(quantity) || quantity < 1 || quantity > owned) {
+    encounterTradeError.value = `You only have ${owned} of that.`
+    return
+  }
+  if (!Number.isInteger(creditsWanted) || creditsWanted < 0) {
+    encounterTradeError.value = 'Enter a whole number of tokens to ask for.'
+    return
+  }
+
+  proposingTrade.value = true
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/trade-offers`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to_character_id: targetId, item_key: itemKey, quantity, credits: creditsWanted })
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      encounterTradeError.value = data.message || 'Failed to send trade offer.'
+      return
+    }
+    logLines.value.push(data.message || 'Trade offer sent.')
+    scrollLogToBottom()
+    viewportMode.value = 'space'
+    selectedIndex.value = -1
+  } catch {
+    encounterTradeError.value = 'Transmission failed.'
+  } finally {
+    proposingTrade.value = false
   }
 }
 
@@ -2213,6 +2389,92 @@ onUnmounted(() => {
                     <p v-if="!canAffordLanding" class="outpost-error">Landing needs {{ DOCK_CYCLE_COST }} cycles &mdash; {{ displayedCycles }} available. Ready in {{ landingReadyLabel }}.</p>
                   </div>
 
+                  <!-- Hail: top-level message/trade/attack menu -->
+                  <div v-else-if="viewportMode === 'encounter'" class="tui-panel-body outpost-body">
+                    <p class="outpost-heading">HAILING FREQUENCIES OPEN</p>
+                    <div class="outpost-items">
+                      <button
+                        v-for="(entry, i) in encounterMenuItems"
+                        :key="entry.__leave ? '__leave' : entry.key"
+                        class="outpost-item-btn"
+                        :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.__leave }"
+                        :aria-pressed="selectedIndex === i"
+                        @click="activateViewportMenuItem(entry)"
+                      >
+                        <span class="outpost-item-hotkey" aria-hidden="true">{{ i + 1 }}</span>
+                        <span class="outpost-item-name">{{ entry.name }}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Hail > Attack: pick which pilot to fire on -->
+                  <div v-else-if="viewportMode === 'encounter-attack'" class="tui-panel-body outpost-body">
+                    <p class="outpost-heading">SELECT TARGET</p>
+                    <div class="outpost-items">
+                      <button
+                        v-for="(entry, i) in viewportMenuItems"
+                        :key="entry.__leave ? '__leave' : entry.id"
+                        class="outpost-item-btn"
+                        :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.__leave }"
+                        :disabled="!!attackingId"
+                        :aria-pressed="selectedIndex === i"
+                        @click="activateViewportMenuItem(entry)"
+                      >
+                        <span class="outpost-item-hotkey" aria-hidden="true">{{ i + 1 }}</span>
+                        <span class="outpost-item-name">{{ entry.name }}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Hail > Propose a Trade: target/item/qty/credits form -- a real
+                       form rather than a hotkey list, since it needs more than one
+                       field at once. -->
+                  <div v-else-if="viewportMode === 'encounter-trade'" class="tui-panel-body outpost-body encounter-trade-body">
+                    <p class="outpost-heading">PROPOSE A TRADE</p>
+
+                    <div v-if="humanPlayersHere.length > 1" class="encounter-field">
+                      <label for="encounter-target">Pilot</label>
+                      <select id="encounter-target" v-model="encounterTargetId">
+                        <option :value="null" disabled>Select a pilot...</option>
+                        <option v-for="p in humanPlayersHere" :key="p.id" :value="p.id">{{ p.display_name }}</option>
+                      </select>
+                    </div>
+                    <p v-else-if="humanPlayersHere.length === 1" class="encounter-field-static">
+                      Pilot: <strong>{{ humanPlayersHere[0].display_name }}</strong>
+                    </p>
+
+                    <div class="encounter-field">
+                      <label for="encounter-item">Item to offer</label>
+                      <select id="encounter-item" v-model="encounterItemKey" :disabled="inventory.length === 0">
+                        <option value="" disabled>Select an item...</option>
+                        <option v-for="entry in inventory" :key="entry.item_key" :value="entry.item_key">{{ entry.name }} (owned {{ entry.quantity }})</option>
+                      </select>
+                    </div>
+
+                    <div class="encounter-field-row">
+                      <div class="encounter-field">
+                        <label for="encounter-qty">Quantity</label>
+                        <input id="encounter-qty" v-model.number="encounterQuantity" type="number" min="1" :max="Math.max(1, inventoryQuantity(encounterItemKey))" step="1" />
+                      </div>
+                      <div class="encounter-field">
+                        <label for="encounter-credits">For (Tokens)</label>
+                        <input id="encounter-credits" v-model.number="encounterCredits" type="number" min="0" step="1" />
+                      </div>
+                    </div>
+
+                    <p v-if="inventory.length === 0" class="outpost-error">Cargo hold is empty &mdash; nothing to offer.</p>
+                    <p v-if="encounterTradeError" class="outpost-error">{{ encounterTradeError }}</p>
+
+                    <div class="outpost-items">
+                      <button class="outpost-item-btn" :disabled="proposingTrade || inventory.length === 0" @click="proposeTrade">
+                        <span class="outpost-item-name">{{ proposingTrade ? 'Sending...' : 'Send Proposal' }}</span>
+                      </button>
+                      <button class="outpost-item-btn outpost-leave-btn" @click="exitViewportOverlay()">
+                        <span class="outpost-item-name">Cancel</span>
+                      </button>
+                    </div>
+                  </div>
+
                   <div v-else-if="viewportMode === 'landing-sequence'" class="tui-panel-body landing-sequence-body">
                     <div
                       class="landing-scene"
@@ -3091,6 +3353,56 @@ onUnmounted(() => {
 .outpost-error {
   font-size: 0.75rem;
   color: #ff8a8a;
+}
+
+/* ---- Viewport panel: Hail > Propose a Trade -- a real form, unlike every
+   other overlay's hotkey list, since it needs several fields at once. */
+.encounter-trade-body {
+  gap: 10px;
+}
+
+.encounter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.encounter-field label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #8fe6ab;
+}
+
+.encounter-field select,
+.encounter-field input {
+  padding: 6px 8px;
+  border: 1px solid #2fd66e;
+  border-radius: 4px;
+  background: rgba(77, 255, 136, 0.08);
+  color: #baffcf;
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+
+.encounter-field select:disabled {
+  opacity: 0.5;
+}
+
+.encounter-field-row {
+  display: flex;
+  gap: 10px;
+}
+
+.encounter-field-row .encounter-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.encounter-field-static {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #baffcf;
 }
 
 /* ---- Viewport panel: landing-sequence mode -- the animated 90s-style
