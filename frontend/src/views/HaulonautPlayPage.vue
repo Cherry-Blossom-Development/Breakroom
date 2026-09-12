@@ -1422,6 +1422,30 @@ async function handleTerminalSlashCommand(rest) {
   const cmd = (tokens.shift() || '').toLowerCase()
   const charId = route.params.characterId
 
+  if (cmd === 'help') {
+    showHelp()
+    return
+  }
+
+  // A bare sector number (e.g. "/42") warps straight there, same one-hop set
+  // the Navigation panel offers -- just typed instead of clicked/arrowed to.
+  // Requires nothing else on the line, so "/42" works but "/42 foo" falls
+  // through to "Command not recognized" rather than silently warping.
+  if (/^\d+$/.test(cmd) && tokens.length === 0) {
+    warpToSectorNumber(parseInt(cmd, 10))
+    return
+  }
+
+  // Everything currently listed in the Actions panel is also a slash
+  // command -- matched by its short command word (single-token, e.g.
+  // "/outpost") or its full on-screen label (e.g. "/visit outpost"),
+  // case-insensitively, against whatever actionItems currently offers.
+  const action = findActionCommand(cmd) || findActionCommand(rest.trim().toLowerCase())
+  if (action) {
+    performAction(action)
+    return
+  }
+
   if (cmd === 'give') {
     const amount = popNumber(tokens)
     const targetName = tokens.join(' ')
@@ -1538,6 +1562,66 @@ async function handleTerminalSlashCommand(rest) {
   scrollLogToBottom()
 }
 
+// Short word typed after / in the Terminal to trigger an Actions-panel
+// entry -- intentionally terse (an alias, not the full label) so it's fast
+// to type. findActionCommand also accepts the full on-screen label, so
+// either works. Only entries not already a single lowercase word need a
+// mapping here; any future action key falls back to itself with
+// underscores stripped.
+const ACTION_COMMAND_WORDS = {
+  visit_outpost: 'outpost',
+  planet_overview: 'planet',
+  view_cargo: 'cargo',
+  view_charts: 'charts'
+}
+function actionCommandWord(item) {
+  return ACTION_COMMAND_WORDS[item.key] || item.key.replace(/_/g, '')
+}
+
+// Matches typed text against whatever the Actions panel currently offers --
+// by short command word or full label, case-insensitively -- so the
+// Terminal can never advertise (via help) or accept a command for something
+// that isn't actually clickable right now (e.g. "hail" only matches while
+// another pilot is actually in the sector).
+function findActionCommand(lower) {
+  return actionItems.value.find(item => lower === actionCommandWord(item) || lower === item.label.toLowerCase()) || null
+}
+
+function showHelp() {
+  const lines = ['Commands (all start with /):']
+  for (const item of actionItems.value) {
+    lines.push(`  /${actionCommandWord(item)} -- ${item.label}`)
+  }
+  lines.push('  /<sector number> -- warp there, if reachable from here')
+  lines.push('  /give <pilot> <credits> -- gift tokens to a pilot here')
+  lines.push('  /offer <pilot> <item_key> <qty> for <credits> -- propose a trade')
+  lines.push('  /accept <offer id>  or  /decline <offer id>')
+  lines.push('  /attack <pilot> -- attack a pilot here')
+  lines.push('  anything not starting with / -- sent as a message to this sector')
+  logLines.value.push(...lines)
+  scrollLogToBottom()
+}
+
+// A bare sector number warps straight there, same one-hop set the
+// Navigation panel offers -- just typed instead of clicked/arrowed to.
+function warpToSectorNumber(num) {
+  if (landingSequenceActive.value || navigating.value) {
+    logLines.value.push('Cannot warp right now.')
+    scrollLogToBottom()
+    return
+  }
+  const sector = connectedSectors.value.find(s => s.sector_number === num)
+  if (!sector) {
+    logLines.value.push(`Sector ${num} is not reachable from here.`)
+    scrollLogToBottom()
+    return
+  }
+  manualNavigateTo(sector)
+}
+
+// Anything NOT starting with "/" is always a plain sector-chat broadcast --
+// commands are slash-prefixed exclusively (see handleTerminalSlashCommand)
+// so regular typing is never intercepted or ambiguous with a command.
 function submitTerminalCommand() {
   const text = terminalInput.value.trim()
   if (!text) return
@@ -2678,7 +2762,6 @@ onUnmounted(() => {
                         aria-label="Terminal command input"
                         @keydown.enter.prevent="submitTerminalCommand"
                       />
-                      <span class="terminal-cursor" aria-hidden="true">_</span>
                     </p>
                   </div>
                 </div>
@@ -2975,14 +3058,10 @@ onUnmounted(() => {
   .sector-arrival-icon { animation: none; }
 }
 
-.terminal-cursor {
-  animation: terminal-blink 1s step-end infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .terminal-cursor { animation: none; }
-}
-
+/* Shared by .sector-arrival-icon -- the fake terminal text-cursor that used
+   to blink here (and used this same keyframes) was removed: it never
+   tracked the real <input> caret position, so it was purely decorative and
+   easily read as "broken" rather than intentional. */
 @keyframes terminal-blink {
   0%, 49% { opacity: 1; }
   50%, 100% { opacity: 0; }
