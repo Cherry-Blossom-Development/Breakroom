@@ -108,6 +108,21 @@ const encounterCredits = ref(0)
 const encounterTradeError = ref('')
 const proposingTrade = ref(false)
 const attackingId = ref(null) // guards overlapping /attack requests while set to the target's id
+
+// Read-only reference panel on the Propose a Trade screen -- what the
+// selected target (human or NPC) is carrying and how many Tokens they hold,
+// fetched from GET .../pilots/:targetId. Trade mechanics stay one-directional
+// (you offer one of YOUR items for credits, same as always); this is
+// context only, not something you can pick items out of.
+const encounterTargetInfo = ref(null) // { display_name, is_npc, credits, inventory } | null
+const loadingTargetInfo = ref(false)
+
+// Incoming trade offers awaiting a response, shown as an actionable banner
+// (see the floating-alerts template block) instead of only a Terminal log
+// line telling you to type /accept -- populated by loadPendingTradeOffers
+// (catch-up on load) and the live haulonaut_trade_offer socket event.
+const incomingTradeOffers = ref([]) // [{ id, fromDisplayName, itemName, quantity, credits }]
+const respondingOfferId = ref(null) // guards overlapping accept/decline requests
 const landingPhase = ref(null) // null | 'approaching' | 'closing' | 'sweeping' | 'entry' | 'docked' -- drives the landing-sequence animation
 const landingSceneEl = ref(null)
 const landingSceneHeightPx = ref(280) // measured; see measureLandingScene() -- sane fallback before the first measurement
@@ -376,10 +391,11 @@ const actionItems = computed(() => {
   return items
 })
 
-// Other pilots actually eligible for trade/attack -- NPCs can be seen and
-// hailed (the message broadcast doesn't distinguish), but the backend
-// rejects both /trade-offers and /attack against one, so they're left out
-// of those two target lists rather than offering a click that always fails.
+// Other pilots eligible to ATTACK -- the backend still refuses /attack
+// against an NPC, so they're left out of that target list rather than
+// offering a click that always fails. Trade is different: NPCs pay for
+// items out of their own credits and answer instantly (see /trade-offers),
+// so every playersHere entry -- human or NPC -- is a valid trade target.
 const humanPlayersHere = computed(() => playersHere.value.filter(p => !p.is_npc))
 
 // The catalog plus a trailing "leave" entry, so the outpost view's list
@@ -634,19 +650,38 @@ function enterEncounterMessage() {
   focusBox('terminal')
 }
 
+// Fetches the target's read-only reference panel (display name, credits,
+// inventory) for the trade screen -- see encounterTargetInfo above. Called
+// whenever the trade screen's target changes, whether auto-selected (one
+// pilot here) or picked from the dropdown (several here).
+async function loadEncounterTargetInfo(targetId) {
+  encounterTargetInfo.value = null
+  if (!targetId) return
+  loadingTargetInfo.value = true
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/pilots/${targetId}`, { credentials: 'include' })
+    if (res.ok) encounterTargetInfo.value = await res.json()
+  } catch {
+    // Non-fatal -- the trade form still works without the reference panel.
+  } finally {
+    loadingTargetInfo.value = false
+  }
+}
+
 function enterEncounterTrade() {
-  if (humanPlayersHere.value.length === 0) {
+  if (playersHere.value.length === 0) {
     logLines.value.push('No pilots here to trade with.')
     scrollLogToBottom()
     return
   }
   viewportMode.value = 'encounter-trade'
   selectedIndex.value = -1
-  encounterTargetId.value = humanPlayersHere.value.length === 1 ? humanPlayersHere.value[0].id : null
+  encounterTargetId.value = playersHere.value.length === 1 ? playersHere.value[0].id : null
   encounterItemKey.value = ''
   encounterQuantity.value = 1
   encounterCredits.value = 0
   encounterTradeError.value = ''
+  loadEncounterTargetInfo(encounterTargetId.value)
   logLines.value.push('Opening a trade channel.')
   scrollLogToBottom()
 }
@@ -694,10 +729,15 @@ async function attackTarget(entry) {
   }
 }
 
-// Same /trade-offers route the terminal's /offer command calls -- nothing
-// moves until the target /accepts it (see haulonaut_trade_offer handling in
-// connectSectorSocket). Re-validated server-side regardless of what this
-// form allowed client-side, same posture as every other action here.
+// Same /trade-offers route the terminal's /offer command calls. A human
+// target: nothing moves yet, they get an accept/decline prompt (see
+// haulonaut_trade_offer handling in connectSectorSocket and
+// incomingTradeOffers). An NPC target: the server resolves it immediately
+// and the response carries npcResponse ('accepted'/'declined') plus updated
+// credits/inventory on acceptance -- applied here right away since no
+// accept/decline round-trip is coming. Re-validated server-side regardless
+// of what this form allowed client-side, same posture as every other
+// action here.
 async function proposeTrade() {
   if (proposingTrade.value) return
   encounterTradeError.value = ''
@@ -734,6 +774,10 @@ async function proposeTrade() {
     }
     logLines.value.push(data.message || 'Trade offer sent.')
     scrollLogToBottom()
+    if (data.npcResponse === 'accepted') {
+      if (typeof data.credits === 'number') credits.value = data.credits
+      if (data.inventory) inventory.value = data.inventory
+    }
     viewportMode.value = 'space'
     selectedIndex.value = -1
   } catch {
@@ -1332,9 +1376,16 @@ function connectSectorSocket() {
 
   sectorSocket.on('haulonaut_trade_offer', (data) => {
     logLines.value.push(
-      `[TRADE OFFER #${data.offerId}] ${data.fromDisplayName} offers ${data.quantity} ${data.itemName} for ${data.credits} Tokens. Type /accept ${data.offerId} or /decline ${data.offerId}.`
+      `[TRADE OFFER #${data.offerId}] ${data.fromDisplayName} offers ${data.quantity} ${data.itemName} for ${data.credits} Tokens.`
     )
     scrollLogToBottom()
+    incomingTradeOffers.value = [...incomingTradeOffers.value, {
+      id: data.offerId,
+      fromDisplayName: data.fromDisplayName,
+      itemName: data.itemName,
+      quantity: data.quantity,
+      credits: data.credits
+    }]
   })
 
   sectorSocket.on('haulonaut_trade_resolved', (data) => {
@@ -1408,6 +1459,35 @@ function showSectorArrivalAlert(displayName, isNpc) {
   setTimeout(() => {
     sectorArrivalAlerts.value = sectorArrivalAlerts.value.filter(a => a.id !== id)
   }, 6000)
+}
+
+// Accepts or declines an incoming trade offer -- shared by the
+// incomingTradeOffers banner's buttons and the terminal's /accept and
+// /decline commands, so there's exactly one implementation of "call the
+// endpoint, apply the result, clear the offer from the list." Unlike the
+// sector-arrival alerts, an incoming trade offer doesn't auto-dismiss -- it
+// stays until you actually respond to it.
+async function respondToTradeOffer(offerId, action) {
+  if (respondingOfferId.value) return
+  respondingOfferId.value = offerId
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/trade-offers/${offerId}/${action}`, {
+      method: 'POST',
+      credentials: 'include'
+    })
+    const data = await res.json()
+    logLines.value.push(data.message || `Failed to ${action} trade offer.`)
+    if (res.ok && action === 'accept') {
+      if (typeof data.credits === 'number') credits.value = data.credits
+      if (data.inventory) inventory.value = data.inventory
+    }
+  } catch {
+    logLines.value.push('Transmission failed.')
+  } finally {
+    incomingTradeOffers.value = incomingTradeOffers.value.filter(o => o.id !== offerId)
+    respondingOfferId.value = null
+    scrollLogToBottom()
+  }
 }
 
 // Trading commands, typed straight into the terminal: /give, /offer,
@@ -1510,21 +1590,8 @@ async function handleTerminalSlashCommand(rest) {
       logLines.value.push(`Usage: /${cmd} <offer id>`)
       return scrollLogToBottom()
     }
-    try {
-      const res = await fetch(`/api/games/haulonaut/characters/${charId}/trade-offers/${offerId}/${cmd}`, {
-        method: 'POST',
-        credentials: 'include'
-      })
-      const data = await res.json()
-      logLines.value.push(data.message || `Failed to ${cmd} trade offer.`)
-      if (res.ok && cmd === 'accept') {
-        if (typeof data.credits === 'number') credits.value = data.credits
-        if (data.inventory) inventory.value = data.inventory
-      }
-    } catch {
-      logLines.value.push('Transmission failed.')
-    }
-    return scrollLogToBottom()
+    await respondToTradeOffer(offerId, cmd)
+    return
   }
 
   if (cmd === 'attack') {
@@ -1730,10 +1797,19 @@ async function loadPendingTradeOffers() {
     const incoming = (data.offers || []).filter(o => o.to_game_user_id === Number(route.params.characterId))
     for (const o of incoming) {
       logLines.value.push(
-        `[TRADE OFFER #${o.id}] ${o.from_display_name} offers ${o.quantity} ${o.item_name} for ${o.credits} Tokens. Type /accept ${o.id} or /decline ${o.id}.`
+        `[TRADE OFFER #${o.id}] ${o.from_display_name} offers ${o.quantity} ${o.item_name} for ${o.credits} Tokens.`
       )
     }
-    if (incoming.length > 0) scrollLogToBottom()
+    if (incoming.length > 0) {
+      incomingTradeOffers.value = incoming.map(o => ({
+        id: o.id,
+        fromDisplayName: o.from_display_name,
+        itemName: o.item_name,
+        quantity: o.quantity,
+        credits: o.credits
+      }))
+      scrollLogToBottom()
+    }
   } catch {
     // Non-fatal -- offers still resolve fine via /accept or /decline once known some other way.
   }
@@ -2414,14 +2490,25 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Presence alerts: another pilot (human or NPC) just warped into
-                   this sector -- see the haulonaut_sector_arrival handler in
-                   connectSectorSocket. Purely additive to the Terminal log line
-                   it also writes -- this is the "pop up a notice" half. -->
-              <div v-if="sectorArrivalAlerts.length > 0" class="sector-arrival-alerts" aria-live="polite">
-                <div v-for="a in sectorArrivalAlerts" :key="a.id" class="sector-arrival-alert">
+              <!-- Floating alerts, stacked in one column so neither kind ever
+                   overlaps the other:
+                   - Presence: another pilot (human or NPC) just warped into this
+                     sector (haulonaut_sector_arrival in connectSectorSocket) --
+                     auto-dismisses, purely additive to the Terminal log line it
+                     also writes.
+                   - Trade offers: awaiting YOUR response (haulonaut_trade_offer /
+                     loadPendingTradeOffers) -- stays until you Accept or Decline. -->
+              <div v-if="sectorArrivalAlerts.length > 0 || incomingTradeOffers.length > 0" class="floating-alerts" aria-live="polite">
+                <div v-for="a in sectorArrivalAlerts" :key="'arrival-' + a.id" class="sector-arrival-alert">
                   <span class="sector-arrival-icon" aria-hidden="true">&#9673;</span>
                   <span>{{ a.displayName }}{{ a.isNpc ? ' [NPC]' : '' }} has entered the sector</span>
+                </div>
+                <div v-for="o in incomingTradeOffers" :key="'trade-' + o.id" class="trade-offer-alert">
+                  <p class="trade-offer-text">{{ o.fromDisplayName }} offers {{ o.quantity }} {{ o.itemName }} for {{ o.credits }} Tokens</p>
+                  <div class="trade-offer-actions">
+                    <button class="trade-offer-btn" :disabled="respondingOfferId === o.id" @click="respondToTradeOffer(o.id, 'accept')">Accept</button>
+                    <button class="trade-offer-btn trade-offer-decline" :disabled="respondingOfferId === o.id" @click="respondToTradeOffer(o.id, 'decline')">Decline</button>
+                  </div>
                 </div>
               </div>
 
@@ -2567,16 +2654,32 @@ onUnmounted(() => {
                   <div v-else-if="viewportMode === 'encounter-trade'" class="tui-panel-body outpost-body encounter-trade-body">
                     <p class="outpost-heading">PROPOSE A TRADE</p>
 
-                    <div v-if="humanPlayersHere.length > 1" class="encounter-field">
+                    <div v-if="playersHere.length > 1" class="encounter-field">
                       <label for="encounter-target">Pilot</label>
-                      <select id="encounter-target" v-model="encounterTargetId">
+                      <select id="encounter-target" v-model="encounterTargetId" @change="loadEncounterTargetInfo(encounterTargetId)">
                         <option :value="null" disabled>Select a pilot...</option>
-                        <option v-for="p in humanPlayersHere" :key="p.id" :value="p.id">{{ p.display_name }}</option>
+                        <option v-for="p in playersHere" :key="p.id" :value="p.id">{{ p.display_name }}{{ p.is_npc ? ' [NPC]' : '' }}</option>
                       </select>
                     </div>
-                    <p v-else-if="humanPlayersHere.length === 1" class="encounter-field-static">
-                      Pilot: <strong>{{ humanPlayersHere[0].display_name }}</strong>
+                    <p v-else-if="playersHere.length === 1" class="encounter-field-static">
+                      Pilot: <strong>{{ playersHere[0].display_name }}{{ playersHere[0].is_npc ? ' [NPC]' : '' }}</strong>
                     </p>
+
+                    <!-- Reference only -- what they're carrying and holding, so
+                         you can gauge the trade before offering. You can only
+                         ever pick items to give FROM YOUR OWN inventory below. -->
+                    <div v-if="encounterTargetId" class="encounter-target-info">
+                      <p v-if="loadingTargetInfo" class="encounter-field-static">Scanning their hold...</p>
+                      <template v-else-if="encounterTargetInfo">
+                        <p class="encounter-target-heading">Their cargo &mdash; {{ encounterTargetInfo.credits }} Tokens on hand</p>
+                        <p v-if="encounterTargetInfo.inventory.length === 0" class="cargo-empty">Nothing.</p>
+                        <div v-else class="cargo-list">
+                          <p v-for="entry in encounterTargetInfo.inventory" :key="entry.item_key" class="cargo-list-row">
+                            {{ entry.name }} <span class="cargo-list-qty">&times;{{ entry.quantity }}</span>
+                          </p>
+                        </div>
+                      </template>
+                    </div>
 
                     <div class="encounter-field">
                       <label for="encounter-item">Item to offer</label>
@@ -3008,9 +3111,12 @@ onUnmounted(() => {
   font-family: 'Courier New', Courier, monospace;
 }
 
-/* Sector-arrival alerts: float over the grid rather than taking layout
-   space, so a burst of them doesn't shove the panels around. */
-.sector-arrival-alerts {
+/* Floating alerts (sector-arrival + incoming trade offers): float over the
+   grid rather than taking layout space, so a burst of them doesn't shove
+   the panels around. The container itself ignores clicks (nothing between
+   alerts should intercept them); each alert re-enables pointer-events for
+   itself since the trade-offer ones need to be clickable. */
+.floating-alerts {
   position: absolute;
   top: 8px;
   left: 50%;
@@ -3056,6 +3162,68 @@ onUnmounted(() => {
 @media (prefers-reduced-motion: reduce) {
   .sector-arrival-alert { animation: none; }
   .sector-arrival-icon { animation: none; }
+}
+
+/* Trade-offer alert: no auto-dismiss animation (stays until responded to,
+   see respondToTradeOffer) and, unlike a sector-arrival alert, is
+   interactive -- re-enables pointer-events since the container above turns
+   them off. */
+.trade-offer-alert {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(5, 19, 10, 0.94);
+  border: 1px solid #4dff88;
+  border-radius: 5px;
+  padding: 9px 14px;
+  box-shadow: 0 0 14px rgba(77, 255, 136, 0.5);
+  animation: sector-alert-in 0.25s ease-out;
+}
+
+.trade-offer-text {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #baffcf;
+}
+
+.trade-offer-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.trade-offer-btn {
+  flex: 1;
+  background: rgba(77, 255, 136, 0.12);
+  border: 1px solid #2fd66e;
+  color: #baffcf;
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.trade-offer-btn:hover:not(:disabled) {
+  background: #4dff88;
+  color: #05130a;
+}
+
+.trade-offer-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.trade-offer-btn.trade-offer-decline {
+  border-color: #ff8a8a;
+  color: #ff8a8a;
+}
+
+.trade-offer-btn.trade-offer-decline:hover:not(:disabled) {
+  background: #ff8a8a;
+  color: #05130a;
 }
 
 /* Shared by .sector-arrival-icon -- the fake terminal text-cursor that used
@@ -3583,6 +3751,23 @@ onUnmounted(() => {
   margin: 0;
   font-size: 0.8rem;
   color: #baffcf;
+}
+
+.encounter-target-info {
+  border: 1px dashed #2fd66e;
+  border-radius: 4px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.encounter-target-heading {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #8fe6ab;
 }
 
 /* ---- Viewport panel: landing-sequence mode -- the animated 90s-style

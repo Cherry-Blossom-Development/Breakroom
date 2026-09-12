@@ -557,7 +557,7 @@ async function spawnPilotAtRandomSector(client, gameUserId) {
 async function loadSameSectorTarget(client, actingGameUserId, targetGameUserId) {
   if (!targetGameUserId || Number(targetGameUserId) === Number(actingGameUserId)) return null;
   const result = await client.query(
-    `SELECT tgu.id, tgu.user_id, tgu.display_name, tgu.is_npc
+    `SELECT tgu.id, tgu.user_id, tgu.display_name, tgu.is_npc, thp.credits
      FROM haulonaut_pilots ahp
      JOIN haulonaut_pilots thp ON thp.current_sector_id = ahp.current_sector_id
      JOIN game_users tgu ON tgu.id = thp.game_user_id
@@ -1136,13 +1136,101 @@ router.post('/:gameKey/characters/:id/give', authenticate, async (req, res) => {
   }
 });
 
+// Executes an already-inserted trade offer: moves the item from the
+// proposer's inventory to the acceptor's, and the credits the other way,
+// inside one transaction -- re-checking both sides' CURRENT balances rather
+// than trusting whatever was true when the offer was created (the proposer
+// may have since spent the item, the acceptor may be short on tokens).
+// Marks the offer 'accepted' on success or 'declined' on failure either way
+// -- nothing is ever left 'pending' after this runs. Shared by the human
+// /accept route and the immediate NPC auto-response in POST /trade-offers
+// below, so the money/inventory movement itself is defined exactly once.
+// Returns { ok: true } or { ok: false, message }.
+async function resolveTradeOffer(client, offer, acceptorGameUserId) {
+  await client.beginTransaction();
+
+  const takeItem = await client.query(
+    'UPDATE haulonaut_pilot_inventory SET quantity = quantity - $1 WHERE game_user_id = $2 AND item_id = $3 AND quantity >= $1',
+    [offer.quantity, offer.from_game_user_id, offer.item_id]
+  );
+  if (!takeItem.affectedRows) {
+    await client.rollback();
+    await client.query(`UPDATE haulonaut_trade_offers SET status = 'declined', resolved_at = NOW() WHERE id = $1`, [offer.id]);
+    return { ok: false, message: `They no longer have enough ${offer.item_name}` };
+  }
+
+  const takeCredits = await client.query(
+    'UPDATE haulonaut_pilots SET credits = credits - $1 WHERE game_user_id = $2 AND credits >= $1',
+    [offer.credits, acceptorGameUserId]
+  );
+  if (!takeCredits.affectedRows) {
+    await client.rollback();
+    await client.query(`UPDATE haulonaut_trade_offers SET status = 'declined', resolved_at = NOW() WHERE id = $1`, [offer.id]);
+    return { ok: false, message: 'Not enough tokens' };
+  }
+
+  await client.query(
+    `INSERT INTO haulonaut_pilot_inventory (game_user_id, item_id, quantity) VALUES ($1, $2, $3)
+     ON DUPLICATE KEY UPDATE quantity = quantity + $3`,
+    [acceptorGameUserId, offer.item_id, offer.quantity]
+  );
+  await client.query('UPDATE haulonaut_pilots SET credits = credits + $1 WHERE game_user_id = $2', [offer.credits, offer.from_game_user_id]);
+  await client.query(`UPDATE haulonaut_trade_offers SET status = 'accepted', resolved_at = NOW() WHERE id = $1`, [offer.id]);
+
+  await client.commit();
+  return { ok: true };
+}
+
+/**
+ * GET /api/games/:gameKey/characters/:id/pilots/:targetId
+ * Read-only snapshot of another active pilot in the same sector -- display
+ * name, credits, and inventory. Not a trade action itself; backs the Hail >
+ * Propose a Trade screen's "what they have" reference panel, so a proposer
+ * can see what a target (human or NPC) is carrying and how many tokens they
+ * hold before deciding what to ask for.
+ */
+router.get('/:gameKey/characters/:id/pilots/:targetId', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+
+    const target = await loadSameSectorTarget(client, req.params.id, req.params.targetId);
+    if (!target) return res.status(404).json({ message: 'That pilot is not in this sector' });
+
+    const inventory = await loadInventory(client, req.params.targetId);
+    res.json({ id: target.id, display_name: target.display_name, is_npc: !!target.is_npc, credits: target.credits, inventory });
+  } catch (err) {
+    console.error('Error loading pilot snapshot:', err);
+    res.status(500).json({ message: 'Failed to load pilot' });
+  } finally {
+    client.release();
+  }
+});
+
 /**
  * POST /api/games/:gameKey/characters/:id/trade-offers
  * Offers a quantity of one item from this character's own inventory to
  * another active character in the same sector, in exchange for a set
- * amount of credits. Nothing moves yet -- the target has to /accept it
- * (see the route below) before either side's balance changes. Body:
- * { to_character_id, item_key, quantity, credits }.
+ * amount of credits. Body: { to_character_id, item_key, quantity, credits }.
+ *
+ * A human target: nothing moves yet -- they have to /accept it (see the
+ * route below) before either side's balance changes.
+ *
+ * An NPC target: resolved immediately, in this same request -- an NPC has
+ * no one interactively driving it to /accept later, so "are they interested"
+ * is answered on the spot. The rule is simple and entirely about
+ * affordability: if the NPC's current credits cover your asking price, it
+ * accepts (via the same resolveTradeOffer used for a human's /accept);
+ * otherwise it declines. Either way the response carries `npcResponse`
+ * ('accepted' | 'declined') so the client can show the outcome immediately
+ * instead of waiting on a socket event that will never come.
  */
 router.post('/:gameKey/characters/:id/trade-offers', authenticate, async (req, res) => {
   const toCharacterId = parseInt(req.body.to_character_id, 10);
@@ -1168,7 +1256,6 @@ router.post('/:gameKey/characters/:id/trade-offers', authenticate, async (req, r
 
     const target = await loadSameSectorTarget(client, req.params.id, toCharacterId);
     if (!target) return res.status(404).json({ message: 'That pilot is not in this sector' });
-    if (target.is_npc) return res.status(400).json({ message: 'NPCs cannot respond to trade offers' });
 
     const itemResult = await client.query('SELECT id, name FROM haulonaut_items WHERE item_key = $1', [itemKey]);
     if (itemResult.rowCount === 0) return res.status(404).json({ message: 'Item not found' });
@@ -1186,10 +1273,37 @@ router.post('/:gameKey/characters/:id/trade-offers', authenticate, async (req, r
        VALUES ($1, $2, $3, $4, $5)`,
       [req.params.id, toCharacterId, item.id, quantity, credits]
     );
+    const offerId = insertResult.insertId;
+
+    if (target.is_npc) {
+      if (target.credits < credits) {
+        await client.query(`UPDATE haulonaut_trade_offers SET status = 'declined', resolved_at = NOW() WHERE id = $1`, [offerId]);
+        return res.status(200).json({
+          message: `${target.display_name} doesn't have enough Tokens for that (they have ${target.credits}, you asked for ${credits}).`,
+          offerId,
+          npcResponse: 'declined'
+        });
+      }
+
+      const offer = { id: offerId, from_game_user_id: Number(req.params.id), item_id: item.id, quantity, credits, item_name: item.name };
+      const result = await resolveTradeOffer(client, offer, toCharacterId);
+      if (!result.ok) {
+        return res.status(200).json({ message: `${target.display_name} declines: ${result.message}`, offerId, npcResponse: 'declined' });
+      }
+      const pilotAfter = await client.query('SELECT credits FROM haulonaut_pilots WHERE game_user_id = $1', [req.params.id]);
+      const inventory = await loadInventory(client, req.params.id);
+      return res.status(200).json({
+        message: `${target.display_name} accepts! Traded ${quantity} ${item.name} for ${credits} Tokens.`,
+        offerId,
+        npcResponse: 'accepted',
+        credits: pilotAfter.rows[0].credits,
+        inventory
+      });
+    }
 
     if (target.user_id) {
       emitToUser(target.user_id, 'haulonaut_trade_offer', {
-        offerId: insertResult.insertId,
+        offerId,
         fromCharacterId: Number(req.params.id),
         fromDisplayName: ownerCheck.rows[0].display_name,
         itemKey,
@@ -1201,7 +1315,7 @@ router.post('/:gameKey/characters/:id/trade-offers', authenticate, async (req, r
 
     res.status(201).json({
       message: `Offered ${quantity} ${item.name} to ${target.display_name} for ${credits} Tokens`,
-      offerId: insertResult.insertId
+      offerId
     });
   } catch (err) {
     console.error('Error creating trade offer:', err);
@@ -1289,36 +1403,10 @@ router.post('/:gameKey/characters/:id/trade-offers/:offerId/accept', authenticat
       return res.status(409).json({ message: 'They are no longer in this sector' });
     }
 
-    await client.beginTransaction();
-
-    const takeItem = await client.query(
-      'UPDATE haulonaut_pilot_inventory SET quantity = quantity - $1 WHERE game_user_id = $2 AND item_id = $3 AND quantity >= $1',
-      [offer.quantity, offer.from_game_user_id, offer.item_id]
-    );
-    if (!takeItem.affectedRows) {
-      await client.rollback();
-      await client.query(`UPDATE haulonaut_trade_offers SET status = 'declined', resolved_at = NOW() WHERE id = $1`, [offer.id]);
-      return res.status(409).json({ message: `They no longer have enough ${offer.item_name}` });
+    const result = await resolveTradeOffer(client, offer, req.params.id);
+    if (!result.ok) {
+      return res.status(409).json({ message: result.message });
     }
-
-    const takeCredits = await client.query(
-      'UPDATE haulonaut_pilots SET credits = credits - $1 WHERE game_user_id = $2 AND credits >= $1',
-      [offer.credits, req.params.id]
-    );
-    if (!takeCredits.affectedRows) {
-      await client.rollback();
-      return res.status(400).json({ message: 'Not enough tokens' });
-    }
-
-    await client.query(
-      `INSERT INTO haulonaut_pilot_inventory (game_user_id, item_id, quantity) VALUES ($1, $2, $3)
-       ON DUPLICATE KEY UPDATE quantity = quantity + $3`,
-      [req.params.id, offer.item_id, offer.quantity]
-    );
-    await client.query('UPDATE haulonaut_pilots SET credits = credits + $1 WHERE game_user_id = $2', [offer.credits, offer.from_game_user_id]);
-    await client.query(`UPDATE haulonaut_trade_offers SET status = 'accepted', resolved_at = NOW() WHERE id = $1`, [offer.id]);
-
-    await client.commit();
 
     const pilotAfter = await client.query('SELECT credits FROM haulonaut_pilots WHERE game_user_id = $1', [req.params.id]);
     const inventory = await loadInventory(client, req.params.id);
