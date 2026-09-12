@@ -51,6 +51,9 @@ const currentSector = ref(null)
 const connectedSectors = ref([])
 const sectorFeatures = ref([])
 const playersHere = ref([])
+// Brief "X has entered the sector" banners -- see the haulonaut_sector_arrival
+// socket handler in connectSectorSocket and showSectorArrivalAlert below.
+const sectorArrivalAlerts = ref([]) // [{ id, displayName, isNpc }]
 const credits = ref(0)
 const rations = ref(0)
 const fuel = ref(0)
@@ -1294,6 +1297,30 @@ function connectSectorSocket() {
     scrollLogToBottom()
   })
 
+  // Presence: someone (human or NPC) just warped/drifted into this sector --
+  // broadcast by the server from /navigate, /drift, and the NPC scheduler's
+  // own warp (see emitHaulonautSectorArrival in backend/utilities/socket.js).
+  // Own arrival is filtered out client-side (same pattern as
+  // haulonaut_combat_event below) rather than server-side, since the server
+  // doesn't know which socket belongs to which client connection here.
+  // Everyone else's arrival gets a Terminal log line, a brief on-screen
+  // alert, and a live playersHere update -- so SECTOR SCAN and the Hail
+  // action reflect the new arrival immediately, no reload or re-navigate
+  // needed.
+  sectorSocket.on('haulonaut_sector_arrival', (data) => {
+    if (!currentSector.value || data.sectorId !== currentSector.value.id) return
+    const myId = Number(route.params.characterId)
+    if (data.characterId === myId) return
+
+    logLines.value.push(`${data.displayName}${data.isNpc ? ' [NPC]' : ''} has entered the sector.`)
+    scrollLogToBottom()
+    showSectorArrivalAlert(data.displayName, data.isNpc)
+
+    if (!playersHere.value.some(p => p.id === data.characterId)) {
+      playersHere.value = [...playersHere.value, { id: data.characterId, display_name: data.displayName, is_npc: data.isNpc }]
+    }
+  })
+
   // Trading (see /give and /trade-offers in games.js). Both notifications
   // carry the recipient's post-transfer credit balance directly, so the
   // HUD updates without a round-trip back to the server to re-fetch it.
@@ -1368,6 +1395,19 @@ function popNumber(tokens) {
 function findPlayerHereByName(name) {
   const lower = name.toLowerCase()
   return playersHere.value.find(p => p.display_name.toLowerCase() === lower) || null
+}
+
+// Shows a brief "X has entered the sector" banner (see the
+// sector-arrival-alerts template block) and auto-dismisses it -- a local
+// queue+timeout, same pattern App.vue's mention/comment toasts use, kept
+// local to this page since the Haulonaut play route renders bareLayout
+// (no app chrome, so the global toast components never mount here).
+function showSectorArrivalAlert(displayName, isNpc) {
+  const id = Date.now() + Math.random()
+  sectorArrivalAlerts.value.push({ id, displayName, isNpc })
+  setTimeout(() => {
+    sectorArrivalAlerts.value = sectorArrivalAlerts.value.filter(a => a.id !== id)
+  }, 6000)
 }
 
 // Trading commands, typed straight into the terminal: /give, /offer,
@@ -2290,6 +2330,17 @@ onUnmounted(() => {
                 </div>
               </div>
 
+              <!-- Presence alerts: another pilot (human or NPC) just warped into
+                   this sector -- see the haulonaut_sector_arrival handler in
+                   connectSectorSocket. Purely additive to the Terminal log line
+                   it also writes -- this is the "pop up a notice" half. -->
+              <div v-if="sectorArrivalAlerts.length > 0" class="sector-arrival-alerts" aria-live="polite">
+                <div v-for="a in sectorArrivalAlerts" :key="a.id" class="sector-arrival-alert">
+                  <span class="sector-arrival-icon" aria-hidden="true">&#9673;</span>
+                  <span>{{ a.displayName }}{{ a.isNpc ? ' [NPC]' : '' }} has entered the sector</span>
+                </div>
+              </div>
+
               <div class="crt-grid">
                 <!-- Viewport: what you'd see out the window -->
                 <div class="tui-panel panel-viewport" :class="boxStateClass('viewport')" @click="focusBox('viewport')">
@@ -2872,6 +2923,56 @@ onUnmounted(() => {
   gap: clamp(6px, 1.5%, 12px);
   color: #4dff88;
   font-family: 'Courier New', Courier, monospace;
+}
+
+/* Sector-arrival alerts: float over the grid rather than taking layout
+   space, so a burst of them doesn't shove the panels around. */
+.sector-arrival-alerts {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  pointer-events: none;
+  width: min(92%, 420px);
+}
+
+.sector-arrival-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(5, 19, 10, 0.92);
+  border: 1px solid #4dff88;
+  border-radius: 5px;
+  padding: 7px 14px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #baffcf;
+  box-shadow: 0 0 14px rgba(77, 255, 136, 0.5);
+  animation: sector-alert-in 0.25s ease-out, sector-alert-out 0.4s ease-in 5.6s forwards;
+}
+
+.sector-arrival-icon {
+  color: #4dff88;
+  animation: terminal-blink 1s step-end infinite;
+}
+
+@keyframes sector-alert-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes sector-alert-out {
+  to { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sector-arrival-alert { animation: none; }
+  .sector-arrival-icon { animation: none; }
 }
 
 .terminal-cursor {

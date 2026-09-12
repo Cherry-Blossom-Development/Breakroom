@@ -5,7 +5,7 @@ const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { buildUniverseGraph, generateSectorContent, randomNpcName } = require('../utilities/haulonautUniverse');
 const { rollLandingEvent } = require('../utilities/haulonautLandingEvents');
-const { emitToUser, getIO } = require('../utilities/socket');
+const { emitToUser, getIO, emitHaulonautSectorArrival } = require('../utilities/socket');
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -81,6 +81,17 @@ const ATTACK_CYCLE_COST = 3;
 const ATTACK_MIN_DAMAGE = 15;
 const ATTACK_MAX_DAMAGE = 30;
 const ATTACK_WEAPON_ITEM_KEY = 'laser_cannon';
+
+// NPC "magnet" behavior (see migration 072 and haulonautNpcScheduler.js): a
+// magnet NPC's countdown to its next pull-toward-target hop is reseeded to a
+// random value in this range each time it reaches 0 -- "every 5 random
+// turns" rather than a rigid cadence, and independently randomized per NPC
+// so a batch spawned together doesn't pull in lockstep.
+const MAGNET_MIN_TURNS = 3;
+const MAGNET_MAX_TURNS = 7;
+function randomMagnetTurns() {
+  return MAGNET_MIN_TURNS + Math.floor(Math.random() * (MAGNET_MAX_TURNS - MAGNET_MIN_TURNS + 1));
+}
 
 // A planet surface's exploration grid -- low-res and small on purpose (see
 // haulonaut_surface_maps in migration 063). Reveal radius 1 means a 3x3
@@ -754,7 +765,7 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
   const client = await getClient();
   try {
     const ownerCheck = await client.query(
-      `SELECT gu.id FROM game_users gu
+      `SELECT gu.id, gu.display_name FROM game_users gu
        JOIN game_instances gi ON gi.id = gu.game_instance_id
        JOIN games g ON g.id = gi.game_id
        WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
@@ -825,6 +836,13 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
     // kill the character outright. Done after the move: thematically the
     // ship still completes the jump; the crew just may not survive it.
     const { died } = await applyWarpHealth(client, req.params.id, hadRations);
+    // Broadcast the arrival only if the pilot survived the jump -- a
+    // starved warp that kills them on landing isn't a live presence for
+    // anyone else in the sector to be alerted about (same guard the NPC
+    // scheduler applies to its own warp).
+    if (!died) {
+      emitHaulonautSectorArrival(toSectorId, { id: Number(req.params.id), display_name: ownerCheck.rows[0].display_name, is_npc: false });
+    }
 
     const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel, health, cycles, cyclesUpdatedAt } = await loadPilotLocation(client, req.params.id);
 
@@ -857,7 +875,7 @@ router.post('/:gameKey/characters/:id/drift', authenticate, async (req, res) => 
   const client = await getClient();
   try {
     const ownerCheck = await client.query(
-      `SELECT gu.id, gu.game_instance_id FROM game_users gu
+      `SELECT gu.id, gu.game_instance_id, gu.display_name FROM game_users gu
        JOIN game_instances gi ON gi.id = gu.game_instance_id
        JOIN games g ON g.id = gi.game_id
        WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
@@ -925,6 +943,7 @@ router.post('/:gameKey/characters/:id/drift', authenticate, async (req, res) => 
     await client.query('UPDATE haulonaut_pilots SET current_sector_id = $1 WHERE game_user_id = $2', [nextSectorId, req.params.id]);
     await markSectorVisited(client, req.params.id, nextSectorId);
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
+    emitHaulonautSectorArrival(nextSectorId, { id: Number(req.params.id), display_name: ownerCheck.rows[0].display_name, is_npc: false });
 
     const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel, health, cycles, cyclesUpdatedAt } = await loadPilotLocation(client, req.params.id);
 
@@ -2039,7 +2058,7 @@ router.get('/:gameKey/admin/instances/:instanceId/roster', authenticate, require
  * health/cycles as a freshly created human character. jobs/haulonautNpcScheduler.js
  * is what actually moves them from there; this endpoint only creates the
  * roster entries. Body: { count, placement, targetGameUserId, sectorsAway,
- * sectorNumber }.
+ * sectorNumber, magnet }.
  *
  * `placement` (default 'anywhere') picks where each spawned NPC starts:
  *   - 'anywhere': the original behavior -- a uniformly random sector.
@@ -2056,12 +2075,22 @@ router.get('/:gameKey/admin/instances/:instanceId/roster', authenticate, require
  * Each created entry in the response includes the sector it actually landed
  * in, so the admin UI can display where "near_user"/"in_sector" resolved to.
  *
+ * `magnet` (boolean, default false) makes every spawned NPC a "magnet"
+ * tracking `targetGameUserId` (see migration 072 and haulonautNpcScheduler.js
+ * for the pull-toward-target behavior itself) -- only valid alongside
+ * `placement: 'near_user'`, since that's what already supplies the target;
+ * 400s if set with any other placement.
+ *
  * count defaults to 1, clamped to 1-50 per call so a fat-fingered number
  * can't flood a universe in one request.
  */
 router.post('/:gameKey/admin/instances/:instanceId/npcs', authenticate, requireGameAdmin, async (req, res) => {
   const count = Math.min(50, Math.max(1, parseInt(req.body.count, 10) || 1));
   const placement = ['anywhere', 'near_user', 'in_sector'].includes(req.body.placement) ? req.body.placement : 'anywhere';
+  const magnet = req.body.magnet === true;
+  if (magnet && placement !== 'near_user') {
+    return res.status(400).json({ message: "Magnet requires 'near user' placement" });
+  }
 
   const client = await getClient();
   try {
@@ -2076,6 +2105,7 @@ router.post('/:gameKey/admin/instances/:instanceId/npcs', authenticate, requireG
     // partial batch behind.
     let fixedSector = null; // 'in_sector': every NPC lands here
     let nearCandidates = null; // 'near_user': each NPC independently picks one of these
+    let magnetTargetId = null; // 'near_user' + magnet: who each spawned NPC tracks
 
     if (placement === 'in_sector') {
       const sectorNumber = parseInt(req.body.sectorNumber, 10);
@@ -2112,6 +2142,7 @@ router.post('/:gameKey/admin/instances/:instanceId/npcs', authenticate, requireG
       if (nearCandidates.length === 0) {
         return res.status(400).json({ message: `No sector exactly ${sectorsAway} warp${sectorsAway === 1 ? '' : 's'} away from that pilot was found.` });
       }
+      magnetTargetId = targetGameUserId;
     }
 
     const created = [];
@@ -2133,7 +2164,16 @@ router.post('/:gameKey/admin/instances/:instanceId/npcs', authenticate, requireG
         spawned = await spawnPilotAtRandomSector(client, newGameUserId);
       }
 
-      if (spawned) created.push({ id: newGameUserId, display_name: displayName, sector_number: spawned.sector_number });
+      if (magnet && magnetTargetId) {
+        await client.query(
+          `UPDATE haulonaut_pilots
+           SET is_magnet = TRUE, magnet_target_game_user_id = $1, magnet_turns_remaining = $2
+           WHERE game_user_id = $3`,
+          [magnetTargetId, randomMagnetTurns(), newGameUserId]
+        );
+      }
+
+      if (spawned) created.push({ id: newGameUserId, display_name: displayName, sector_number: spawned.sector_number, magnet: magnet && !!magnetTargetId });
     }
 
     res.status(201).json({ created });
@@ -2338,6 +2378,8 @@ module.exports.internals = {
   spendCycles,
   applyWarpHealth,
   markSectorVisited,
+  computeSectorDistances,
+  randomMagnetTurns,
   WARP_CYCLE_COST,
   WARP_FUEL_COST,
   WARP_RATIONS_COST

@@ -29,7 +29,8 @@ const npcModes = ref({}) // instanceId -> 'anywhere' | 'near_user' | 'in_sector'
 const npcTargetUser = ref({}) // instanceId -> selected non-NPC game_users.id (string, from the <select>)
 const npcSectorsAway = ref({}) // instanceId -> 0-10
 const npcSectorNumber = ref({}) // instanceId -> exact sector_number
-const npcSpawnResults = ref({}) // instanceId -> last spawn's [{ id, display_name, sector_number }], for "chosen sector" display
+const npcMagnet = ref({}) // instanceId -> bool -- only meaningful in 'near_user' mode; see backend/jobs/haulonautNpcScheduler.js
+const npcSpawnResults = ref({}) // instanceId -> last spawn's [{ id, display_name, sector_number, magnet }], for "chosen sector" display
 
 async function loadOverview() {
   loading.value = true
@@ -105,6 +106,7 @@ async function spawnNpcs(inst) {
     body.targetGameUserId = npcTargetUser.value[inst.id]
     // Whole number 0-10 -- clamp/round client-side too, not just server-side.
     body.sectorsAway = Math.min(10, Math.max(0, Math.round(Number(npcSectorsAway.value[inst.id]) || 0)))
+    body.magnet = !!npcMagnet.value[inst.id]
   } else if (mode === 'in_sector') {
     const sectorNumber = Math.round(Number(npcSectorNumber.value[inst.id]))
     if (!Number.isInteger(sectorNumber) || sectorNumber < 1) {
@@ -297,10 +299,15 @@ onMounted(loadOverview)
                 </button>
               </div>
 
+              <label v-if="(npcModes[inst.id] || 'anywhere') === 'near_user' && npcTargetUser[inst.id]" class="npc-magnet-row">
+                <input type="checkbox" v-model="npcMagnet[inst.id]" />
+                Magnet &mdash; every few turns, pull this NPC back toward that pilot until it catches up
+              </label>
+
               <p v-if="(npcSpawnResults[inst.id] || []).length > 0" class="npc-spawn-results">
                 Spawned:
                 <span v-for="(c, i) in npcSpawnResults[inst.id]" :key="c.id">
-                  {{ c.display_name }} &rarr; Sector #{{ c.sector_number }}<span v-if="i < npcSpawnResults[inst.id].length - 1">, </span>
+                  {{ c.display_name }} &rarr; Sector #{{ c.sector_number }}<span v-if="c.magnet"> [MAGNET]</span><span v-if="i < npcSpawnResults[inst.id].length - 1">, </span>
                 </span>
               </p>
             </div>
@@ -481,6 +488,15 @@ h2 { color: var(--color-text); font-size: 1.1rem; margin: 0 0 12px; }
 
 .npc-spawn-row select {
   min-width: 110px;
+}
+
+.npc-magnet-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 0.8rem;
+  color: var(--color-text-light);
 }
 
 .npc-spawn-results {

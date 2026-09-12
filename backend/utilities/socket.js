@@ -407,4 +407,25 @@ const emitToUser = (userId, event, data) => {
   }
 };
 
-module.exports = { initializeSocket, userSockets, getIO, emitToUser };
+// Broadcasts that a character just arrived in a Haulonaut sector, to
+// everyone currently sitting in that sector's comms room (see
+// haulonaut_join_sector above). Every way a character's current_sector_id
+// can change uses this: /navigate and /drift in routes/games.js (human
+// movement) and jobs/haulonautNpcScheduler.js's own warp (NPC movement) --
+// one shared emit so a client only ever needs one listener
+// (haulonaut_sector_arrival) regardless of who moved or why. The arriving
+// character's own client also receives this (it's in the same room by the
+// time it re-joins) -- it filters its own arrival out client-side rather
+// than being special-cased here, the same way haulonaut_combat_event already
+// lets the client tell "me" from "someone else" apart.
+const emitHaulonautSectorArrival = (sectorId, character) => {
+  if (!ioInstance) return;
+  ioInstance.to(`haulonaut_sector_${sectorId}`).emit('haulonaut_sector_arrival', {
+    sectorId,
+    characterId: character.id,
+    displayName: character.display_name,
+    isNpc: !!character.is_npc
+  });
+};
+
+module.exports = { initializeSocket, userSockets, getIO, emitToUser, emitHaulonautSectorArrival };
