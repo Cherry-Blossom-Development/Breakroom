@@ -82,16 +82,12 @@ const ATTACK_MIN_DAMAGE = 15;
 const ATTACK_MAX_DAMAGE = 30;
 const ATTACK_WEAPON_ITEM_KEY = 'laser_cannon';
 
-// NPC "magnet" behavior (see migration 072 and haulonautNpcScheduler.js): a
-// magnet NPC's countdown to its next pull-toward-target hop is reseeded to a
-// random value in this range each time it reaches 0 -- "every 5 random
-// turns" rather than a rigid cadence, and independently randomized per NPC
-// so a batch spawned together doesn't pull in lockstep.
-const MAGNET_MIN_TURNS = 3;
-const MAGNET_MAX_TURNS = 7;
-function randomMagnetTurns() {
-  return MAGNET_MIN_TURNS + Math.floor(Math.random() * (MAGNET_MAX_TURNS - MAGNET_MIN_TURNS + 1));
-}
+// NPC "magnet" behavior (see migrations 072/073 and haulonautNpcScheduler.js):
+// a magnet NPC wanders randomly for exactly this many turns, then commits to
+// homing -- a shortest-path hop toward its target EVERY turn (a beeline)
+// until it actually lands in the target's sector, at which point it stops
+// and starts a fresh MAGNET_RANDOM_TURNS-turn wander phase.
+const MAGNET_RANDOM_TURNS = 5;
 
 // A planet surface's exploration grid -- low-res and small on purpose (see
 // haulonaut_surface_maps in migration 063). Reveal radius 1 means a 3x3
@@ -2076,8 +2072,9 @@ router.get('/:gameKey/admin/instances/:instanceId/roster', authenticate, require
  * in, so the admin UI can display where "near_user"/"in_sector" resolved to.
  *
  * `magnet` (boolean, default false) makes every spawned NPC a "magnet"
- * tracking `targetGameUserId` (see migration 072 and haulonautNpcScheduler.js
- * for the pull-toward-target behavior itself) -- only valid alongside
+ * tracking `targetGameUserId` -- wanders for MAGNET_RANDOM_TURNS turns, then
+ * beelines toward the target every turn until it arrives (see migrations
+ * 072/073 and haulonautNpcScheduler.js) -- only valid alongside
  * `placement: 'near_user'`, since that's what already supplies the target;
  * 400s if set with any other placement.
  *
@@ -2167,9 +2164,9 @@ router.post('/:gameKey/admin/instances/:instanceId/npcs', authenticate, requireG
       if (magnet && magnetTargetId) {
         await client.query(
           `UPDATE haulonaut_pilots
-           SET is_magnet = TRUE, magnet_target_game_user_id = $1, magnet_turns_remaining = $2
+           SET is_magnet = TRUE, magnet_target_game_user_id = $1, magnet_turns_remaining = $2, magnet_homing = FALSE
            WHERE game_user_id = $3`,
-          [magnetTargetId, randomMagnetTurns(), newGameUserId]
+          [magnetTargetId, MAGNET_RANDOM_TURNS, newGameUserId]
         );
       }
 
@@ -2379,7 +2376,7 @@ module.exports.internals = {
   applyWarpHealth,
   markSectorVisited,
   computeSectorDistances,
-  randomMagnetTurns,
+  MAGNET_RANDOM_TURNS,
   WARP_CYCLE_COST,
   WARP_FUEL_COST,
   WARP_RATIONS_COST

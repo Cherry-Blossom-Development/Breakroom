@@ -13,7 +13,7 @@ const {
   applyWarpHealth,
   markSectorVisited,
   computeSectorDistances,
-  randomMagnetTurns,
+  MAGNET_RANDOM_TURNS,
   WARP_CYCLE_COST,
   WARP_FUEL_COST,
   WARP_RATIONS_COST
@@ -28,18 +28,26 @@ const TICK_MS = 5 * 60 * 1000; // one action opportunity per NPC every 5 minutes
 const RESTOCK_THRESHOLD = 20;
 const RESTOCK_QUANTITY = 20;
 
-// "Magnet" NPCs (is_magnet, see migration 072 and the admin NPC-spawn
-// route's `magnet` flag): every ~5 turns (magnet_turns_remaining, reseeded
-// via randomMagnetTurns on each pull) they abandon the random walk for one
-// hop toward their tracked pilot's CURRENT sector instead -- re-resolved
-// fresh on every pull, since the target may have moved since the last one.
-// Returns the next sector to warp to, or null if there's nothing to pull
-// toward this tick (no target, target unresolvable/gone, already arrived,
-// or unreachable) -- the caller falls back to the normal random walk.
+// "Magnet" NPCs (is_magnet, see migrations 072/073 and the admin NPC-spawn
+// route's `magnet` flag) run a two-phase state machine, tracked by
+// magnet_homing:
+//   - wandering (magnet_homing = false): a normal random walk, same as any
+//     other NPC, but counted -- MAGNET_RANDOM_TURNS successful random hops
+//     flips it into homing.
+//   - homing (magnet_homing = true): every turn it re-resolves its target's
+//     CURRENT sector (they may have moved) and takes one shortest-path hop
+//     toward it -- an actual beeline, not a periodic pull -- until it lands
+//     in the same sector, at which point it stops, sits still for that tick,
+//     and drops back into a fresh wander phase.
+//
+// resolveMagnetHop reports which of those applies this tick:
+//   { status: 'hop', sectorId } -- take this hop, still homing
+//   { status: 'arrived' }       -- already in the target's sector
+//   { status: 'no-target' }     -- target unresolvable (dead/gone) or unreachable
 // Same shortest-path-then-take-the-first-step reconstruction /drift uses in
 // routes/games.js.
 async function resolveMagnetHop(client, npc) {
-  if (!npc.magnet_target_game_user_id) return null;
+  if (!npc.magnet_target_game_user_id) return { status: 'no-target' };
 
   const targetResult = await client.query(
     `SELECT hp.current_sector_id FROM haulonaut_pilots hp
@@ -47,52 +55,31 @@ async function resolveMagnetHop(client, npc) {
      WHERE gu.id = $1 AND gu.status = 'active'`,
     [npc.magnet_target_game_user_id]
   );
-  if (targetResult.rowCount === 0) return null; // target's character is gone/dead -- nothing to home toward
+  if (targetResult.rowCount === 0) return { status: 'no-target' }; // target's character is gone/dead
 
   const targetSectorId = targetResult.rows[0].current_sector_id;
-  if (targetSectorId === npc.current_sector_id) return null; // already caught up
+  if (targetSectorId === npc.current_sector_id) return { status: 'arrived' };
 
   const distances = await computeSectorDistances(client, npc.game_instance_id, npc.current_sector_id);
   const targetInfo = distances.get(targetSectorId);
-  if (!targetInfo) return null; // unreachable in this instance's graph
+  if (!targetInfo) return { status: 'no-target' }; // unreachable in this instance's graph
 
   const pathIds = [];
   for (let step = targetSectorId; step !== null; step = distances.get(step).prevSectorId) {
     pathIds.unshift(step);
   }
-  return pathIds.length > 1 ? pathIds[1] : null;
+  const nextHop = pathIds.length > 1 ? pathIds[1] : null;
+  return nextHop ? { status: 'hop', sectorId: nextHop } : { status: 'arrived' };
 }
 
 // One NPC's turn: restock if low and standing somewhere tradeable,
-// otherwise warp -- toward its magnet target if one is due and resolvable,
-// else to a random sector linked from wherever it already is. Silently
-// no-ops (no action this tick) if it's out of cycles, out of fuel with
-// nowhere to restock, or docked/on the surface -- NPCs don't land or drive
-// the buggy in this first pass, they only crew the ship.
+// otherwise warp -- beelining toward its magnet target while homing, else to
+// a random sector linked from wherever it already is. Silently no-ops (no
+// action this tick) if it's out of cycles, out of fuel with nowhere to
+// restock, or docked/on the surface -- NPCs don't land or drive the buggy in
+// this first pass, they only crew the ship.
 async function tickNpc(client, npc) {
   if (npc.on_surface || npc.docked_feature_id) return;
-
-  // Magnet countdown ticks down on every turn this NPC is even eligible to
-  // act (not gated on whether it actually ends up moving this tick), so a
-  // stretch of restocks or a cycle-starved lull still counts toward the
-  // next pull. Resolved before the cycles/restock checks below since it
-  // only affects WHICH sector a warp heads to, not whether one happens.
-  let magnetHopTarget = null;
-  if (npc.is_magnet) {
-    const turnsRemaining = (npc.magnet_turns_remaining ?? 1) - 1;
-    if (turnsRemaining <= 0) {
-      magnetHopTarget = await resolveMagnetHop(client, npc);
-      await client.query(
-        'UPDATE haulonaut_pilots SET magnet_turns_remaining = $1 WHERE game_user_id = $2',
-        [randomMagnetTurns(), npc.game_user_id]
-      );
-    } else {
-      await client.query(
-        'UPDATE haulonaut_pilots SET magnet_turns_remaining = $1 WHERE game_user_id = $2',
-        [turnsRemaining, npc.game_user_id]
-      );
-    }
-  }
 
   const { cycles } = await replenishCycles(client, npc.game_user_id);
   if (cycles < WARP_CYCLE_COST) return;
@@ -119,7 +106,33 @@ async function tickNpc(client, npc) {
 
   if (npc.fuel < WARP_FUEL_COST) return; // stranded until restocked (or an admin tops it up)
 
-  let toSectorId = magnetHopTarget;
+  // Whether THIS tick's hop, if it ends up being a plain random one, should
+  // count toward the wander-phase threshold -- true only when the NPC
+  // started this tick already wandering (not homing, and not a transition
+  // hop right after dropping out of homing below).
+  const countsAsWander = npc.is_magnet && !npc.magnet_homing;
+
+  let toSectorId = null;
+  if (npc.is_magnet && npc.magnet_homing) {
+    const result = await resolveMagnetHop(client, npc);
+    if (result.status === 'hop') {
+      toSectorId = result.sectorId;
+    } else {
+      // Arrived, or nothing left to home toward -- drop out of homing and
+      // start a fresh wander phase either way.
+      await client.query(
+        'UPDATE haulonaut_pilots SET magnet_homing = FALSE, magnet_turns_remaining = $1 WHERE game_user_id = $2',
+        [MAGNET_RANDOM_TURNS, npc.game_user_id]
+      );
+      // On 'arrived' specifically, take NO action this tick -- it's exactly
+      // where it needs to be; let it actually sit there for a moment rather
+      // than immediately wandering off again in the same breath. 'no-target'
+      // falls through to a normal random hop below (uncounted -- the fresh
+      // wander phase starts counting from the NEXT tick).
+      if (result.status === 'arrived') return;
+    }
+  }
+
   if (!toSectorId) {
     const linkResult = await client.query(
       'SELECT to_sector_id FROM haulonaut_sector_links WHERE from_sector_id = $1 ORDER BY RAND() LIMIT 1',
@@ -142,6 +155,20 @@ async function tickNpc(client, npc) {
   await markSectorVisited(client, npc.game_user_id, toSectorId);
   await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [npc.game_user_id]);
   const { died } = await applyWarpHealth(client, npc.game_user_id, hadRations);
+
+  // A genuine wander-phase hop counts toward MAGNET_RANDOM_TURNS -- once it
+  // reaches 0, the NEXT tick commits to homing (checked at the top). Homing
+  // hops and the post-homing transition hop are deliberately excluded (see
+  // countsAsWander above).
+  if (countsAsWander) {
+    const turnsRemaining = (npc.magnet_turns_remaining ?? MAGNET_RANDOM_TURNS) - 1;
+    if (turnsRemaining <= 0) {
+      await client.query('UPDATE haulonaut_pilots SET magnet_homing = TRUE, magnet_turns_remaining = 0 WHERE game_user_id = $1', [npc.game_user_id]);
+    } else {
+      await client.query('UPDATE haulonaut_pilots SET magnet_turns_remaining = $1 WHERE game_user_id = $2', [turnsRemaining, npc.game_user_id]);
+    }
+  }
+
   // Same broadcast /navigate and /drift send for human movement -- lets
   // anyone already sitting in toSectorId see the NPC show up live. Skipped
   // if this very warp starved the NPC to death -- it's not a live arrival,
@@ -159,7 +186,7 @@ async function tick() {
       `SELECT gu.id AS game_user_id, gu.display_name, gu.game_instance_id,
               hp.current_sector_id, hp.fuel, hp.rations, hp.credits,
               hp.on_surface, hp.docked_feature_id,
-              hp.is_magnet, hp.magnet_target_game_user_id, hp.magnet_turns_remaining
+              hp.is_magnet, hp.magnet_target_game_user_id, hp.magnet_turns_remaining, hp.magnet_homing
        FROM game_users gu
        JOIN haulonaut_pilots hp ON hp.game_user_id = gu.id
        WHERE gu.is_npc = 1 AND gu.status = 'active'`

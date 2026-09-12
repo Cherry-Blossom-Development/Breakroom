@@ -301,7 +301,7 @@ onMounted(loadOverview)
 
               <label v-if="(npcModes[inst.id] || 'anywhere') === 'near_user' && npcTargetUser[inst.id]" class="npc-magnet-row">
                 <input type="checkbox" v-model="npcMagnet[inst.id]" />
-                Magnet &mdash; every few turns, pull this NPC back toward that pilot until it catches up
+                Magnet &mdash; wanders for 5 turns, then beelines toward that pilot until it catches up, then repeats
               </label>
 
               <p v-if="(npcSpawnResults[inst.id] || []).length > 0" class="npc-spawn-results">
