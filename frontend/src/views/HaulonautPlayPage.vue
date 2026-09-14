@@ -2561,7 +2561,10 @@ onUnmounted(() => {
                   </div>
 
                   <div v-else-if="viewportMode === 'charts'" class="tui-panel-body outpost-body">
-                    <p class="outpost-heading">STAR CHARTS</p>
+                    <div class="outpost-heading-row">
+                      <p class="outpost-heading">STAR CHARTS</p>
+                      <button class="outpost-close-btn" aria-label="Close Star Charts" @click="exitViewportOverlay()">&times;</button>
+                    </div>
                     <div v-if="knownLocations.length === 0" class="cargo-empty">No known locations yet -- explore more sectors.</div>
                     <template v-else>
                       <div v-if="knownLocations.some(l => l.distance === 0)" class="cargo-list">
@@ -3583,6 +3586,44 @@ onUnmounted(() => {
   letter-spacing: 0.08em;
   color: #baffcf;
   text-shadow: 0 0 6px rgba(77, 255, 136, 0.5);
+}
+
+/* Puts a quick close shortcut top-right next to the heading, alongside
+   (not instead of) the Close entry at the end of the hotkey list below --
+   that entry stays for keyboard/hotkey nav, this is just a faster mouse
+   target than scrolling to the bottom of a long list. */
+.outpost-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.outpost-close-btn {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(77, 255, 136, 0.08);
+  border: 1px solid #2fd66e;
+  border-radius: 3px;
+  color: #baffcf;
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.outpost-close-btn:hover {
+  background: #4dff88;
+  color: #05130a;
+}
+
+.outpost-close-btn:focus-visible {
+  outline: 2px solid #baffcf;
+  outline-offset: 2px;
 }
 
 .planet-description {
