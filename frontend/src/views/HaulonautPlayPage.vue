@@ -151,6 +151,21 @@ const drifting = ref(false) // true while a drift hop's own API call is in fligh
 const navigating = ref(false)
 const navError = ref('')
 const logLines = ref([])
+// One timestamp per logLines entry, kept in sync automatically rather than
+// touching every one of the many logLines.value.push(...) call sites
+// throughout this file: this watcher fires whenever the log actually grows
+// (push, or the one full reassignment on initial load) and appends a
+// Date.now() for each newly-added line. Rendered muted/right-aligned next
+// to its line -- see .log-line-time.
+const logTimestamps = ref([])
+watch(() => logLines.value.length, (newLength) => {
+  while (logTimestamps.value.length < newLength) logTimestamps.value.push(Date.now())
+  if (logTimestamps.value.length > newLength) logTimestamps.value.length = newLength
+}, { immediate: true })
+function formatLogTime(ts) {
+  if (!ts) return ''
+  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+}
 const selectedIndex = ref(-1) // -1 = nothing highlighted; Left/Right move this, Enter confirms it
 const logEl = ref(null)
 const stars = ref([])
@@ -2853,7 +2868,10 @@ onUnmounted(() => {
                     <span v-if="activeBox === 'terminal' && level === 'inside'" aria-hidden="true">&#9658; </span><span v-if="activeBox === 'terminal' && level === 'box'" aria-hidden="true">[ </span>TERMINAL<span v-if="activeBox === 'terminal' && level === 'box'" aria-hidden="true"> ]</span>
                   </span>
                   <div class="tui-panel-body log-body" ref="logEl">
-                    <p v-for="(line, i) in logLines" :key="i" class="log-line">&gt; {{ line }}</p>
+                    <p v-for="(line, i) in logLines" :key="i" class="log-line">
+                      <span class="log-line-text">&gt; {{ line }}</span>
+                      <span class="log-line-time">{{ formatLogTime(logTimestamps[i]) }}</span>
+                    </p>
                     <p v-if="navError" class="log-line log-error">&gt; {{ navError }}</p>
                     <p class="log-line log-prompt">
                       &gt;
@@ -4165,6 +4183,27 @@ onUnmounted(() => {
   margin: 0 0 6px;
   color: #8fe6ab;
   line-height: 1.5;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.log-line-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* Muted timestamp, right-aligned next to its line -- dimmer than the log
+   text itself so it reads as ambient/secondary rather than competing with
+   the message. */
+.log-line-time {
+  flex-shrink: 0;
+  color: #6fbd8c;
+  opacity: 0.65;
+  font-size: 0.65rem;
+  white-space: nowrap;
 }
 
 .log-error {
