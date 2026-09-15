@@ -740,10 +740,12 @@ async function attackTarget(entry) {
       logLines.value.push(data.message || 'Attack failed.')
       if (typeof data.cycles === 'number') cycles.value = data.cycles
       scrollLogToBottom()
+      playHaulonautSound('error')
     }
   } catch {
     logLines.value.push('Transmission failed.')
     scrollLogToBottom()
+    playHaulonautSound('error')
   } finally {
     attackingId.value = null
   }
@@ -790,6 +792,7 @@ async function proposeTrade() {
     const data = await res.json()
     if (!res.ok) {
       encounterTradeError.value = data.message || 'Failed to send trade offer.'
+      playHaulonautSound('error')
       return
     }
     logLines.value.push(data.message || 'Trade offer sent.')
@@ -797,11 +800,17 @@ async function proposeTrade() {
     if (data.npcResponse === 'accepted') {
       if (typeof data.credits === 'number') credits.value = data.credits
       if (data.inventory) inventory.value = data.inventory
+      playHaulonautSound('trade-success')
+    } else if (data.npcResponse === 'declined') {
+      playHaulonautSound('trade-decline')
+    } else {
+      playHaulonautSound('success')
     }
     viewportMode.value = 'space'
     selectedIndex.value = -1
   } catch {
     encounterTradeError.value = 'Transmission failed.'
+    playHaulonautSound('error')
   } finally {
     proposingTrade.value = false
   }
@@ -1044,6 +1053,7 @@ async function beginLandingSequence() {
   if (!canAffordLanding.value) {
     logLines.value.push(`Cannot begin descent: landing needs ${DOCK_CYCLE_COST} cycles, you have ${displayedCycles.value}. Ready in ${landingReadyLabel.value}.`)
     scrollLogToBottom()
+    playHaulonautSound('error')
     return
   }
   viewportMode.value = 'landing-sequence'
@@ -1052,6 +1062,7 @@ async function beginLandingSequence() {
   landingPhase.value = 'approaching'
   logLines.value.push(`Beginning descent toward ${planetFeature.value ? planetFeature.value.name : 'the surface'}.`)
   scrollLogToBottom()
+  playHaulonautSound('descent')
   await nextTick() // .landing-scene doesn't exist in the DOM until this render lands
   measureLandingScene()
   window.addEventListener('resize', measureLandingScene)
@@ -1085,9 +1096,11 @@ function advanceLandingPhase() {
     landingFlames.value = generateLandingFlames()
     logLines.value.push('ATMOSPHERIC ENTRY -- HOLD ON!')
     scrollLogToBottom()
+    playHaulonautSound('entry')
   } else if (next === 'docked') {
     logLines.value.push('Touchdown confirmed. Docking clamps engaged.')
     scrollLogToBottom()
+    playHaulonautSound('dock')
     notifyDocked()
   }
   scheduleLandingFallback(next)
@@ -1172,6 +1185,7 @@ function beginLaunchSequence() {
   landingPhase.value = 'launch-ignition'
   logLines.value.push('Launch sequence initiated.')
   scrollLogToBottom()
+  playHaulonautSound('launch')
   launchTimeoutId = setTimeout(() => {
     landingPhase.value = 'launch-departing'
     logLines.value.push('Ascending...')
@@ -1192,6 +1206,7 @@ async function finishLaunch() {
   selectedIndex.value = -1
   logLines.value.push('Breaking orbit. Back in open space.')
   scrollLogToBottom()
+  playHaulonautSound('arrival')
   try {
     await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/launch`, {
       method: 'POST',
@@ -1217,6 +1232,7 @@ function exitCraft() {
   onSurface.value = true
   logLines.value.push('Exiting craft.')
   scrollLogToBottom()
+  playHaulonautSound('open')
   loadSurfaceMap()
 }
 
@@ -1261,6 +1277,7 @@ async function returnToShip() {
   surfaceMap.value = null
   logLines.value.push('Boarding the ship. Systems coming back online.')
   scrollLogToBottom()
+  playHaulonautSound('click')
   try {
     await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/return-to-ship`, {
       method: 'POST',
@@ -1392,6 +1409,7 @@ function connectSectorSocket() {
     logLines.value.push(`${data.fromDisplayName} gave you ${data.credits} Tokens.`)
     if (typeof data.newBalance === 'number') credits.value = data.newBalance
     scrollLogToBottom()
+    playHaulonautSound('trade-success')
   })
 
   sectorSocket.on('haulonaut_trade_offer', (data) => {
@@ -1399,6 +1417,7 @@ function connectSectorSocket() {
       `[TRADE OFFER #${data.offerId}] ${data.fromDisplayName} offers ${data.quantity} ${data.itemName} for ${data.credits} Tokens.`
     )
     scrollLogToBottom()
+    playHaulonautSound('notify')
     incomingTradeOffers.value = [...incomingTradeOffers.value, {
       id: data.offerId,
       fromDisplayName: data.fromDisplayName,
@@ -1412,8 +1431,10 @@ function connectSectorSocket() {
     if (data.accepted) {
       logLines.value.push(`Trade #${data.offerId} accepted: you received ${data.credits} Tokens for ${data.quantity} ${data.itemName}.`)
       if (typeof data.newBalance === 'number') credits.value = data.newBalance
+      playHaulonautSound('trade-success')
     } else {
       logLines.value.push(`Trade #${data.offerId} declined.`)
+      playHaulonautSound('trade-decline')
     }
     scrollLogToBottom()
   })
@@ -1503,9 +1524,15 @@ async function respondToTradeOffer(offerId, action) {
     if (res.ok && action === 'accept') {
       if (typeof data.credits === 'number') credits.value = data.credits
       if (data.inventory) inventory.value = data.inventory
+      playHaulonautSound('trade-success')
+    } else if (res.ok && action === 'decline') {
+      playHaulonautSound('trade-decline')
+    } else {
+      playHaulonautSound('error')
     }
   } catch {
     logLines.value.push('Transmission failed.')
+    playHaulonautSound('error')
   } finally {
     incomingTradeOffers.value = incomingTradeOffers.value.filter(o => o.id !== offerId)
     respondingOfferId.value = null
@@ -1570,9 +1597,15 @@ async function handleTerminalSlashCommand(rest) {
       })
       const data = await res.json()
       logLines.value.push(data.message || 'Failed to give tokens.')
-      if (res.ok && typeof data.credits === 'number') credits.value = data.credits
+      if (res.ok && typeof data.credits === 'number') {
+        credits.value = data.credits
+        playHaulonautSound('trade-success')
+      } else if (!res.ok) {
+        playHaulonautSound('error')
+      }
     } catch {
       logLines.value.push('Transmission failed.')
+      playHaulonautSound('error')
     }
     return scrollLogToBottom()
   }
@@ -1601,8 +1634,13 @@ async function handleTerminalSlashCommand(rest) {
       })
       const data = await res.json()
       logLines.value.push(data.message || 'Failed to send trade offer.')
+      if (!res.ok) playHaulonautSound('error')
+      else if (data.npcResponse === 'accepted') playHaulonautSound('trade-success')
+      else if (data.npcResponse === 'declined') playHaulonautSound('trade-decline')
+      else playHaulonautSound('success')
     } catch {
       logLines.value.push('Transmission failed.')
+      playHaulonautSound('error')
     }
     return scrollLogToBottom()
   }
@@ -1641,9 +1679,11 @@ async function handleTerminalSlashCommand(rest) {
         const data = await res.json()
         logLines.value.push(data.message || 'Attack failed.')
         if (typeof data.cycles === 'number') cycles.value = data.cycles
+        playHaulonautSound('error')
       }
     } catch {
       logLines.value.push('Transmission failed.')
+      playHaulonautSound('error')
     }
     return scrollLogToBottom()
   }

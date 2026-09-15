@@ -26,7 +26,15 @@ const SOUND_FILES = {
   hit: '/sounds/haulonaut/hit.wav',
   damage: '/sounds/haulonaut/damage.wav',
   danger: '/sounds/haulonaut/danger.wav',
-  death: '/sounds/haulonaut/death.wav'
+  death: '/sounds/haulonaut/death.wav',
+  // Phase 3: trade/hail + landing/launch/docking
+  notify: '/sounds/haulonaut/notify.wav',
+  'trade-success': '/sounds/haulonaut/trade-success.wav',
+  'trade-decline': '/sounds/haulonaut/trade-decline.wav',
+  descent: '/sounds/haulonaut/descent.wav',
+  entry: '/sounds/haulonaut/entry.wav',
+  dock: '/sounds/haulonaut/dock.wav',
+  launch: '/sounds/haulonaut/launch.wav'
 }
 
 function loadPrefs() {
