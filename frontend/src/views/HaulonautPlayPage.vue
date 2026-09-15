@@ -1302,6 +1302,7 @@ async function moveBuggy(direction) {
   // until a cycle replenishes; that's the intended weight of the budget.
   if (outOfCycles.value) {
     mapError.value = `Out of cycles -- next in ${cycleCountdownLabel.value}`
+    playHaulonautSound('error')
     return
   }
   buggyMoving.value = true
@@ -1318,7 +1319,8 @@ async function moveBuggy(direction) {
     // grid's edge is a silent no-op server-side (see POST /drive-buggy),
     // and shouldn't play the "hit a rock" animation for a move that didn't
     // happen.
-    if (data.buggyX !== surfaceMap.value.buggyX || data.buggyY !== surfaceMap.value.buggyY) buggyMoveCount.value++
+    const actuallyMoved = data.buggyX !== surfaceMap.value.buggyX || data.buggyY !== surfaceMap.value.buggyY
+    if (actuallyMoved) buggyMoveCount.value++
     surfaceMap.value = { ...surfaceMap.value, buggyX: data.buggyX, buggyY: data.buggyY, revealed: data.revealed }
     applyPilotState(data)
     // Arriving at a cell for the first time rolls one landing event
@@ -1329,9 +1331,13 @@ async function moveBuggy(direction) {
       credits.value = data.credits
       rations.value = data.rations
       fuel.value = data.fuel
+      playHaulonautSound('landing-event')
+    } else if (actuallyMoved) {
+      playHaulonautSound('buggy-move')
     }
   } catch (err) {
     mapError.value = err.message
+    playHaulonautSound('error')
   } finally {
     buggyMoving.value = false
   }
@@ -1500,7 +1506,7 @@ function findPlayerHereByName(name) {
 // local to this page since the Haulonaut play route renders bareLayout
 // (no app chrome, so the global toast components never mount here).
 function showSectorArrivalAlert(displayName, isNpc) {
-  playHaulonautSound('presence')
+  playHaulonautSound(isNpc ? 'npc-presence' : 'presence')
   const id = Date.now() + Math.random()
   sectorArrivalAlerts.value.push({ id, displayName, isNpc })
   setTimeout(() => {

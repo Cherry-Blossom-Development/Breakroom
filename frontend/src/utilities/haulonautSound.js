@@ -41,7 +41,11 @@ const SOUND_FILES = {
   descent: '/sounds/haulonaut/descent.wav',
   entry: '/sounds/haulonaut/entry.wav',
   dock: '/sounds/haulonaut/dock.wav',
-  launch: '/sounds/haulonaut/launch.wav'
+  launch: '/sounds/haulonaut/launch.wav',
+  // Phase 5: polish (buggy movement, NPC-distinct presence, buggy landing events)
+  'buggy-move': '/sounds/haulonaut/buggy-move.wav',
+  'npc-presence': '/sounds/haulonaut/npc-presence.wav',
+  'landing-event': '/sounds/haulonaut/landing-event.wav'
 }
 
 function loadPrefs() {
