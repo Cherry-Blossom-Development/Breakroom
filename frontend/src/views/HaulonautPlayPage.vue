@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
 import HaulonautStatChip from '@/components/HaulonautStatChip.vue'
+import { playHaulonautSound, soundMuted, soundVolume, toggleHaulonautSoundMuted, setHaulonautSoundVolume } from '@/utilities/haulonautSound'
 
 const route = useRoute()
 const router = useRouter()
@@ -556,6 +557,7 @@ function boxStateClass(box) {
 // switch the viewport into an overlay mode -- everything else on screen
 // stays the same.
 function performAction(item) {
+  playHaulonautSound('open')
   if (item.key === 'visit_outpost') {
     viewportMode.value = 'outpost'
     purchaseError.value = ''
@@ -595,6 +597,7 @@ const OVERLAY_CLOSE_MESSAGES = {
 }
 
 function exitViewportOverlay() {
+  playHaulonautSound('click')
   const message = OVERLAY_CLOSE_MESSAGES[viewportMode.value] || 'Closing.'
   viewportMode.value = 'space'
   selectedIndex.value = -1
@@ -624,8 +627,10 @@ async function purchaseItem(entry) {
     inventory.value = data.inventory || []
     logLines.value.push(`Purchased 1 ${entry.name}. (-${entry.base_price} Tokens)`)
     scrollLogToBottom()
+    playHaulonautSound('success')
   } catch (err) {
     purchaseError.value = err.message
+    playHaulonautSound('error')
   } finally {
     purchasing.value = false
   }
@@ -1642,6 +1647,7 @@ async function handleTerminalSlashCommand(rest) {
 
   logLines.value.push('Command not recognized.')
   scrollLogToBottom()
+  playHaulonautSound('error')
 }
 
 // Short word typed after / in the Terminal to trigger an Actions-panel
@@ -1690,12 +1696,14 @@ function warpToSectorNumber(num) {
   if (landingSequenceActive.value || navigating.value) {
     logLines.value.push('Cannot warp right now.')
     scrollLogToBottom()
+    playHaulonautSound('error')
     return
   }
   const sector = connectedSectors.value.find(s => s.sector_number === num)
   if (!sector) {
     logLines.value.push(`Sector ${num} is not reachable from here.`)
     scrollLogToBottom()
+    playHaulonautSound('error')
     return
   }
   manualNavigateTo(sector)
@@ -1710,6 +1718,7 @@ function submitTerminalCommand() {
   logLines.value.push(text)
   terminalInput.value = ''
   scrollLogToBottom()
+  playHaulonautSound('click')
 
   if (text.startsWith('/')) {
     handleTerminalSlashCommand(text.slice(1))
@@ -2479,6 +2488,24 @@ onUnmounted(() => {
             <div class="crt-content">
               <div class="crt-header">
                 <span class="header-name">{{ character.display_name }}</span>
+                <div class="sound-controls" @click.stop>
+                  <button
+                    type="button"
+                    class="sound-toggle-btn"
+                    :class="{ muted: soundMuted }"
+                    @click="toggleHaulonautSoundMuted"
+                    :title="soundMuted ? 'Unmute sound' : 'Mute sound'"
+                  >{{ soundMuted ? '♪ OFF' : '♪ ON' }}</button>
+                  <input
+                    v-if="!soundMuted"
+                    type="range"
+                    class="sound-volume-slider"
+                    min="0" max="1" step="0.05"
+                    :value="soundVolume"
+                    @input="setHaulonautSoundVolume(parseFloat($event.target.value))"
+                    title="Sound volume"
+                  />
+                </div>
                 <div class="header-resources" @click.stop>
                   <HaulonautStatChip stat-key="credits" :icon="STAT_META.credits.icon" :label="STAT_META.credits.label"
                     :value="credits.toLocaleString()" :mode="statLabelModes.credits" :selected="selectedStatChip === 'credits'"
@@ -3320,6 +3347,38 @@ onUnmounted(() => {
 
 .resource-stat {
   white-space: nowrap;
+}
+
+.sound-controls {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sound-toggle-btn {
+  flex-shrink: 0;
+  font-family: inherit;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+  color: #baffcf;
+  background: rgba(77, 255, 136, 0.08);
+  border: 1px solid rgba(77, 255, 136, 0.4);
+  border-radius: 3px;
+  padding: 2px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sound-toggle-btn.muted {
+  color: #6b8f78;
+  border-color: rgba(107, 143, 120, 0.4);
+  background: transparent;
+}
+
+.sound-volume-slider {
+  width: 54px;
+  accent-color: #4dff88;
 }
 
 .resource-icon {
