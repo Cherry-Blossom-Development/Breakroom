@@ -1429,8 +1429,10 @@ function connectSectorSocket() {
       logLines.value.push(`${data.fromDisplayName} attacks you for ${data.damage} damage! Health: ${data.targetHealth}.`)
       health.value = data.targetHealth
       if (data.died) dead.value = true
+      else playHaulonautSound('damage')
     } else if (data.fromCharacterId === myId) {
       logLines.value.push(`You hit ${data.toDisplayName} for ${data.damage} damage. Their health: ${data.targetHealth}.`)
+      playHaulonautSound('hit')
     } else {
       logLines.value.push(`${data.fromDisplayName} attacks ${data.toDisplayName} for ${data.damage} damage.`)
     }
@@ -1474,6 +1476,7 @@ function findPlayerHereByName(name) {
 // local to this page since the Haulonaut play route renders bareLayout
 // (no app chrome, so the global toast components never mount here).
 function showSectorArrivalAlert(displayName, isNpc) {
+  playHaulonautSound('presence')
   const id = Date.now() + Math.random()
   sectorArrivalAlerts.value.push({ id, displayName, isNpc })
   setTimeout(() => {
@@ -1873,10 +1876,12 @@ async function navigateTo(sector) {
     navError.value = `Warp needs ${WARP_CYCLE_COST} cycles (you have ${displayedCycles.value}) -- ready in ${warpReadyLabel.value}`
     logLines.value.push(`Warp drive offline: needs ${WARP_CYCLE_COST} cycles, ${displayedCycles.value} available. Ready in ${warpReadyLabel.value}.`)
     scrollLogToBottom()
+    playHaulonautSound('error')
     return false
   }
   navigating.value = true
   navError.value = ''
+  playHaulonautSound('warp')
   try {
     const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/navigate`, {
       method: 'POST',
@@ -1916,9 +1921,11 @@ async function navigateTo(sector) {
     }
     selectedIndex.value = -1
     scrollLogToBottom()
+    playHaulonautSound('arrival')
     return true
   } catch (err) {
     navError.value = err.message
+    playHaulonautSound('error')
     return false
   } finally {
     navigating.value = false
@@ -2035,6 +2042,7 @@ async function performDrift() {
       logLines.value.push('A planetary body is in range. Drift variance stabilizing.')
     }
     scrollLogToBottom()
+    playHaulonautSound('drift')
     driftVariance.value = 0
   } finally {
     drifting.value = false
@@ -2049,10 +2057,27 @@ watch(fuel, (newFuel, oldFuel) => {
   if (newFuel <= 0 && oldFuel > 0) {
     logLines.value.push('WARNING: Fuel depleted. Hull drifting, uncontrolled.')
     scrollLogToBottom()
+    playHaulonautSound('error')
   } else if (newFuel > 0 && oldFuel <= 0) {
     logLines.value.push('Fuel restored. Drift variance stabilizing.')
     scrollLogToBottom()
+    playHaulonautSound('success')
   }
+})
+
+// Low-health warning -- fires once right as health crosses into the
+// critical band (see healthCritical above), not on every tick it stays
+// there. Catches every path into critical health (combat, a starved warp)
+// with one hook instead of duplicating the check at each call site.
+watch(healthCritical, (isCritical, wasCritical) => {
+  if (isCritical && !wasCritical) playHaulonautSound('danger')
+})
+
+// Character death -- fires once, however it happened (combat or a starved
+// warp both flip `dead` via applyPilotState / the navigate response), so
+// this is the single place that needs to know about it.
+watch(dead, (isDead) => {
+  if (isDead) playHaulonautSound('death')
 })
 
 // Rations running dry no longer strands the ship -- it can still warp --

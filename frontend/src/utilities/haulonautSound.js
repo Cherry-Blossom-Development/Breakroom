@@ -17,7 +17,16 @@ const SOUND_FILES = {
   click: '/sounds/haulonaut/ui-click.wav',
   open: '/sounds/haulonaut/ui-open.wav',
   success: '/sounds/haulonaut/ui-success.wav',
-  error: '/sounds/haulonaut/ui-error.wav'
+  error: '/sounds/haulonaut/ui-error.wav',
+  // Phase 2: navigation + combat
+  warp: '/sounds/haulonaut/warp.wav',
+  drift: '/sounds/haulonaut/drift.wav',
+  arrival: '/sounds/haulonaut/arrival.wav',
+  presence: '/sounds/haulonaut/presence.wav',
+  hit: '/sounds/haulonaut/hit.wav',
+  damage: '/sounds/haulonaut/damage.wav',
+  danger: '/sounds/haulonaut/danger.wav',
+  death: '/sounds/haulonaut/death.wav'
 }
 
 function loadPrefs() {
