@@ -7,11 +7,18 @@
 // Phase 1: infra + a handful of core UI cues (open/click/success/error).
 // Sounds are added here as the game grows; nothing else needs to change to
 // add a new one beyond adding it to SOUND_FILES and calling playHaulonautSound.
+//
+// Phase 4 adds a second, independent bus for looping ambience (see
+// AMBIENT_FILES / playHaulonautAmbient below) -- separate mute/volume from
+// the one-shot SFX bus above, since background audio is a different kind of
+// decision (on by default here, but someone may want SFX without the drone,
+// or vice versa).
 import { Howl } from 'howler'
 import { ref } from 'vue'
 
 const STORAGE_KEY = 'haulonaut_sound_prefs'
 const DEFAULT_VOLUME = 0.6
+const DEFAULT_AMBIENT_VOLUME = 0.35
 
 const SOUND_FILES = {
   click: '/sounds/haulonaut/ui-click.wav',
@@ -42,21 +49,32 @@ function loadPrefs() {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}')
     return {
       muted: typeof saved.muted === 'boolean' ? saved.muted : false,
-      volume: typeof saved.volume === 'number' ? saved.volume : DEFAULT_VOLUME
+      volume: typeof saved.volume === 'number' ? saved.volume : DEFAULT_VOLUME,
+      // Ambience defaults to ON (unlike SFX, this is a deliberate per-game
+      // choice, not just "whatever the mute default happens to be").
+      ambientMuted: typeof saved.ambientMuted === 'boolean' ? saved.ambientMuted : false,
+      ambientVolume: typeof saved.ambientVolume === 'number' ? saved.ambientVolume : DEFAULT_AMBIENT_VOLUME
     }
   } catch {
     // private mode / disabled storage -- fall back to defaults
-    return { muted: false, volume: DEFAULT_VOLUME }
+    return { muted: false, volume: DEFAULT_VOLUME, ambientMuted: false, ambientVolume: DEFAULT_AMBIENT_VOLUME }
   }
 }
 
 const prefs = loadPrefs()
 export const soundMuted = ref(prefs.muted)
 export const soundVolume = ref(prefs.volume)
+export const ambientMuted = ref(prefs.ambientMuted)
+export const ambientVolume = ref(prefs.ambientVolume)
 
 function savePrefs() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ muted: soundMuted.value, volume: soundVolume.value }))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      muted: soundMuted.value,
+      volume: soundVolume.value,
+      ambientMuted: ambientMuted.value,
+      ambientVolume: ambientVolume.value
+    }))
   } catch {
     // non-fatal -- prefs just won't survive a reload
   }
@@ -89,4 +107,83 @@ export function toggleHaulonautSoundMuted() {
 export function setHaulonautSoundVolume(value) {
   soundVolume.value = Math.max(0, Math.min(1, value))
   savePrefs()
+}
+
+// ---- Ambient bus (looping background beds) ----
+
+const AMBIENT_FILES = {
+  space: '/sounds/haulonaut/amb-space.wav',
+  outpost: '/sounds/haulonaut/amb-outpost.wav',
+  surface: '/sounds/haulonaut/amb-surface.wav'
+}
+const AMBIENT_FADE_MS = 800
+
+const ambientHowls = {}
+function getAmbientHowl(key) {
+  if (!(key in AMBIENT_FILES)) return null
+  if (!ambientHowls[key]) {
+    ambientHowls[key] = new Howl({ src: [AMBIENT_FILES[key]], loop: true, volume: 0 })
+  }
+  return ambientHowls[key]
+}
+
+// Which ambient bed the caller last asked for (independent of ambientMuted --
+// muting pauses playback but remembers the key, so unmuting resumes the
+// right bed instead of needing the caller to re-request it).
+let currentAmbientKey = null
+
+function fadeOutAndPause(howl) {
+  if (!howl.playing()) return
+  howl.fade(howl.volume(), 0, AMBIENT_FADE_MS)
+  setTimeout(() => howl.pause(), AMBIENT_FADE_MS)
+}
+
+// Crossfades to `key` ('space' | 'outpost' | 'surface'), or fades out to
+// silence for a falsy key (e.g. during the landing-sequence montage, where
+// the foreground SFX should carry the moment). Calling with the
+// already-current key is a no-op, so callers can pass a plain computed
+// context value straight into a watcher without tracking transitions
+// themselves.
+export function playHaulonautAmbient(key) {
+  if (key === currentAmbientKey) return
+  const prevKey = currentAmbientKey
+  currentAmbientKey = key
+  if (prevKey) {
+    const prevHowl = ambientHowls[prevKey]
+    if (prevHowl) fadeOutAndPause(prevHowl)
+  }
+  if (!key || ambientMuted.value) return
+  const howl = getAmbientHowl(key)
+  if (!howl) return
+  if (!howl.playing()) howl.play()
+  howl.fade(howl.volume(), ambientVolume.value, AMBIENT_FADE_MS)
+}
+
+export function stopHaulonautAmbient() {
+  playHaulonautAmbient(null)
+}
+
+export function toggleHaulonautAmbientMuted() {
+  ambientMuted.value = !ambientMuted.value
+  savePrefs()
+  if (!currentAmbientKey) return
+  if (ambientMuted.value) {
+    const howl = ambientHowls[currentAmbientKey]
+    if (howl) fadeOutAndPause(howl)
+  } else {
+    const howl = getAmbientHowl(currentAmbientKey)
+    if (howl) {
+      if (!howl.playing()) howl.play()
+      howl.fade(howl.volume(), ambientVolume.value, AMBIENT_FADE_MS)
+    }
+  }
+}
+
+export function setHaulonautAmbientVolume(value) {
+  ambientVolume.value = Math.max(0, Math.min(1, value))
+  savePrefs()
+  if (currentAmbientKey && !ambientMuted.value) {
+    const howl = ambientHowls[currentAmbientKey]
+    if (howl) howl.volume(ambientVolume.value)
+  }
 }

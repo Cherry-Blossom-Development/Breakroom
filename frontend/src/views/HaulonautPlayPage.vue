@@ -3,7 +3,10 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
 import HaulonautStatChip from '@/components/HaulonautStatChip.vue'
-import { playHaulonautSound, soundMuted, soundVolume, toggleHaulonautSoundMuted, setHaulonautSoundVolume } from '@/utilities/haulonautSound'
+import {
+  playHaulonautSound, soundMuted, soundVolume, toggleHaulonautSoundMuted, setHaulonautSoundVolume,
+  playHaulonautAmbient, stopHaulonautAmbient, ambientMuted, ambientVolume, toggleHaulonautAmbientMuted, setHaulonautAmbientVolume
+} from '@/utilities/haulonautSound'
 
 const route = useRoute()
 const router = useRouter()
@@ -2416,7 +2419,24 @@ onUnmounted(() => {
   if (landingTimeoutId) clearTimeout(landingTimeoutId)
   if (launchTimeoutId) clearTimeout(launchTimeoutId)
   sectorSocket?.disconnect()
+  stopHaulonautAmbient()
 })
+
+// Which ambient bed should be playing right now, purely a function of
+// where the character is -- surface ambience while walking around a
+// planet, outpost ambience while browsing its wares, silence during the
+// landing-sequence montage (the descent/entry/dock SFX carry that moment
+// instead), and the default space drone otherwise (including once dead --
+// no reason to cut the atmosphere along with the character). playHaulonautAmbient
+// itself no-ops when the key hasn't actually changed, so this can just be
+// re-run on every relevant state change without tracking transitions here.
+const ambientContext = computed(() => {
+  if (onSurface.value) return 'surface'
+  if (viewportMode.value === 'outpost') return 'outpost'
+  if (viewportMode.value === 'landing-sequence') return null
+  return 'space'
+})
+watch(ambientContext, (key) => playHaulonautAmbient(key), { immediate: true })
 </script>
 
 <template>
@@ -2559,8 +2579,8 @@ onUnmounted(() => {
                     class="sound-toggle-btn"
                     :class="{ muted: soundMuted }"
                     @click="toggleHaulonautSoundMuted"
-                    :title="soundMuted ? 'Unmute sound' : 'Mute sound'"
-                  >{{ soundMuted ? '♪ OFF' : '♪ ON' }}</button>
+                    :title="soundMuted ? 'Unmute sound effects' : 'Mute sound effects'"
+                  >{{ soundMuted ? '♪ SFX OFF' : '♪ SFX ON' }}</button>
                   <input
                     v-if="!soundMuted"
                     type="range"
@@ -2568,7 +2588,23 @@ onUnmounted(() => {
                     min="0" max="1" step="0.05"
                     :value="soundVolume"
                     @input="setHaulonautSoundVolume(parseFloat($event.target.value))"
-                    title="Sound volume"
+                    title="Sound effects volume"
+                  />
+                  <button
+                    type="button"
+                    class="sound-toggle-btn"
+                    :class="{ muted: ambientMuted }"
+                    @click="toggleHaulonautAmbientMuted"
+                    :title="ambientMuted ? 'Unmute ambience' : 'Mute ambience'"
+                  >{{ ambientMuted ? '∿ AMB OFF' : '∿ AMB ON' }}</button>
+                  <input
+                    v-if="!ambientMuted"
+                    type="range"
+                    class="sound-volume-slider"
+                    min="0" max="1" step="0.05"
+                    :value="ambientVolume"
+                    @input="setHaulonautAmbientVolume(parseFloat($event.target.value))"
+                    title="Ambience volume"
                   />
                 </div>
                 <div class="header-resources" @click.stop>
@@ -3417,6 +3453,7 @@ onUnmounted(() => {
 .sound-controls {
   flex-shrink: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
