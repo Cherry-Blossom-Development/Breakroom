@@ -296,7 +296,16 @@ async function sendInvite() {
 }
 
 async function openEdit(user) {
-  editingUser.value = { ...user }
+  // MariaDB has no native boolean type -- TRUE/FALSE come back from mysql2 as
+  // 1/0. Vue's checkbox v-model checks equality against the boolean `true`
+  // (via looseEqual), which is false for the number 1, so these must be
+  // coerced to real booleans or the checkboxes render unchecked regardless
+  // of the actual saved value.
+  editingUser.value = {
+    ...user,
+    is_internal: !!user.is_internal,
+    send_notices_to_alternate_email: !!user.send_notices_to_alternate_email,
+  }
   matrix.value = null
   newPassword.value = ''
   passwordError.value = ''
@@ -309,6 +318,8 @@ async function openEdit(user) {
     const res = await fetch(`/api/user/permissionMatrix/${user.id}`)
     if (!res.ok) throw new Error('Failed to fetch permission matrix')
     const data = await res.json()
+    data.permissions.forEach(p => { p.has_permission = !!p.has_permission })
+    data.groups.forEach(g => { g.has_group = !!g.has_group })
     matrix.value = data
 
     watchEffect(() => {
