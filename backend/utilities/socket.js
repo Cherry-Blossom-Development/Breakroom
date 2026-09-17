@@ -11,6 +11,59 @@ const SECRET_KEY = process.env.SECRET_KEY;
 // Store socket connections by user ID
 const userSockets = new Map();
 
+// Presence tracking: userId -> Set of connected socket ids. Tracks every
+// concurrent connection (multiple tabs/devices) per user so that closing one
+// tab doesn't report the user offline while another tab is still connected --
+// unlike userSockets above, which only ever remembers the single most recent
+// socket.
+const onlineSocketsByUser = new Map();
+
+const isOnline = (userId) => onlineSocketsByUser.has(userId);
+
+// Returns true only on the online transition (0 -> 1 connections).
+const markOnline = (userId, socketId) => {
+  let sockets = onlineSocketsByUser.get(userId);
+  if (!sockets) {
+    sockets = new Set();
+    onlineSocketsByUser.set(userId, sockets);
+  }
+  const wasOnline = sockets.size > 0;
+  sockets.add(socketId);
+  return !wasOnline;
+};
+
+// Returns true only on the offline transition (last connection closed).
+const markOffline = (userId, socketId) => {
+  const sockets = onlineSocketsByUser.get(userId);
+  if (!sockets) return false;
+  sockets.delete(socketId);
+  if (sockets.size === 0) {
+    onlineSocketsByUser.delete(userId);
+    return true;
+  }
+  return false;
+};
+
+// Notifies every accepted friend of userId that their online status changed.
+const broadcastPresenceToFriends = async (userId, online) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      `SELECT CASE WHEN f.user_id = $1 THEN f.friend_id ELSE f.user_id END AS friend_id
+       FROM friends f
+       WHERE (f.user_id = $2 OR f.friend_id = $3) AND f.status = 'accepted'`,
+      [userId, userId, userId]
+    );
+    for (const row of result.rows) {
+      emitToUser(row.friend_id, 'friend_presence', { userId, isOnline: online });
+    }
+  } catch (err) {
+    console.error('Error broadcasting presence update:', err);
+  } finally {
+    client.release();
+  }
+};
+
 // Store io instance for use in other modules
 let ioInstance = null;
 
@@ -58,6 +111,12 @@ const initializeSocket = (io) => {
 
     // Store socket reference (kept for chat functionality)
     userSockets.set(socket.user.id, socket);
+
+    // Presence: notify friends the moment this is the user's first active
+    // connection (a second tab/device connecting is not a new transition).
+    if (markOnline(socket.user.id, socket.id)) {
+      broadcastPresenceToFriends(socket.user.id, true);
+    }
 
     // Join a chat room
     socket.on('join_room', async (roomId) => {
@@ -396,6 +455,11 @@ const initializeSocket = (io) => {
     socket.on('disconnect', () => {
       console.log(`User disconnected: ${socket.user.handle}`);
       userSockets.delete(socket.user.id);
+
+      // Presence: only notify friends once the user's last connection closes.
+      if (markOffline(socket.user.id, socket.id)) {
+        broadcastPresenceToFriends(socket.user.id, false);
+      }
     });
   });
 };
@@ -428,4 +492,4 @@ const emitHaulonautSectorArrival = (sectorId, character) => {
   });
 };
 
-module.exports = { initializeSocket, userSockets, getIO, emitToUser, emitHaulonautSectorArrival };
+module.exports = { initializeSocket, userSockets, isOnline, getIO, emitToUser, emitHaulonautSectorArrival };

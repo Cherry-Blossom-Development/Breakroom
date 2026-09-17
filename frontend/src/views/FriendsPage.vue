@@ -5,6 +5,7 @@ import { friends } from '@/stores/friends.js'
 import LoadingSpinner from '@/components/LoadingSpinner.vue'
 import { user } from '@/stores/user.js'
 import { badges } from '@/stores/badges.js'
+import { presence } from '@/stores/presence.js'
 
 const router = useRouter()
 
@@ -23,6 +24,17 @@ const tabs = [
 ]
 
 const requestCount = computed(() => friends.requests.length)
+
+// Online friends first, alphabetical within each group -- re-sorts live as
+// presence updates arrive over the socket (see stores/presence.js).
+const sortedFriends = computed(() => {
+  return [...friends.friends].sort((a, b) => {
+    const aOnline = presence.isOnline(a.id)
+    const bOnline = presence.isOnline(b.id)
+    if (aOnline !== bOnline) return aOnline ? -1 : 1
+    return a.handle.localeCompare(b.handle)
+  })
+})
 
 onMounted(() => {
   friends.fetchAll()
@@ -179,7 +191,7 @@ function goToProfile(handle) {
         <div v-if="friends.friends.length === 0" class="empty-state">
           No friends yet. Find users to connect with!
         </div>
-        <div v-for="friend in friends.friends" :key="friend.id" class="user-card">
+        <div v-for="friend in sortedFriends" :key="friend.id" class="user-card">
           <div class="user-avatar clickable" aria-hidden="true" @click="goToProfile(friend.handle)">
             <img v-if="getPhotoUrl(friend)" :src="getPhotoUrl(friend)" alt="" />
             <span v-else class="avatar-placeholder">{{ getInitial(friend) }}</span>
@@ -196,8 +208,8 @@ function goToProfile(handle) {
                 @keydown.space.prevent="goToProfile(friend.handle)"
               >{{ friend.handle }}</span>
               <span class="status-indicator">
-                <span class="status-dot" :class="{ online: friend.is_online }"></span>
-                <span v-if="friend.is_online" class="status-text">Online now</span>
+                <span class="status-dot" :class="{ online: presence.isOnline(friend.id) }"></span>
+                <span v-if="presence.isOnline(friend.id)" class="status-text">Online now</span>
               </span>
             </div>
             <span v-if="friend.first_name || friend.last_name" class="user-name">

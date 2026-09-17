@@ -5,6 +5,7 @@ import { user } from './stores/user.js'
 import { notificationStore } from './stores/notification.js'
 import { moderationStore } from './stores/moderation.js'
 import { badges } from './stores/badges.js'
+import { presence } from './stores/presence.js'
 import { features } from './stores/features.js'
 import { initEventService, destroyEventService } from './utilities/eventService.js'
 import { getVisitorId } from './utilities/visitorId.js'
@@ -157,6 +158,10 @@ function setupNotificationSocket() {
 
   socket.on('friend_badge_update', () => {
     badges.onFriendBadgeUpdate()
+  })
+
+  socket.on('friend_presence', (data) => {
+    presence.onPresenceUpdate(data)
   })
 
   socket.on('blog_badge_update', ({ postId }) => {

@@ -3,7 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
-const { emitToUser, userSockets } = require('../utilities/socket');
+const { emitToUser, isOnline } = require('../utilities/socket');
 const { sendToUser } = require('../utilities/fcm');
 
 require('dotenv').config();
@@ -64,7 +64,7 @@ router.get('/', authenticate, async (req, res) => {
 
     const friendsWithStatus = friends.rows.map(f => ({
       ...f,
-      is_online: userSockets.has(f.id)
+      is_online: isOnline(f.id)
     }));
 
     res.json({ friends: friendsWithStatus });

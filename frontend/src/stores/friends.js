@@ -1,5 +1,6 @@
 import { reactive } from 'vue'
 import { authFetch } from '../utilities/authFetch'
+import { presence } from './presence.js'
 
 const state = reactive({
   friends: [],
@@ -37,6 +38,7 @@ export const friends = reactive({
       if (!res.ok) throw new Error('Failed to fetch friends')
       const data = await res.json()
       state.friends = data.friends
+      presence.hydrate(data.friends)
     } catch (err) {
       console.error('Error fetching friends:', err)
       state.error = err.message
