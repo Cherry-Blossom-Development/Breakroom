@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { friends } from '@/stores/friends.js'
 import LoadingSpinner from '@/components/LoadingSpinner.vue'
+import OnlineStatusDot from '@/components/OnlineStatusDot.vue'
 import { user } from '@/stores/user.js'
 import { badges } from '@/stores/badges.js'
 import { presence } from '@/stores/presence.js'
@@ -207,10 +208,7 @@ function goToProfile(handle) {
                 @keydown.enter="goToProfile(friend.handle)"
                 @keydown.space.prevent="goToProfile(friend.handle)"
               >{{ friend.handle }}</span>
-              <span class="status-indicator">
-                <span class="status-dot" :class="{ online: presence.isOnline(friend.id) }"></span>
-                <span v-if="presence.isOnline(friend.id)" class="status-text">Online now</span>
-              </span>
+              <OnlineStatusDot :user-id="friend.id" show-label />
             </div>
             <span v-if="friend.first_name || friend.last_name" class="user-name">
               {{ friend.first_name }} {{ friend.last_name }}
@@ -517,29 +515,6 @@ h1 {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.status-indicator {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-text-light);
-  flex-shrink: 0;
-}
-
-.status-dot.online {
-  background: var(--color-success);
-}
-
-.status-text {
-  font-size: 0.8rem;
-  color: var(--color-success);
 }
 
 .clickable {

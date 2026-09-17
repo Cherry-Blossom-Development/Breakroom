@@ -5,6 +5,7 @@ import { user } from '@/stores/user.js'
 import { moderationStore } from '@/stores/moderation.js'
 import FlagDialog from '@/components/FlagDialog.vue'
 import ImageLightbox from '@/components/ImageLightbox.vue'
+import OnlineStatusDot from '@/components/OnlineStatusDot.vue'
 import { renderMessage } from '@/utilities/linkify.js'
 
 const messageInput = ref('')
@@ -488,6 +489,7 @@ onUnmounted(() => {
             :class="{ own: isOwnMessage(msg.handle), 'message-scheduled': msg.is_scheduled }"
           >
             <div class="message-header">
+              <OnlineStatusDot :user-id="msg.user_id" />
               <RouterLink :to="`/user/${msg.handle}`" class="message-author">{{ msg.handle }}</RouterLink>
               <div class="msg-header-right">
                 <span class="message-time">{{ formatTime(msg.created_at) }}</span>

@@ -4,6 +4,7 @@ import { io } from 'socket.io-client'
 import LoadingSpinner from './LoadingSpinner.vue'
 import FlagDialog from './FlagDialog.vue'
 import ImageLightbox from './ImageLightbox.vue'
+import OnlineStatusDot from './OnlineStatusDot.vue'
 import { user } from '@/stores/user.js'
 import { moderationStore } from '@/stores/moderation.js'
 import { chat } from '@/stores/chat.js'
@@ -676,6 +677,7 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
           :class="{ 'message-flash': flashingMessageIds.has(msg.id), 'message-scheduled': msg.is_scheduled }"
         >
           <div class="message-header">
+            <OnlineStatusDot :user-id="msg.user_id" />
             <RouterLink :to="`/user/${msg.handle}`" class="username">{{ msg.handle }}</RouterLink>
             <div class="msg-header-right">
               <span class="time">{{ formatTime(msg.created_at) }}</span>

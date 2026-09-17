@@ -44,24 +44,13 @@ const markOffline = (userId, socketId) => {
   return false;
 };
 
-// Notifies every accepted friend of userId that their online status changed.
-const broadcastPresenceToFriends = async (userId, online) => {
-  const client = await getClient();
-  try {
-    const result = await client.query(
-      `SELECT CASE WHEN f.user_id = $1 THEN f.friend_id ELSE f.user_id END AS friend_id
-       FROM friends f
-       WHERE (f.user_id = $2 OR f.friend_id = $3) AND f.status = 'accepted'`,
-      [userId, userId, userId]
-    );
-    for (const row of result.rows) {
-      emitToUser(row.friend_id, 'friend_presence', { userId, isOnline: online });
-    }
-  } catch (err) {
-    console.error('Error broadcasting presence update:', err);
-  } finally {
-    client.release();
-  }
+const getOnlineUserIds = () => Array.from(onlineSocketsByUser.keys());
+
+// Presence is shown wherever a handle appears (friends list, chat rooms, the
+// chat carousel), not just to friends, so status changes broadcast to every
+// connected user rather than being scoped to a relationship.
+const broadcastPresenceChange = (io, userId, online) => {
+  io.emit('presence_update', { userId, isOnline: online });
 };
 
 // Store io instance for use in other modules
@@ -112,10 +101,10 @@ const initializeSocket = (io) => {
     // Store socket reference (kept for chat functionality)
     userSockets.set(socket.user.id, socket);
 
-    // Presence: notify friends the moment this is the user's first active
+    // Presence: broadcast the moment this is the user's first active
     // connection (a second tab/device connecting is not a new transition).
     if (markOnline(socket.user.id, socket.id)) {
-      broadcastPresenceToFriends(socket.user.id, true);
+      broadcastPresenceChange(io, socket.user.id, true);
     }
 
     // Join a chat room
@@ -456,9 +445,9 @@ const initializeSocket = (io) => {
       console.log(`User disconnected: ${socket.user.handle}`);
       userSockets.delete(socket.user.id);
 
-      // Presence: only notify friends once the user's last connection closes.
+      // Presence: only broadcast once the user's last connection closes.
       if (markOffline(socket.user.id, socket.id)) {
-        broadcastPresenceToFriends(socket.user.id, false);
+        broadcastPresenceChange(io, socket.user.id, false);
       }
     });
   });
@@ -492,4 +481,4 @@ const emitHaulonautSectorArrival = (sectorId, character) => {
   });
 };
 
-module.exports = { initializeSocket, userSockets, isOnline, getIO, emitToUser, emitHaulonautSectorArrival };
+module.exports = { initializeSocket, userSockets, isOnline, getOnlineUserIds, getIO, emitToUser, emitHaulonautSectorArrival };

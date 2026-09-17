@@ -160,7 +160,7 @@ function setupNotificationSocket() {
     badges.onFriendBadgeUpdate()
   })
 
-  socket.on('friend_presence', (data) => {
+  socket.on('presence_update', (data) => {
     presence.onPresenceUpdate(data)
   })
 
@@ -203,6 +203,7 @@ function initLoggedInServices() {
   moderationStore.fetchBlockList()
   badges.fetchAll()
   features.load()
+  presence.fetchOnline()
   initEventService()
   setupNotificationSocket()
 }
@@ -223,6 +224,7 @@ watch(() => user.username, (newUsername) => {
   } else {
     destroyEventService()
     teardownNotificationSocket()
+    presence.reset()
   }
 })
 

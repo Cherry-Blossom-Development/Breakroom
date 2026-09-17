@@ -46,6 +46,11 @@
   --color-text-light: #888888;
   --color-text-placeholder: #999999;
 
+  /* Offline status dot -- deliberately lighter than --color-text-light so
+     it reads as a distinct shade from the green "online" dot for
+     colorblind users, not just a difference in hue. */
+  --color-status-offline: #a0a0a0;
+
   --color-accent: #42b983;
   --color-accent-hover: #3aa876;
   --color-accent-light: #e8f5e9;
@@ -140,6 +145,7 @@
     --color-text-muted: #b0b0b0;
     --color-text-light: #909090;
     --color-text-placeholder: #707070;
+    --color-status-offline: #a6a6a6;
 
     --color-accent: #4eca8f;
     --color-accent-hover: #42b983;
@@ -217,6 +223,7 @@
     --color-text-placeholder: #444444;
     --color-border: rgba(0, 0, 0, 0.5);
     --color-border-hover: rgba(0, 0, 0, 0.7);
+    --color-status-offline: #333333;
   }
 }
 
@@ -228,6 +235,7 @@
     --color-text-placeholder: #d8d8d8;
     --color-border: rgba(255, 255, 255, 0.5);
     --color-border-hover: rgba(255, 255, 255, 0.7);
+    --color-status-offline: #f0f0f0;
   }
 }
 

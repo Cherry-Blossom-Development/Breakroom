@@ -13,6 +13,7 @@ const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { checkPermission } = require('../middleware/checkPermission');
 const { findIdentifierCollision } = require('../utilities/userIdentifiers');
+const { getOnlineUserIds } = require('../utilities/socket');
 
 require('dotenv').config();
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -32,6 +33,16 @@ const authenticate = async (req, res, next) => {
     return res.status(401).json({ message: 'Invalid token' });
   }
 };
+
+/**
+ * GET /api/user/online-ids
+ * Full snapshot of who's currently online, for seeding the frontend's
+ * presence store on load. Live changes after that arrive over the
+ * 'presence_update' socket event (see utilities/socket.js).
+ */
+router.get('/online-ids', authenticate, (req, res) => {
+  res.json({ onlineUserIds: getOnlineUserIds() });
+});
 
 router.get('/all', async (req, res) => {
   const client = await getClient();
