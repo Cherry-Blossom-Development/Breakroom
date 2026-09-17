@@ -185,15 +185,21 @@ function goToProfile(handle) {
             <span v-else class="avatar-placeholder">{{ getInitial(friend) }}</span>
           </div>
           <div class="user-info">
-            <span
-              class="user-handle clickable"
-              role="button"
-              tabindex="0"
-              :aria-label="`View ${friend.handle}'s profile`"
-              @click="goToProfile(friend.handle)"
-              @keydown.enter="goToProfile(friend.handle)"
-              @keydown.space.prevent="goToProfile(friend.handle)"
-            >{{ friend.handle }}</span>
+            <div class="handle-row">
+              <span
+                class="user-handle clickable"
+                role="button"
+                tabindex="0"
+                :aria-label="`View ${friend.handle}'s profile`"
+                @click="goToProfile(friend.handle)"
+                @keydown.enter="goToProfile(friend.handle)"
+                @keydown.space.prevent="goToProfile(friend.handle)"
+              >{{ friend.handle }}</span>
+              <span class="status-indicator">
+                <span class="status-dot" :class="{ online: friend.is_online }"></span>
+                <span v-if="friend.is_online" class="status-text">Online now</span>
+              </span>
+            </div>
             <span v-if="friend.first_name || friend.last_name" class="user-name">
               {{ friend.first_name }} {{ friend.last_name }}
             </span>
@@ -493,6 +499,35 @@ h1 {
 .user-handle {
   font-weight: 600;
   color: var(--color-text);
+}
+
+.handle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-light);
+  flex-shrink: 0;
+}
+
+.status-dot.online {
+  background: var(--color-success);
+}
+
+.status-text {
+  font-size: 0.8rem;
+  color: var(--color-success);
 }
 
 .clickable {

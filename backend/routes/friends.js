@@ -3,7 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
-const { emitToUser } = require('../utilities/socket');
+const { emitToUser, userSockets } = require('../utilities/socket');
 const { sendToUser } = require('../utilities/fcm');
 
 require('dotenv').config();
@@ -62,7 +62,12 @@ router.get('/', authenticate, async (req, res) => {
       [req.user.id, req.user.id, req.user.id, req.user.id]
     );
 
-    res.json({ friends: friends.rows });
+    const friendsWithStatus = friends.rows.map(f => ({
+      ...f,
+      is_online: userSockets.has(f.id)
+    }));
+
+    res.json({ friends: friendsWithStatus });
   } catch (err) {
     console.error('Error fetching friends:', err);
     res.status(500).json({ message: 'Failed to fetch friends' });
