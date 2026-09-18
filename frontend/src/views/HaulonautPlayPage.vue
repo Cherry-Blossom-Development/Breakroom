@@ -6,7 +6,7 @@ import HaulonautStatChip from '@/components/HaulonautStatChip.vue'
 import {
   playHaulonautSound, soundMuted, soundVolume, toggleHaulonautSoundMuted, setHaulonautSoundVolume,
   playHaulonautAmbient, stopHaulonautAmbient, ambientMuted, ambientVolume, toggleHaulonautAmbientMuted, setHaulonautAmbientVolume,
-  startHaulonautDescentRoar, rampHaulonautDescentRoarIntensity, spikeHaulonautDescentRoar, stopHaulonautDescentRoar
+  startHaulonautEngineRoar, rampHaulonautEngineRoarIntensity, spikeHaulonautEngineRoar, stopHaulonautEngineRoar
 } from '@/utilities/haulonautSound'
 
 const route = useRoute()
@@ -866,10 +866,10 @@ const LANDING_PHASE_ORDER = ['approaching', 'closing', 'sweeping', 'entry', 'doc
 // actually running underneath for the whole 17s.
 const LANDING_PHASE_DURATIONS = { approaching: 8000, closing: 5000, sweeping: 4000, entry: 6000 }
 
-// Target intensity (0..1, see rampHaulonautDescentRoarIntensity) the
+// Target intensity (0..1, see rampHaulonautEngineRoarIntensity) the
 // continuous descent roar ramps *to* over the course of each phase --
 // each phase starts wherever the previous one's ramp left off. 'entry'
-// isn't listed: that phase spikes hard on arrival (spikeHaulonautDescentRoar)
+// isn't listed: that phase spikes hard on arrival (spikeHaulonautEngineRoar)
 // then ramps back down to 0, rather than climbing further.
 const DESCENT_ROAR_TARGETS = { approaching: 0.25, closing: 0.5, sweeping: 0.75 }
 // How long the entry spike holds at its peak before the roar starts dying
@@ -883,6 +883,18 @@ const DESCENT_ROAR_SPIKE_HOLD_MS = 900
 // landing's animationend-driven precision; a plain timer pair is exactly
 // as reliable here and far simpler.
 const LAUNCH_PHASE_DURATIONS = { 'launch-ignition': 1800, 'launch-departing': 2800 }
+
+// The launch roar is the mirror image of the descent roar: it starts hot
+// (spike right on ignition, when the flames appear) and fades to silence
+// by the time orbit breaks, instead of building up to a spike. Held at the
+// spike's peak for this long before easing down through the rest of
+// ignition into the climb-away fade -- shorter than the descent entry's
+// hold since the whole ignition phase is much shorter.
+const LAUNCH_ROAR_SPIKE_HOLD_MS = 300
+// Intensity the roar eases down to by the end of ignition, before the
+// climb-away fade (see beginLaunchSequence) takes it the rest of the way
+// to 0 over 'launch-departing'.
+const LAUNCH_ROAR_MID_INTENSITY = 0.5
 
 const LANDING_PHASE_ANIMATIONS = {
   'landing-atmosphere-rise': 'entry'
@@ -1077,8 +1089,8 @@ async function beginLandingSequence() {
   landingPhase.value = 'approaching'
   logLines.value.push(`Beginning descent toward ${planetFeature.value ? planetFeature.value.name : 'the surface'}.`)
   scrollLogToBottom()
-  startHaulonautDescentRoar()
-  rampHaulonautDescentRoarIntensity(DESCENT_ROAR_TARGETS.approaching, LANDING_PHASE_DURATIONS.approaching)
+  startHaulonautEngineRoar()
+  rampHaulonautEngineRoarIntensity(DESCENT_ROAR_TARGETS.approaching, LANDING_PHASE_DURATIONS.approaching)
   await nextTick() // .landing-scene doesn't exist in the DOM until this render lands
   measureLandingScene()
   window.addEventListener('resize', measureLandingScene)
@@ -1107,7 +1119,7 @@ function advanceLandingPhase() {
   // roar climbing -- 'entry'/'docked' drive it their own way instead (spike
   // then fade, and hard stop, respectively).
   if (next in DESCENT_ROAR_TARGETS) {
-    rampHaulonautDescentRoarIntensity(DESCENT_ROAR_TARGETS[next], LANDING_PHASE_DURATIONS[next])
+    rampHaulonautEngineRoarIntensity(DESCENT_ROAR_TARGETS[next], LANDING_PHASE_DURATIONS[next])
   }
   // Only scroll when a line was actually added -- 'closing'/'sweeping' add
   // nothing, so there's no reason to force a scrollHeight layout read (and
@@ -1121,16 +1133,16 @@ function advanceLandingPhase() {
     // Hard spike right as the flames appear, held briefly, then ramped back
     // to silence over the rest of this phase so the roar dies down right as
     // the ship lands instead of cutting off abruptly at 'docked'.
-    spikeHaulonautDescentRoar()
+    spikeHaulonautEngineRoar()
     setTimeout(() => {
       if (landingPhase.value === 'entry') {
-        rampHaulonautDescentRoarIntensity(0, LANDING_PHASE_DURATIONS.entry - DESCENT_ROAR_SPIKE_HOLD_MS)
+        rampHaulonautEngineRoarIntensity(0, LANDING_PHASE_DURATIONS.entry - DESCENT_ROAR_SPIKE_HOLD_MS)
       }
     }, DESCENT_ROAR_SPIKE_HOLD_MS)
   } else if (next === 'docked') {
     logLines.value.push('Touchdown confirmed. Docking clamps engaged.')
     scrollLogToBottom()
-    stopHaulonautDescentRoar(200)
+    stopHaulonautEngineRoar(200)
     playHaulonautSound('dock')
     notifyDocked()
   }
@@ -1196,11 +1208,12 @@ function cancelLandingSequence() {
   if (landingPhase.value === 'launch-ignition' || landingPhase.value === 'launch-departing') {
     landingPhase.value = 'docked'
     logLines.value.push('Launch aborted.')
+    stopHaulonautEngineRoar()
   } else {
     landingPhase.value = null
     viewportMode.value = 'planet'
     logLines.value.push('Descent aborted.')
-    stopHaulonautDescentRoar()
+    stopHaulonautEngineRoar()
   }
   selectedIndex.value = -1
   scrollLogToBottom()
@@ -1217,11 +1230,23 @@ function beginLaunchSequence() {
   landingPhase.value = 'launch-ignition'
   logLines.value.push('Launch sequence initiated.')
   scrollLogToBottom()
-  playHaulonautSound('launch')
+  startHaulonautEngineRoar()
+  // Mirror image of the descent roar: hard spike right on ignition (the
+  // flames appear immediately, not partway through like atmospheric
+  // entry), held briefly, then eased down through the rest of ignition
+  // and on into the climb-away fade below -- silent by the time orbit
+  // breaks (see finishLaunch) instead of building up to a spike.
+  spikeHaulonautEngineRoar()
+  setTimeout(() => {
+    if (landingPhase.value === 'launch-ignition') {
+      rampHaulonautEngineRoarIntensity(LAUNCH_ROAR_MID_INTENSITY, LAUNCH_PHASE_DURATIONS['launch-ignition'] - LAUNCH_ROAR_SPIKE_HOLD_MS)
+    }
+  }, LAUNCH_ROAR_SPIKE_HOLD_MS)
   launchTimeoutId = setTimeout(() => {
     landingPhase.value = 'launch-departing'
     logLines.value.push('Ascending...')
     scrollLogToBottom()
+    rampHaulonautEngineRoarIntensity(0, LAUNCH_PHASE_DURATIONS['launch-departing'])
     launchTimeoutId = setTimeout(finishLaunch, LAUNCH_PHASE_DURATIONS['launch-departing'])
   }, LAUNCH_PHASE_DURATIONS['launch-ignition'])
 }
@@ -1238,6 +1263,7 @@ async function finishLaunch() {
   selectedIndex.value = -1
   logLines.value.push('Breaking orbit. Back in open space.')
   scrollLogToBottom()
+  stopHaulonautEngineRoar(150)
   playHaulonautSound('arrival')
   try {
     await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/launch`, {
@@ -2455,7 +2481,7 @@ onUnmounted(() => {
   if (launchTimeoutId) clearTimeout(launchTimeoutId)
   sectorSocket?.disconnect()
   stopHaulonautAmbient()
-  stopHaulonautDescentRoar(0)
+  stopHaulonautEngineRoar(0)
 })
 
 // Which ambient bed should be playing right now, purely a function of
