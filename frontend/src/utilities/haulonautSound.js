@@ -38,8 +38,6 @@ const SOUND_FILES = {
   notify: '/sounds/haulonaut/notify.wav',
   'trade-success': '/sounds/haulonaut/trade-success.wav',
   'trade-decline': '/sounds/haulonaut/trade-decline.wav',
-  descent: '/sounds/haulonaut/descent.wav',
-  entry: '/sounds/haulonaut/entry.wav',
   dock: '/sounds/haulonaut/dock.wav',
   launch: '/sounds/haulonaut/launch.wav',
   // Phase 5: polish (buggy movement, NPC-distinct presence, buggy landing events)
@@ -106,11 +104,181 @@ export function playHaulonautSound(key) {
 export function toggleHaulonautSoundMuted() {
   soundMuted.value = !soundMuted.value
   savePrefs()
+  syncDescentRoarUserGain()
 }
 
 export function setHaulonautSoundVolume(value) {
   soundVolume.value = Math.max(0, Math.min(1, value))
   savePrefs()
+  syncDescentRoarUserGain()
+}
+
+// ---- Descent roar (procedural, Web Audio) ----
+//
+// The landing-sequence used to rely on two one-shot clips (`descent` at the
+// start, `entry` when the flames appear) across a ~17s montage, which reads
+// as exactly what it is: a short burst of noise, several seconds of
+// silence, then another short burst. This replaces both with one
+// continuous synthesized bed -- filtered noise plus a low engine tone --
+// that's audible from the first frame of descent to touchdown, so there's
+// never a silent gap. It's synthesized rather than a looped .wav because a
+// looped clip has an audible seam every cycle; a Web Audio noise buffer
+// with `loop = true` on a BufferSourceNode does not.
+//
+// Callers (see the landing-sequence phase machine in HaulonautPlayPage.vue)
+// drive the "getting closer" feel by ramping `intensity` (0..1) up across
+// approaching/closing/sweeping, spiking it hard right as the atmospheric-
+// entry flames appear, then ramping back to 0 so it's silent by touchdown.
+let descentAudioCtx = null
+let descentNoiseSource = null
+let descentFilter = null
+let descentEngineOsc = null
+let descentEngineGain = null
+let descentIntensityGain = null
+let descentUserGain = null
+
+function buildNoiseBuffer(ctx) {
+  const seconds = 2
+  const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * seconds), ctx.sampleRate)
+  const data = buffer.getChannelData(0)
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1
+  return buffer
+}
+
+// Keeps the roar's output in sync with the normal SFX mute/volume prefs
+// even while it's mid-descent (e.g. the player mutes partway down) --
+// mirrors the one-shot bus's soundMuted/soundVolume, just applied
+// continuously instead of read once at play() time.
+function syncDescentRoarUserGain() {
+  if (!descentAudioCtx || !descentUserGain) return
+  const now = descentAudioCtx.currentTime
+  descentUserGain.gain.cancelScheduledValues(now)
+  descentUserGain.gain.linearRampToValueAtTime(soundMuted.value ? 0 : soundVolume.value, now + 0.05)
+}
+
+export function startHaulonautDescentRoar() {
+  if (descentAudioCtx) return // already running -- guards a double beginLandingSequence
+  const Ctx = window.AudioContext || window.webkitAudioContext
+  if (!Ctx) return // unsupported browser -- silently skip rather than throw
+  const ctx = new Ctx()
+
+  const noise = ctx.createBufferSource()
+  noise.buffer = buildNoiseBuffer(ctx)
+  noise.loop = true
+
+  const filter = ctx.createBiquadFilter()
+  filter.type = 'lowpass'
+  filter.frequency.value = 500
+  filter.Q.value = 0.7
+
+  const engineOsc = ctx.createOscillator()
+  engineOsc.type = 'sawtooth'
+  engineOsc.frequency.value = 55
+  const engineGain = ctx.createGain()
+  engineGain.gain.value = 0
+
+  const intensityGain = ctx.createGain()
+  intensityGain.gain.value = 0.08 // audible immediately, like distant background noise -- never a silent start
+  const userGain = ctx.createGain()
+  userGain.gain.value = soundMuted.value ? 0 : soundVolume.value
+
+  noise.connect(filter)
+  filter.connect(intensityGain)
+  engineOsc.connect(engineGain)
+  engineGain.connect(intensityGain)
+  intensityGain.connect(userGain)
+  userGain.connect(ctx.destination)
+
+  noise.start()
+  engineOsc.start()
+
+  descentAudioCtx = ctx
+  descentNoiseSource = noise
+  descentFilter = filter
+  descentEngineOsc = engineOsc
+  descentEngineGain = engineGain
+  descentIntensityGain = intensityGain
+  descentUserGain = userGain
+}
+
+// Smoothly moves the roar toward `target` intensity (0..1) over
+// `durationMs` -- both loudness and timbre (filter brightness + engine
+// pitch/body) move together so "louder" reads as "closer", not just "gain
+// went up".
+export function rampHaulonautDescentRoarIntensity(target, durationMs) {
+  if (!descentAudioCtx) return
+  const ctx = descentAudioCtx
+  const now = ctx.currentTime
+  const clamped = Math.max(0, Math.min(1, target))
+  const seconds = Math.max(0.01, durationMs / 1000)
+
+  const level = 0.08 + clamped * 0.55
+  descentIntensityGain.gain.cancelScheduledValues(now)
+  descentIntensityGain.gain.setValueAtTime(descentIntensityGain.gain.value, now)
+  descentIntensityGain.gain.linearRampToValueAtTime(level, now + seconds)
+
+  descentFilter.frequency.cancelScheduledValues(now)
+  descentFilter.frequency.setValueAtTime(descentFilter.frequency.value, now)
+  descentFilter.frequency.linearRampToValueAtTime(500 + clamped * 2600, now + seconds)
+
+  descentEngineGain.gain.cancelScheduledValues(now)
+  descentEngineGain.gain.setValueAtTime(descentEngineGain.gain.value, now)
+  descentEngineGain.gain.linearRampToValueAtTime(clamped * 0.5, now + seconds)
+
+  descentEngineOsc.frequency.cancelScheduledValues(now)
+  descentEngineOsc.frequency.setValueAtTime(descentEngineOsc.frequency.value, now)
+  descentEngineOsc.frequency.linearRampToValueAtTime(55 + clamped * 70, now + seconds)
+}
+
+// The atmospheric-entry beat: a fast attack to a hot peak, distinct from
+// the gradual approach swell, timed by the caller to land right as the
+// flames appear on screen.
+export function spikeHaulonautDescentRoar() {
+  if (!descentAudioCtx) return
+  const ctx = descentAudioCtx
+  const now = ctx.currentTime
+  const attack = 0.15
+
+  descentIntensityGain.gain.cancelScheduledValues(now)
+  descentIntensityGain.gain.setValueAtTime(descentIntensityGain.gain.value, now)
+  descentIntensityGain.gain.linearRampToValueAtTime(1.0, now + attack)
+
+  descentFilter.frequency.cancelScheduledValues(now)
+  descentFilter.frequency.setValueAtTime(descentFilter.frequency.value, now)
+  descentFilter.frequency.linearRampToValueAtTime(3400, now + attack)
+
+  descentEngineGain.gain.cancelScheduledValues(now)
+  descentEngineGain.gain.setValueAtTime(descentEngineGain.gain.value, now)
+  descentEngineGain.gain.linearRampToValueAtTime(0.7, now + attack)
+}
+
+// Fades to silence over `fadeMs` and tears down the audio graph. Safe to
+// call when nothing is running (e.g. a defensive cleanup call on unmount).
+export function stopHaulonautDescentRoar(fadeMs = 400) {
+  if (!descentAudioCtx) return
+  const ctx = descentAudioCtx
+  const noise = descentNoiseSource
+  const osc = descentEngineOsc
+  const now = ctx.currentTime
+  const seconds = Math.max(0.01, fadeMs / 1000)
+
+  descentIntensityGain.gain.cancelScheduledValues(now)
+  descentIntensityGain.gain.setValueAtTime(descentIntensityGain.gain.value, now)
+  descentIntensityGain.gain.linearRampToValueAtTime(0, now + seconds)
+
+  setTimeout(() => {
+    try { noise.stop() } catch { /* already stopped */ }
+    try { osc.stop() } catch { /* already stopped */ }
+    ctx.close()
+  }, fadeMs + 50)
+
+  descentAudioCtx = null
+  descentNoiseSource = null
+  descentFilter = null
+  descentEngineOsc = null
+  descentEngineGain = null
+  descentIntensityGain = null
+  descentUserGain = null
 }
 
 // ---- Ambient bus (looping background beds) ----

@@ -5,7 +5,8 @@ import { io } from 'socket.io-client'
 import HaulonautStatChip from '@/components/HaulonautStatChip.vue'
 import {
   playHaulonautSound, soundMuted, soundVolume, toggleHaulonautSoundMuted, setHaulonautSoundVolume,
-  playHaulonautAmbient, stopHaulonautAmbient, ambientMuted, ambientVolume, toggleHaulonautAmbientMuted, setHaulonautAmbientVolume
+  playHaulonautAmbient, stopHaulonautAmbient, ambientMuted, ambientVolume, toggleHaulonautAmbientMuted, setHaulonautAmbientVolume,
+  startHaulonautDescentRoar, rampHaulonautDescentRoarIntensity, spikeHaulonautDescentRoar, stopHaulonautDescentRoar
 } from '@/utilities/haulonautSound'
 
 const route = useRoute()
@@ -865,6 +866,17 @@ const LANDING_PHASE_ORDER = ['approaching', 'closing', 'sweeping', 'entry', 'doc
 // actually running underneath for the whole 17s.
 const LANDING_PHASE_DURATIONS = { approaching: 8000, closing: 5000, sweeping: 4000, entry: 6000 }
 
+// Target intensity (0..1, see rampHaulonautDescentRoarIntensity) the
+// continuous descent roar ramps *to* over the course of each phase --
+// each phase starts wherever the previous one's ramp left off. 'entry'
+// isn't listed: that phase spikes hard on arrival (spikeHaulonautDescentRoar)
+// then ramps back down to 0, rather than climbing further.
+const DESCENT_ROAR_TARGETS = { approaching: 0.25, closing: 0.5, sweeping: 0.75 }
+// How long the entry spike holds at its peak before the roar starts dying
+// down toward touchdown -- keeps the flame-burst moment feeling distinct
+// rather than immediately sliding back down.
+const DESCENT_ROAR_SPIKE_HOLD_MS = 900
+
 // The launch sequence -- much shorter than landing, and simple enough
 // (two brief CSS fades, see .landing-sky/.landing-facility's
 // launch-departing rules and the reused flame burst) that it doesn't need
@@ -1065,7 +1077,8 @@ async function beginLandingSequence() {
   landingPhase.value = 'approaching'
   logLines.value.push(`Beginning descent toward ${planetFeature.value ? planetFeature.value.name : 'the surface'}.`)
   scrollLogToBottom()
-  playHaulonautSound('descent')
+  startHaulonautDescentRoar()
+  rampHaulonautDescentRoarIntensity(DESCENT_ROAR_TARGETS.approaching, LANDING_PHASE_DURATIONS.approaching)
   await nextTick() // .landing-scene doesn't exist in the DOM until this render lands
   measureLandingScene()
   window.addEventListener('resize', measureLandingScene)
@@ -1090,6 +1103,12 @@ function advanceLandingPhase() {
   if (!next) return
   if (landingTimeoutId) { clearTimeout(landingTimeoutId); landingTimeoutId = null }
   landingPhase.value = next
+  // 'closing'/'sweeping' don't add a log line (see below) but do keep the
+  // roar climbing -- 'entry'/'docked' drive it their own way instead (spike
+  // then fade, and hard stop, respectively).
+  if (next in DESCENT_ROAR_TARGETS) {
+    rampHaulonautDescentRoarIntensity(DESCENT_ROAR_TARGETS[next], LANDING_PHASE_DURATIONS[next])
+  }
   // Only scroll when a line was actually added -- 'closing'/'sweeping' add
   // nothing, so there's no reason to force a scrollHeight layout read (and
   // scrollTop write) in the same tick as the .landing-scene class swap.
@@ -1099,10 +1118,19 @@ function advanceLandingPhase() {
     landingFlames.value = generateLandingFlames()
     logLines.value.push('ATMOSPHERIC ENTRY -- HOLD ON!')
     scrollLogToBottom()
-    playHaulonautSound('entry')
+    // Hard spike right as the flames appear, held briefly, then ramped back
+    // to silence over the rest of this phase so the roar dies down right as
+    // the ship lands instead of cutting off abruptly at 'docked'.
+    spikeHaulonautDescentRoar()
+    setTimeout(() => {
+      if (landingPhase.value === 'entry') {
+        rampHaulonautDescentRoarIntensity(0, LANDING_PHASE_DURATIONS.entry - DESCENT_ROAR_SPIKE_HOLD_MS)
+      }
+    }, DESCENT_ROAR_SPIKE_HOLD_MS)
   } else if (next === 'docked') {
     logLines.value.push('Touchdown confirmed. Docking clamps engaged.')
     scrollLogToBottom()
+    stopHaulonautDescentRoar(200)
     playHaulonautSound('dock')
     notifyDocked()
   }
@@ -1172,6 +1200,7 @@ function cancelLandingSequence() {
     landingPhase.value = null
     viewportMode.value = 'planet'
     logLines.value.push('Descent aborted.')
+    stopHaulonautDescentRoar()
   }
   selectedIndex.value = -1
   scrollLogToBottom()
@@ -2426,6 +2455,7 @@ onUnmounted(() => {
   if (launchTimeoutId) clearTimeout(launchTimeoutId)
   sectorSocket?.disconnect()
   stopHaulonautAmbient()
+  stopHaulonautDescentRoar(0)
 })
 
 // Which ambient bed should be playing right now, purely a function of
