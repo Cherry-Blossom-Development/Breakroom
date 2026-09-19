@@ -91,10 +91,23 @@ const BUGGY_CYCLE_COST = 1
 const inventory = ref([])
 const itemsCatalog = ref([])
 const knownLocations = ref([])
-const viewportMode = ref('space') // 'space', 'outpost' (browsing what's for sale), 'cargo' (owned inventory), 'charts' (known planets/outposts), 'planet' (overview menu), 'encounter'/'encounter-attack'/'encounter-trade' (Hail -- see below), or 'landing-sequence' (animated descent)
+const viewportMode = ref('space') // 'space', 'outpost' (browsing what's for sale), 'cargo' (owned inventory), 'charts' (known planets/outposts), 'planet' (overview menu), 'encounter'/'encounter-attack'/'encounter-trade' (Hail -- see below), 'probe-deploy'/'probe-search' (see below), or 'landing-sequence' (animated descent)
 const purchasing = ref(false)
 const purchaseError = ref('')
 const chartsError = ref('')
+
+// Probes (see migration 074 and the /probes routes in games.js): a
+// disposable Cargo item deployed from the Cargo screen rather than
+// consumed directly. 'probe-deploy' is the 3-option mission-type menu
+// shown after selecting a probe in Cargo; 'probe-search' is the item list
+// shown only for the 'search' mission type. Only one mission may be active
+// at a time (server-enforced; activeProbe here is just its mirror). A
+// completed/failed mission is a pending "report" until acknowledged (same
+// pending-row pattern haulonaut_trade_offers already uses) -- probeReport
+// drives a dismissible banner, same idea as incomingTradeOffers below.
+const activeProbe = ref(null) // { id, mission_type, ticks_elapsed, ticks_to_complete, deployed_at } | null
+const probeReport = ref(null) // { id, mission_type, status, summary } | null
+const deployingProbe = ref(false)
 
 // Hail: message/trade/attack menu shown when another pilot is in the sector
 // (see actionItems' 'hail' entry). 'encounter' is the top-level 3-option
@@ -227,6 +240,7 @@ function selectStatChip(key) {
 }
 
 const FEATURE_LABELS = { planet: 'PLANET', trading_outpost: 'OUTPOST' }
+const PROBE_MISSION_LABELS = { explore: 'Explore', search: 'Search', traders: 'Find Traders' }
 
 const planetFeature = computed(() => sectorFeatures.value.find(f => f.feature_type === 'planet') || null)
 const outpostFeature = computed(() => sectorFeatures.value.find(f => f.feature_type === 'trading_outpost') || null)
@@ -424,9 +438,37 @@ const humanPlayersHere = computed(() => playersHere.value.filter(p => !p.is_npc)
 // actions boxes without a separate special case for leaving. __leave is a
 // plain marker (not an item_key) shared across every overlay's "close/leave"
 // row -- see activateViewportMenuItem.
+// Probes are the one restricted item (see sells_probe, migration 074) --
+// only listed here when the feature actually standing in this sector
+// carries it, everything else in the catalog is sold everywhere as before.
+const sellsProbeHere = computed(() => !!(outpostFeature.value?.sells_probe || planetFeature.value?.sells_probe))
 const outpostMenuItems = computed(() => [
-  ...itemsCatalog.value,
+  ...itemsCatalog.value.filter(i => i.item_key !== 'probe' || sellsProbeHere.value),
   { __leave: true, name: 'Leave Outpost', base_price: null }
+])
+
+// Cargo's own list is now interactive (probes need a click-through to
+// deploy) rather than the plain read-only rows it used to be -- see
+// activateViewportMenuItem's 'cargo' branch.
+const cargoMenuItems = computed(() => [
+  ...inventory.value,
+  { __leave: true, name: 'Close Cargo' }
+])
+
+// Probe deploy menu -- shown after selecting a probe in Cargo.
+const probeDeployMenuItems = computed(() => [
+  { key: 'explore', name: 'Explore Undiscovered Space' },
+  { key: 'search', name: 'Search For Something' },
+  { key: 'traders', name: 'Find Other Traders' },
+  { __leave: true, name: 'Back to Cargo' }
+])
+
+// What a 'search' mission can look for -- the same catalog, minus probes
+// themselves (searching for a probe to find a probe is circular enough to
+// just leave out).
+const probeSearchMenuItems = computed(() => [
+  ...itemsCatalog.value.filter(i => i.item_key !== 'probe'),
+  { __leave: true, name: 'Back' }
 ])
 
 // Known locations reachable from here (distance > 0) plus the trailing
@@ -456,16 +498,16 @@ const encounterMenuItems = computed(() => [
 ])
 
 // What the viewport box's keyboard handling should treat as "the current
-// list" -- depends on which overlay (if any) is showing. Cargo's own view
-// is otherwise static (just a read-only list), so its only interactive
-// entry is the one that closes it. landing-sequence has nothing to
-// interact with except while sitting docked -- an empty list here is what
-// makes the viewport keydown branch's existing "nothing to do" guard
-// naturally block input during the animation (descent OR launch), with no
-// extra special case.
+// list" -- depends on which overlay (if any) is showing. landing-sequence
+// has nothing to interact with except while sitting docked -- an empty
+// list here is what makes the viewport keydown branch's existing "nothing
+// to do" guard naturally block input during the animation (descent OR
+// launch), with no extra special case.
 const viewportMenuItems = computed(() => {
   if (viewportMode.value === 'outpost') return outpostMenuItems.value
-  if (viewportMode.value === 'cargo') return [{ __leave: true, name: 'Close Cargo' }]
+  if (viewportMode.value === 'cargo') return cargoMenuItems.value
+  if (viewportMode.value === 'probe-deploy') return probeDeployMenuItems.value
+  if (viewportMode.value === 'probe-search') return probeSearchMenuItems.value
   if (viewportMode.value === 'charts') return chartsMenuItems.value
   if (viewportMode.value === 'planet') return planetMenuItems.value
   if (viewportMode.value === 'encounter') return encounterMenuItems.value
@@ -641,11 +683,101 @@ async function purchaseItem(entry) {
   }
 }
 
+// Only probes do anything when clicked in Cargo right now -- other items
+// have no per-item action yet. Refuses to open the deploy menu if a
+// mission is already active (the server would reject the deploy anyway;
+// this just avoids the click going anywhere).
+function selectProbeAction(entry) {
+  if (entry.item_key !== 'probe') return
+  if (activeProbe.value) {
+    logLines.value.push('A probe is already deployed -- wait for it to report back.')
+    scrollLogToBottom()
+    playHaulonautSound('error')
+    return
+  }
+  playHaulonautSound('open')
+  viewportMode.value = 'probe-deploy'
+  selectedIndex.value = -1
+}
+
+// Deploys a probe (see POST .../probes/deploy) -- searchItemKey only
+// matters for missionType 'search', ignored otherwise. Closes the overlay
+// all the way out on success (deployment is a decisive one-off action, not
+// something you keep browsing Cargo after) rather than stepping back to
+// 'cargo'.
+async function deployProbe(missionType, searchItemKey) {
+  if (deployingProbe.value) return
+  deployingProbe.value = true
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/probes/deploy`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mission_type: missionType, search_item_key: searchItemKey })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Failed to deploy probe')
+    inventory.value = data.inventory || []
+    activeProbe.value = data.probe
+    logLines.value.push(data.message)
+    playHaulonautSound('success')
+    viewportMode.value = 'space'
+    selectedIndex.value = -1
+  } catch (err) {
+    logLines.value.push(err.message)
+    playHaulonautSound('error')
+  } finally {
+    deployingProbe.value = false
+    scrollLogToBottom()
+  }
+}
+
+// Dismisses the probe-report banner. Fire-and-forget, same reasoning as
+// returnToShip/exitCraft's background calls -- a failure here just means
+// GET /probes would hand the same report back next load, which is
+// harmless (worst case: the player dismisses it again).
+async function acknowledgeProbeReport() {
+  if (!probeReport.value) return
+  const id = probeReport.value.id
+  probeReport.value = null
+  try {
+    await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/probes/${id}/acknowledge`, {
+      method: 'POST',
+      credentials: 'include'
+    })
+  } catch {
+    // Best-effort -- see comment above.
+  }
+}
+
 function activateViewportMenuItem(entry) {
   if (entry.__leave) {
-    exitViewportOverlay()
+    // Multi-level overlays back up one level at a time rather than
+    // dropping all the way to 'space' the way every other overlay's
+    // __leave does -- probe-search comes from probe-deploy, which comes
+    // from cargo.
+    if (viewportMode.value === 'probe-search') {
+      viewportMode.value = 'probe-deploy'
+      selectedIndex.value = -1
+    } else if (viewportMode.value === 'probe-deploy') {
+      viewportMode.value = 'cargo'
+      selectedIndex.value = -1
+    } else {
+      exitViewportOverlay()
+    }
   } else if (viewportMode.value === 'outpost') {
     purchaseItem(entry)
+  } else if (viewportMode.value === 'cargo') {
+    selectProbeAction(entry)
+  } else if (viewportMode.value === 'probe-deploy') {
+    if (entry.key === 'search') {
+      viewportMode.value = 'probe-search'
+      selectedIndex.value = -1
+    } else if (entry.key === 'explore' || entry.key === 'traders') {
+      deployProbe(entry.key)
+    }
+  } else if (viewportMode.value === 'probe-search') {
+    deployProbe('search', entry.item_key)
   } else if (viewportMode.value === 'charts') {
     setCourse(entry)
   } else if (viewportMode.value === 'planet') {
@@ -1504,6 +1636,17 @@ function connectSectorSocket() {
     scrollLogToBottom()
   })
 
+  // A deployed probe resolving (see haulonautProbeScheduler.js) -- live
+  // delivery for whoever's connected right now; loadProbeStatus covers the
+  // offline case the same way loadPendingTradeOffers does for trade offers.
+  sectorSocket.on('haulonaut_probe_report', (data) => {
+    activeProbe.value = null
+    probeReport.value = { id: data.missionId, mission_type: data.missionType, summary: data.summary }
+    logLines.value.push(`[PROBE -- ${PROBE_MISSION_LABELS[data.missionType] || data.missionType}] ${data.summary}`)
+    scrollLogToBottom()
+    playHaulonautSound('notify')
+  })
+
   // Combat (see /attack in games.js) -- one broadcast to the whole sector
   // room covers attacker, target, and bystanders, each phrased from their
   // own point of view; the attacker's own /attack call deliberately logs
@@ -1909,6 +2052,7 @@ async function loadCharacter() {
     ].filter(Boolean)
     scrollLogToBottom()
     loadPendingTradeOffers()
+    loadProbeStatus()
   } catch (err) {
     error.value = err.message
   } finally {
@@ -1944,6 +2088,24 @@ async function loadPendingTradeOffers() {
     }
   } catch {
     // Non-fatal -- offers still resolve fine via /accept or /decline once known some other way.
+  }
+}
+
+// Same reasoning as loadPendingTradeOffers -- catches up on probe state
+// that arrived (or finished) while this character wasn't connected. The
+// mission row is its own mailbox: whichever report GET /probes hands back
+// hasn't been acknowledged yet, live socket delivery or not.
+async function loadProbeStatus() {
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/probes`, { credentials: 'include' })
+    if (!res.ok) return
+    const data = await res.json()
+    activeProbe.value = data.active || null
+    if (data.report) {
+      probeReport.value = { id: data.report.id, mission_type: data.report.mission_type, summary: data.report.result_summary }
+    }
+  } catch {
+    // Non-fatal -- probe state still resolves fine next time this loads.
   }
 }
 
@@ -2729,8 +2891,10 @@ watch(ambientContext, (key) => playHaulonautAmbient(key), { immediate: true })
                      auto-dismisses, purely additive to the Terminal log line it
                      also writes.
                    - Trade offers: awaiting YOUR response (haulonaut_trade_offer /
-                     loadPendingTradeOffers) -- stays until you Accept or Decline. -->
-              <div v-if="sectorArrivalAlerts.length > 0 || incomingTradeOffers.length > 0" class="floating-alerts" aria-live="polite">
+                     loadPendingTradeOffers) -- stays until you Accept or Decline.
+                   - Probe report: a completed/failed mission awaiting acknowledgement
+                     (haulonaut_probe_report / GET .../probes) -- stays until dismissed. -->
+              <div v-if="sectorArrivalAlerts.length > 0 || incomingTradeOffers.length > 0 || probeReport" class="floating-alerts" aria-live="polite">
                 <div v-for="a in sectorArrivalAlerts" :key="'arrival-' + a.id" class="sector-arrival-alert">
                   <span class="sector-arrival-icon" aria-hidden="true">&#9673;</span>
                   <span>{{ a.displayName }}{{ a.isNpc ? ' [NPC]' : '' }} has entered the sector</span>
@@ -2740,6 +2904,12 @@ watch(ambientContext, (key) => playHaulonautAmbient(key), { immediate: true })
                   <div class="trade-offer-actions">
                     <button class="trade-offer-btn" :disabled="respondingOfferId === o.id" @click="respondToTradeOffer(o.id, 'accept')">Accept</button>
                     <button class="trade-offer-btn trade-offer-decline" :disabled="respondingOfferId === o.id" @click="respondToTradeOffer(o.id, 'decline')">Decline</button>
+                  </div>
+                </div>
+                <div v-if="probeReport" class="trade-offer-alert">
+                  <p class="trade-offer-text">[PROBE -- {{ PROBE_MISSION_LABELS[probeReport.mission_type] || probeReport.mission_type }}] {{ probeReport.summary }}</p>
+                  <div class="trade-offer-actions">
+                    <button class="trade-offer-btn" @click="acknowledgeProbeReport">Dismiss</button>
                   </div>
                 </div>
               </div>
@@ -2773,21 +2943,56 @@ watch(ambientContext, (key) => playHaulonautAmbient(key), { immediate: true })
 
                   <div v-else-if="viewportMode === 'cargo'" class="tui-panel-body outpost-body">
                     <p class="outpost-heading">CARGO MANIFEST</p>
-                    <div v-if="inventory.length > 0" class="cargo-list">
-                      <p v-for="entry in inventory" :key="entry.item_key" class="cargo-list-row">
-                        {{ entry.name }} <span class="cargo-list-qty">&times;{{ entry.quantity }}</span>
-                      </p>
-                    </div>
-                    <p v-else class="cargo-empty">Cargo hold is empty.</p>
+                    <p v-if="activeProbe" class="probe-status-line">Probe deployed ({{ PROBE_MISSION_LABELS[activeProbe.mission_type] || activeProbe.mission_type }}) -- report pending.</p>
+                    <p v-if="inventory.length === 0" class="cargo-empty">Cargo hold is empty.</p>
                     <div class="outpost-items">
                       <button
-                        class="outpost-item-btn outpost-leave-btn"
-                        :class="{ selected: selectedIndex === 0 }"
-                        :aria-pressed="selectedIndex === 0"
-                        @click="exitViewportOverlay()"
+                        v-for="(entry, i) in cargoMenuItems"
+                        :key="entry.__leave ? '__leave' : entry.item_key"
+                        class="outpost-item-btn"
+                        :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.__leave }"
+                        :aria-pressed="selectedIndex === i"
+                        @click="activateViewportMenuItem(entry)"
                       >
-                        <span class="outpost-item-hotkey" aria-hidden="true">1</span>
-                        <span class="outpost-item-name">Close Cargo</span>
+                        <span class="outpost-item-hotkey" aria-hidden="true">{{ i + 1 }}</span>
+                        <span class="outpost-item-name">{{ entry.name }}</span>
+                        <span v-if="!entry.__leave" class="cargo-list-qty">&times;{{ entry.quantity }}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div v-else-if="viewportMode === 'probe-deploy'" class="tui-panel-body outpost-body">
+                    <p class="outpost-heading">DEPLOY PROBE</p>
+                    <div class="outpost-items">
+                      <button
+                        v-for="(entry, i) in probeDeployMenuItems"
+                        :key="entry.__leave ? '__leave' : entry.key"
+                        class="outpost-item-btn"
+                        :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.__leave }"
+                        :disabled="deployingProbe"
+                        :aria-pressed="selectedIndex === i"
+                        @click="activateViewportMenuItem(entry)"
+                      >
+                        <span class="outpost-item-hotkey" aria-hidden="true">{{ i + 1 }}</span>
+                        <span class="outpost-item-name">{{ entry.name }}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div v-else-if="viewportMode === 'probe-search'" class="tui-panel-body outpost-body">
+                    <p class="outpost-heading">SEARCH FOR&hellip;</p>
+                    <div class="outpost-items">
+                      <button
+                        v-for="(entry, i) in probeSearchMenuItems"
+                        :key="entry.__leave ? '__leave' : entry.item_key"
+                        class="outpost-item-btn"
+                        :class="{ selected: selectedIndex === i, 'outpost-leave-btn': entry.__leave }"
+                        :disabled="deployingProbe"
+                        :aria-pressed="selectedIndex === i"
+                        @click="activateViewportMenuItem(entry)"
+                      >
+                        <span class="outpost-item-hotkey" aria-hidden="true">{{ i + 1 }}</span>
+                        <span class="outpost-item-name">{{ entry.name }}</span>
                       </button>
                     </div>
                   </div>
@@ -4665,9 +4870,11 @@ watch(ambientContext, (key) => playHaulonautAmbient(key), { immediate: true })
   cursor: not-allowed;
 }
 
-/* ---- Viewport panel: cargo mode -- a read-only inventory listing plus
-   the one interactive "Close Cargo" row (styled via .outpost-item-btn,
-   shared with the outpost overlay). ---- */
+/* ---- .cargo-list/-row/-qty: read-only inventory listings elsewhere
+   (Star Charts' "already here" rows, the Hail trade target's cargo panel).
+   Cargo's own list is interactive now (styled via .outpost-item-btn,
+   shared with the outpost overlay) but still reuses .cargo-list-qty for
+   the quantity badge. ---- */
 .cargo-list {
   display: flex;
   flex-direction: column;
@@ -4688,6 +4895,12 @@ watch(ambientContext, (key) => playHaulonautAmbient(key), { immediate: true })
   font-size: 0.8rem;
   color: #5fae7c;
   font-style: italic;
+}
+
+.probe-status-line {
+  font-size: 0.75rem;
+  color: #8fe6ab;
+  margin: 0 0 4px;
 }
 
 /* ---- Viewport panel: charts mode -- known locations (styled with

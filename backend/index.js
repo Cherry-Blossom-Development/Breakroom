@@ -72,6 +72,9 @@ startCustomDomainCache();
 const { startHaulonautNpcScheduler } = require('./jobs/haulonautNpcScheduler');
 startHaulonautNpcScheduler();
 
+const { startHaulonautProbeScheduler } = require('./jobs/haulonautProbeScheduler');
+startHaulonautProbeScheduler();
+
 app.use(cors({
   origin: corsOriginCheck,
   credentials: true

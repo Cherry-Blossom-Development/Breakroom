@@ -323,7 +323,7 @@ async function loadPilotLocation(client, gameUserId) {
   // holding more than one -- matches the same tie-break used to pick a
   // planet in /exit-craft below.
   const featuresResult = await client.query(
-    'SELECT id, feature_type, name, description FROM haulonaut_sector_features WHERE sector_id = $1 ORDER BY id',
+    'SELECT id, feature_type, name, description, sells_probe FROM haulonaut_sector_features WHERE sector_id = $1 ORDER BY id',
     [currentSector.id]
   );
 
@@ -1017,7 +1017,7 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
     if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
 
     const tradeCheck = await client.query(
-      `SELECT 1 FROM haulonaut_sector_features WHERE sector_id = $1 AND feature_type IN ('trading_outpost', 'planet')`,
+      `SELECT sells_probe FROM haulonaut_sector_features WHERE sector_id = $1 AND feature_type IN ('trading_outpost', 'planet')`,
       [pilotResult.rows[0].current_sector_id]
     );
     if (tradeCheck.rowCount === 0) return res.status(409).json({ message: 'Nowhere to trade in this sector' });
@@ -1028,6 +1028,13 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
     );
     if (itemResult.rowCount === 0) return res.status(404).json({ message: 'Item not found' });
     const item = itemResult.rows[0];
+
+    // Probes are the one restricted item (see sells_probe, migration 074) --
+    // re-checked here rather than trusted from the client's catalog view,
+    // same as every other server-side re-validation in this route.
+    if (item.item_key === 'probe' && !tradeCheck.rows.some(r => r.sells_probe)) {
+      return res.status(409).json({ message: 'This outpost does not stock probes' });
+    }
 
     const totalCost = item.base_price * quantity;
     if (pilotResult.rows[0].credits < totalCost) return res.status(400).json({ message: 'Not enough tokens' });
@@ -1070,6 +1077,209 @@ router.post('/:gameKey/characters/:id/purchase', authenticate, async (req, res) 
     await client.rollback();
     console.error('Error purchasing item:', err);
     res.status(500).json({ message: 'Failed to purchase item' });
+  } finally {
+    client.release();
+  }
+});
+
+// ---- Probes (see migration 074, haulonaut_probe_missions) ----
+//
+// A probe is bought like any other item (subject to sells_probe -- see the
+// /purchase check above) but isn't consumed at the register: it sits in
+// Cargo until deployed. Deploying picks a mission type and hands it to
+// backend/jobs/haulonautProbeScheduler.js, which resolves it on the same
+// 5-minute cadence haulonautNpcScheduler.js already runs (not a second
+// interval). ticksToComplete is rolled once here at deploy time. The
+// mission row is also the "message": GET /probes returns whichever one is
+// still active plus the most recent unacknowledged completed/failed report
+// -- the same pending-row-as-mailbox pattern haulonaut_trade_offers already
+// uses so a player catches up whether or not they were online in real time
+// when it resolved (the scheduler also fires a live haulonaut_probe_report
+// socket event for whoever IS online).
+const PROBE_TICKS_BY_TYPE = {
+  explore: { min: 3, max: 5 },
+  search: { min: 2, max: 4 },
+  traders: { min: 1, max: 3 }
+};
+
+function rollProbeTicks(missionType) {
+  const { min, max } = PROBE_TICKS_BY_TYPE[missionType];
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+/**
+ * GET /api/games/:gameKey/characters/:id/probes
+ * Whatever probe state this pilot needs to catch up on: the currently
+ * active mission (if any) and the most recent completed/failed one they
+ * haven't acknowledged yet (see POST .../probes/:missionId/acknowledge).
+ */
+router.get('/:gameKey/characters/:id/probes', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+
+    const activeResult = await client.query(
+      `SELECT id, mission_type, ticks_elapsed, ticks_to_complete, deployed_at
+       FROM haulonaut_probe_missions WHERE game_user_id = $1 AND status = 'active'`,
+      [req.params.id]
+    );
+
+    const reportResult = await client.query(
+      `SELECT id, mission_type, status, result_summary, completed_at
+       FROM haulonaut_probe_missions
+       WHERE game_user_id = $1 AND status IN ('completed', 'failed') AND acknowledged_at IS NULL
+       ORDER BY completed_at DESC LIMIT 1`,
+      [req.params.id]
+    );
+
+    res.json({
+      active: activeResult.rows[0] || null,
+      report: reportResult.rows[0] || null
+    });
+  } catch (err) {
+    console.error('Error loading probe status:', err);
+    res.status(500).json({ message: 'Failed to load probe status' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/characters/:id/probes/deploy
+ * Consumes one probe from inventory and starts a mission. Body:
+ * { mission_type: 'explore'|'search'|'traders', search_item_key? } --
+ * search_item_key is required (and must name a real, non-probe item) for
+ * 'search', ignored otherwise. Only one active mission per pilot at a time
+ * (app-level check, not a DB constraint -- same style as the NPC magnet
+ * state machine).
+ */
+router.post('/:gameKey/characters/:id/probes/deploy', authenticate, async (req, res) => {
+  const missionType = (req.body.mission_type || '').trim();
+  if (!PROBE_TICKS_BY_TYPE[missionType]) {
+    return res.status(400).json({ message: 'mission_type must be explore, search, or traders' });
+  }
+
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+    if (!(await isAlive(client, req.params.id))) return res.status(409).json({ message: 'This pilot is lost.' });
+
+    const activeCheck = await client.query(
+      `SELECT id FROM haulonaut_probe_missions WHERE game_user_id = $1 AND status = 'active'`,
+      [req.params.id]
+    );
+    if (activeCheck.rowCount > 0) return res.status(409).json({ message: 'A probe is already deployed' });
+
+    const probeItemResult = await client.query('SELECT id FROM haulonaut_items WHERE item_key = $1', ['probe']);
+    if (probeItemResult.rowCount === 0) return res.status(500).json({ message: 'Probe item is not configured' });
+    const probeItemId = probeItemResult.rows[0].id;
+    const invResult = await client.query(
+      'SELECT quantity FROM haulonaut_pilot_inventory WHERE game_user_id = $1 AND item_id = $2',
+      [req.params.id, probeItemId]
+    );
+    if (invResult.rowCount === 0 || invResult.rows[0].quantity < 1) {
+      return res.status(400).json({ message: 'No probes in cargo' });
+    }
+
+    let searchItemId = null;
+    if (missionType === 'search') {
+      const searchItemKey = (req.body.search_item_key || '').trim();
+      const searchItemResult = await client.query(
+        `SELECT id FROM haulonaut_items WHERE item_key = $1 AND item_key != 'probe'`,
+        [searchItemKey]
+      );
+      if (searchItemResult.rowCount === 0) return res.status(400).json({ message: 'search_item_key must name a real item' });
+      searchItemId = searchItemResult.rows[0].id;
+    }
+
+    const pilotResult = await client.query('SELECT current_sector_id FROM haulonaut_pilots WHERE game_user_id = $1', [req.params.id]);
+    if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
+
+    const ticksToComplete = rollProbeTicks(missionType);
+
+    await client.beginTransaction();
+    // quantity >= 1 guard (same pattern resolveTradeOffer uses) rather than
+    // trusting the invResult check above, which is now a request or two
+    // stale if another deploy raced it.
+    const takeItem = await client.query(
+      `UPDATE haulonaut_pilot_inventory SET quantity = quantity - 1 WHERE game_user_id = $1 AND item_id = $2 AND quantity >= 1`,
+      [req.params.id, probeItemId]
+    );
+    if (!takeItem.affectedRows) {
+      await client.rollback();
+      return res.status(400).json({ message: 'No probes in cargo' });
+    }
+    const missionResult = await client.query(
+      `INSERT INTO haulonaut_probe_missions (game_user_id, mission_type, search_item_id, origin_sector_id, ticks_to_complete)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [req.params.id, missionType, searchItemId, pilotResult.rows[0].current_sector_id, ticksToComplete]
+    );
+    await client.commit();
+
+    const inventory = await loadInventory(client, req.params.id);
+    const etaMinutes = ticksToComplete * 5; // 5-minute tick cadence, see haulonautProbeScheduler.js
+
+    res.status(201).json({
+      message: `Probe deployed. Expect a report in roughly ${etaMinutes} minutes.`,
+      inventory,
+      probe: {
+        id: missionResult.insertId,
+        mission_type: missionType,
+        ticks_elapsed: 0,
+        ticks_to_complete: ticksToComplete,
+        deployed_at: new Date().toISOString()
+      }
+    });
+  } catch (err) {
+    await client.rollback();
+    console.error('Error deploying probe:', err);
+    res.status(500).json({ message: 'Failed to deploy probe' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/characters/:id/probes/:missionId/acknowledge
+ * Dismisses a completed/failed mission's report -- GET /probes stops
+ * returning it as `report` afterward. A no-op if the mission is still
+ * active, doesn't belong to this pilot, or was already acknowledged.
+ */
+router.post('/:gameKey/characters/:id/probes/:missionId/acknowledge', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+
+    await client.query(
+      `UPDATE haulonaut_probe_missions SET acknowledged_at = NOW()
+       WHERE id = $1 AND game_user_id = $2 AND status != 'active' AND acknowledged_at IS NULL`,
+      [req.params.missionId, req.params.id]
+    );
+    res.json({ message: 'Acknowledged' });
+  } catch (err) {
+    console.error('Error acknowledging probe report:', err);
+    res.status(500).json({ message: 'Failed to acknowledge probe report' });
   } finally {
     client.release();
   }
@@ -2421,12 +2631,12 @@ router.post('/:gameKey/admin/universe', authenticate, requireGameAdmin, async (r
     const featureRows = [];
     content.forEach((sc, i) => {
       const sectorId = idByIndex[i];
-      for (const f of sc.features) featureRows.push([sectorId, f.feature_type, f.name, f.description]);
+      for (const f of sc.features) featureRows.push([sectorId, f.feature_type, f.name, f.description, !!f.sells_probe]);
     });
     const FEATURE_BATCH = 300;
     for (let i = 0; i < featureRows.length; i += FEATURE_BATCH) {
       const { sql, params } = buildBulkInsertQuery(
-        'haulonaut_sector_features', ['sector_id', 'feature_type', 'name', 'description'], featureRows.slice(i, i + FEATURE_BATCH)
+        'haulonaut_sector_features', ['sector_id', 'feature_type', 'name', 'description', 'sells_probe'], featureRows.slice(i, i + FEATURE_BATCH)
       );
       await client.query(sql, params);
     }

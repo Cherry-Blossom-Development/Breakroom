@@ -182,10 +182,15 @@ function randomNpcName() {
   return `${pick(NPC_CALLSIGN_FIRST)} ${pick(NPC_CALLSIGN_LAST)}`;
 }
 
+// Same "1 in 3" odds migration 074 seeded onto existing trading_outpost/
+// planet features -- newly generated universes get the same probe
+// availability going forward rather than starting with none.
+const PROBE_CHANCE = 1 / 3;
+
 // Generates per-sector flavor description + a features list, independently
 // rolled per sector. Returns an array indexed the same way as
 // buildUniverseGraph's sectors (0..sectorCount-1):
-//   [{ description, features: [{ feature_type, name, description }] }, ...]
+//   [{ description, features: [{ feature_type, name, description, sells_probe }] }, ...]
 //
 // planetChance/outpostChance default to the "1 in 20" / "2 in 20" starting
 // point from the original request. Exposed as parameters (not hardcoded)
@@ -196,10 +201,10 @@ function generateSectorContent(sectorCount, { planetChance = 0.05, outpostChance
   for (let i = 0; i < sectorCount; i++) {
     const features = [];
     if (Math.random() < planetChance) {
-      features.push({ feature_type: 'planet', name: randomPlanetName(), description: null });
+      features.push({ feature_type: 'planet', name: randomPlanetName(), description: null, sells_probe: Math.random() < PROBE_CHANCE });
     }
     if (Math.random() < outpostChance) {
-      features.push({ feature_type: 'trading_outpost', name: randomOutpostName(), description: null });
+      features.push({ feature_type: 'trading_outpost', name: randomOutpostName(), description: null, sells_probe: Math.random() < PROBE_CHANCE });
     }
     content.push({ description: randomSectorDescription(), features });
   }
