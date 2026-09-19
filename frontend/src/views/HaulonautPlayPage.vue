@@ -172,6 +172,7 @@ function formatLogTime(ts) {
   return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 }
 const selectedIndex = ref(-1) // -1 = nothing highlighted; Left/Right move this, Enter confirms it
+const soundMenuOpen = ref(false) // the speaker-icon popover collapsing the SFX/ambience toggles+sliders
 const logEl = ref(null)
 const stars = ref([])
 const terminalInput = ref('')
@@ -2462,11 +2463,23 @@ function onVisibilityChange() {
   if (document.visibilityState === 'visible') refreshCycles()
 }
 
+// The speaker-icon popover (SFX/ambience toggles+sliders) -- toggled by its
+// own button, closed by a click anywhere else. `.sound-controls` has its
+// own @click.stop (see template) so clicks on the button or inside the
+// popover never reach this document-level listener.
+function toggleSoundMenu() {
+  soundMenuOpen.value = !soundMenuOpen.value
+}
+function closeSoundMenu() {
+  soundMenuOpen.value = false
+}
+
 onMounted(async () => {
   await Promise.all([loadCharacter(), loadItemsCatalog()])
   syncTerminalFocus()
   window.addEventListener('keydown', onKeydown)
   document.addEventListener('visibilitychange', onVisibilityChange)
+  document.addEventListener('click', closeSoundMenu)
   driftIntervalId = setInterval(driftTick, 1000)
   connectSectorSocket()
 })
@@ -2475,6 +2488,7 @@ onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('resize', measureLandingScene)
   document.removeEventListener('visibilitychange', onVisibilityChange)
+  document.removeEventListener('click', closeSoundMenu)
   stopLandingDebugLoop()
   if (driftIntervalId) clearInterval(driftIntervalId)
   if (landingTimeoutId) clearTimeout(landingTimeoutId)
@@ -2638,36 +2652,49 @@ watch(ambientContext, (key) => playHaulonautAmbient(key), { immediate: true })
                 <div class="sound-controls" @click.stop>
                   <button
                     type="button"
-                    class="sound-toggle-btn"
-                    :class="{ muted: soundMuted }"
-                    @click="toggleHaulonautSoundMuted"
-                    :title="soundMuted ? 'Unmute sound effects' : 'Mute sound effects'"
-                  >{{ soundMuted ? '♪ SFX OFF' : '♪ SFX ON' }}</button>
-                  <input
-                    v-if="!soundMuted"
-                    type="range"
-                    class="sound-volume-slider"
-                    min="0" max="1" step="0.05"
-                    :value="soundVolume"
-                    @input="setHaulonautSoundVolume(parseFloat($event.target.value))"
-                    title="Sound effects volume"
-                  />
-                  <button
-                    type="button"
-                    class="sound-toggle-btn"
-                    :class="{ muted: ambientMuted }"
-                    @click="toggleHaulonautAmbientMuted"
-                    :title="ambientMuted ? 'Unmute ambience' : 'Mute ambience'"
-                  >{{ ambientMuted ? '∿ AMB OFF' : '∿ AMB ON' }}</button>
-                  <input
-                    v-if="!ambientMuted"
-                    type="range"
-                    class="sound-volume-slider"
-                    min="0" max="1" step="0.05"
-                    :value="ambientVolume"
-                    @input="setHaulonautAmbientVolume(parseFloat($event.target.value))"
-                    title="Ambience volume"
-                  />
+                    class="sound-menu-btn"
+                    :class="{ muted: soundMuted && ambientMuted }"
+                    @click="toggleSoundMenu"
+                    title="Sound settings"
+                  >{{ soundMuted && ambientMuted ? '🔇' : '🔊' }}</button>
+                  <div v-if="soundMenuOpen" class="sound-menu-popover">
+                    <div class="sound-menu-row">
+                      <button
+                        type="button"
+                        class="sound-toggle-btn"
+                        :class="{ muted: soundMuted }"
+                        @click="toggleHaulonautSoundMuted"
+                        :title="soundMuted ? 'Unmute sound effects' : 'Mute sound effects'"
+                      >{{ soundMuted ? '♪ SFX OFF' : '♪ SFX ON' }}</button>
+                      <input
+                        v-if="!soundMuted"
+                        type="range"
+                        class="sound-volume-slider"
+                        min="0" max="1" step="0.05"
+                        :value="soundVolume"
+                        @input="setHaulonautSoundVolume(parseFloat($event.target.value))"
+                        title="Sound effects volume"
+                      />
+                    </div>
+                    <div class="sound-menu-row">
+                      <button
+                        type="button"
+                        class="sound-toggle-btn"
+                        :class="{ muted: ambientMuted }"
+                        @click="toggleHaulonautAmbientMuted"
+                        :title="ambientMuted ? 'Unmute ambience' : 'Mute ambience'"
+                      >{{ ambientMuted ? '∿ AMB OFF' : '∿ AMB ON' }}</button>
+                      <input
+                        v-if="!ambientMuted"
+                        type="range"
+                        class="sound-volume-slider"
+                        min="0" max="1" step="0.05"
+                        :value="ambientVolume"
+                        @input="setHaulonautAmbientVolume(parseFloat($event.target.value))"
+                        title="Ambience volume"
+                      />
+                    </div>
+                  </div>
                 </div>
                 <div class="header-resources" @click.stop>
                   <HaulonautStatChip stat-key="credits" :icon="STAT_META.credits.icon" :label="STAT_META.credits.label"
@@ -3513,9 +3540,49 @@ watch(ambientContext, (key) => playHaulonautAmbient(key), { immediate: true })
 }
 
 .sound-controls {
+  position: relative;
   flex-shrink: 0;
+}
+
+.sound-menu-btn {
+  flex-shrink: 0;
+  font-size: 1rem;
+  line-height: 1;
+  color: #baffcf;
+  background: rgba(77, 255, 136, 0.08);
+  border: 1px solid rgba(77, 255, 136, 0.4);
+  border-radius: 3px;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+
+.sound-menu-btn.muted {
+  color: #6b8f78;
+  border-color: rgba(107, 143, 120, 0.4);
+  background: transparent;
+}
+
+/* Anchored under the speaker icon rather than the whole header -- the CRT
+   screen clips overflow (see .crt-screen), so this has plenty of room to
+   drop down without spilling outside it. */
+.sound-menu-popover {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 40;
+  margin-top: 4px;
+  padding: 8px;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 6px;
+  background: #0a1a0f;
+  border: 1px solid rgba(77, 255, 136, 0.4);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.6);
+}
+
+.sound-menu-row {
+  display: flex;
   align-items: center;
   gap: 6px;
 }
