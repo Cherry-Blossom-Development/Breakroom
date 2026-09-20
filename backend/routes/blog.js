@@ -62,10 +62,37 @@ const authenticate = async (req, res, next) => {
 // PUBLIC BLOG ENDPOINTS (no auth required)
 // =====================
 
+// Named HTML entities the rich text editor's saved content actually uses
+// (&nbsp; from pasted/formatted text is the common offender) -- decoded so
+// Discover excerpts read as plain text instead of leaking markup.
+const HTML_ENTITIES = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+function decodeEntities(text) {
+  return text.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (match, entity) => {
+    if (entity[0] === '#') {
+      const code = entity[1].toLowerCase() === 'x' ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10);
+      return Number.isNaN(code) ? match : String.fromCodePoint(code);
+    }
+    return HTML_ENTITIES[entity.toLowerCase()] ?? match;
+  });
+}
+
+// Plain-text teaser from a post's (HTML) content -- strips tags, decodes
+// entities, collapses whitespace, and clips to maxLen so the Discover
+// directory can ship a short excerpt instead of the full post body.
+function makeExcerpt(html, maxLen = 160) {
+  if (!html) return '';
+  const text = decodeEntities(html.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  if (text.length <= maxLen) return text;
+  return text.slice(0, maxLen).trim() + '...';
+}
+
 // Directory of blogs the author has opted in to list publicly. Only blogs
 // with at least one published (and unmoderated) post are included, so the
 // directory doesn't surface empty/placeholder blogs -- same pattern as
-// GET /api/gallery/public and GET /api/storefront/public.
+// GET /api/gallery/public and GET /api/storefront/public. Also carries the
+// title + a short excerpt of the most recent qualifying post, so Discover
+// has something to actually show in a blog's preview slot (blogs have no
+// cover image the way galleries/showcases do).
 router.get('/public', async (req, res) => {
   const client = await getClient();
 
@@ -74,7 +101,13 @@ router.get('/public', async (req, res) => {
       `SELECT ub.blog_url, ub.blog_name, ub.updated_at,
               u.handle, u.first_name, u.last_name, u.photo_path,
               (SELECT COUNT(*) FROM blog_posts bp
-                 WHERE bp.user_id = ub.user_id AND bp.is_published = TRUE AND bp.is_hidden = FALSE) AS post_count
+                 WHERE bp.user_id = ub.user_id AND bp.is_published = TRUE AND bp.is_hidden = FALSE) AS post_count,
+              (SELECT bp.title FROM blog_posts bp
+                 WHERE bp.user_id = ub.user_id AND bp.is_published = TRUE AND bp.is_hidden = FALSE
+                 ORDER BY bp.updated_at DESC LIMIT 1) AS latest_post_title,
+              (SELECT bp.content FROM blog_posts bp
+                 WHERE bp.user_id = ub.user_id AND bp.is_published = TRUE AND bp.is_hidden = FALSE
+                 ORDER BY bp.updated_at DESC LIMIT 1) AS latest_post_content
        FROM user_blog ub
        JOIN users u ON u.id = ub.user_id
        WHERE ub.is_public = TRUE
@@ -88,6 +121,8 @@ router.get('/public', async (req, res) => {
         blog_url: row.blog_url,
         blog_name: row.blog_name,
         post_count: row.post_count,
+        latest_post_title: row.latest_post_title,
+        latest_post_excerpt: makeExcerpt(row.latest_post_content),
         artist: {
           handle: row.handle,
           first_name: row.first_name,

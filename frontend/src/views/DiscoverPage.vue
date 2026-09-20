@@ -193,13 +193,18 @@ function openBlog(b) {
             class="discover-card"
             tabindex="0"
             role="button"
-            :aria-label="`Open ${blogEntry.blog_name} blog by ${artistName(blogEntry.artist)}, ${blogEntry.post_count} post${blogEntry.post_count === 1 ? '' : 's'}`"
+            :aria-label="`Open ${blogEntry.blog_name} blog by ${artistName(blogEntry.artist)}, ${blogEntry.post_count} post${blogEntry.post_count === 1 ? '' : 's'}${blogEntry.latest_post_title ? ', latest post ' + blogEntry.latest_post_title : ''}`"
             @click="openBlog(blogEntry)"
             @keydown.enter="openBlog(blogEntry)"
             @keydown.space.prevent="openBlog(blogEntry)"
           >
-            <div class="discover-cover" aria-hidden="true">
-              <div class="cover-placeholder">No preview</div>
+            <div class="discover-cover blog-cover" aria-hidden="true">
+              <template v-if="blogEntry.latest_post_title">
+                <span class="blog-preview-label">Latest post</span>
+                <p class="blog-preview-title">{{ blogEntry.latest_post_title }}</p>
+                <p v-if="blogEntry.latest_post_excerpt" class="blog-preview-excerpt">{{ blogEntry.latest_post_excerpt }}</p>
+              </template>
+              <div v-else class="cover-placeholder">No preview</div>
             </div>
             <div class="discover-info" aria-hidden="true">
               <h3 class="discover-name">{{ blogEntry.blog_name }}</h3>
@@ -306,6 +311,48 @@ function openBlog(b) {
   justify-content: center;
   color: var(--color-text-muted);
   font-size: 0.9rem;
+}
+
+/* Blogs have no cover image, so their preview slot shows a teaser of the
+   most recent post instead -- title + a short excerpt (see
+   latest_post_title/latest_post_excerpt from GET /api/blog/public). */
+.blog-cover {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 18px;
+  background: linear-gradient(var(--color-background-mute), var(--color-background-soft));
+}
+
+.blog-preview-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  margin-bottom: 6px;
+}
+
+.blog-preview-title {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--color-text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.blog-preview-excerpt {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: var(--color-text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .discover-info {
