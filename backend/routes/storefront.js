@@ -6,6 +6,7 @@ const { extractToken } = require('../utilities/auth');
 const { sendMail, sendMailToUser } = require('../utilities/aws-ses-email');
 const { getProcessor } = require('../utilities/payments');
 const { ProcessorAuthError } = require('../utilities/payments/errors');
+const { recalcStorefrontDiscoverActivity } = require('../utilities/discoverActivity');
 
 require('dotenv').config();
 
@@ -76,7 +77,7 @@ router.get('/public', async (req, res) => {
          AND EXISTS (SELECT 1 FROM collection_items ci
                      JOIN user_collections uc ON uc.id = ci.collection_id
                      WHERE uc.user_id = us.user_id AND ci.image_path IS NOT NULL)
-       ORDER BY us.updated_at DESC`
+       ORDER BY us.discover_activity_at DESC`
     );
 
     res.json({
@@ -266,6 +267,7 @@ router.put('/', authenticate, async (req, res) => {
        ON DUPLICATE KEY UPDATE store_url = $2, page_title = $3, is_public = $4, content = $5, settings = $6, external_url = $7`,
       [req.user.id, store_url || null, page_title || '', !!is_public, content || '', JSON.stringify(settings || {}), externalUrlValue]
     );
+    await recalcStorefrontDiscoverActivity(client, req.user.id);
     res.json({ message: 'Saved' });
   } catch (err) {
     console.error('Failed to save storefront:', err);

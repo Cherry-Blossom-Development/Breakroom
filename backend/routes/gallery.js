@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { uploadToS3, deleteFromS3, copyInS3 } = require('../utilities/aws-s3');
 const { extractToken } = require('../utilities/auth');
+const { recalcGalleryDiscoverActivity, recalcStorefrontDiscoverActivity } = require('../utilities/discoverActivity');
 
 require('dotenv').config();
 
@@ -80,7 +81,7 @@ router.get('/public', async (req, res) => {
        WHERE ug.is_public = TRUE
          AND EXISTS (SELECT 1 FROM gallery_artworks ga
                      WHERE ga.user_id = ug.user_id AND ga.is_published = TRUE)
-       ORDER BY ug.updated_at DESC`
+       ORDER BY ug.discover_activity_at DESC`
     );
 
     res.json({
@@ -293,6 +294,7 @@ router.post('/settings', authenticate, async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6)`,
       [req.user.id, finalGalleryUrl, finalGalleryName, !!is_public, bio || null, settings ? JSON.stringify(settings) : null]
     );
+    await recalcGalleryDiscoverActivity(client, req.user.id);
 
     const result = await client.query(
       'SELECT id, gallery_url, gallery_name, is_public, bio, settings, created_at FROM user_gallery WHERE user_id = $1',
@@ -341,6 +343,7 @@ router.put('/settings', authenticate, async (req, res) => {
     if (result.affectedRows === 0) {
       return res.status(404).json({ message: 'Gallery settings not found' });
     }
+    await recalcGalleryDiscoverActivity(client, req.user.id);
 
     const updated = await client.query(
       'SELECT id, gallery_url, gallery_name, is_public, bio, settings, created_at FROM user_gallery WHERE user_id = $1',
@@ -499,6 +502,7 @@ router.post('/artworks', authenticate, upload.single('image'), async (req, res) 
        VALUES ($1, $2, $3, $4, $5)`,
       [req.user.id, title.trim(), description || null, s3Key, isPublished === 'true' || isPublished === true]
     );
+    await recalcGalleryDiscoverActivity(client, req.user.id);
 
     // Get the inserted artwork
     const result = await client.query(
@@ -545,6 +549,7 @@ router.put('/artworks/:id', authenticate, async (req, res) => {
        WHERE id = $4 AND user_id = $5`,
       [title.trim(), description || null, isPublished || false, id, req.user.id]
     );
+    await recalcGalleryDiscoverActivity(client, req.user.id);
 
     // Get updated artwork
     const result = await client.query(
@@ -597,6 +602,7 @@ router.post('/artworks/:id/export-to-showcase', authenticate, async (req, res) =
        VALUES ($1, $2, $3, $4, $5, 0, 1)`,
       [collection_id, req.user.id, src.title, src.description || null, newKey]
     );
+    await recalcStorefrontDiscoverActivity(client, req.user.id);
     const result = await client.query(
       `SELECT id, name, description, image_path, display_order, price_cents, is_available, in_gallery,
               shipping_cost_cents, weight_oz, length_in, width_in, height_in, created_at, updated_at
@@ -635,6 +641,7 @@ router.delete('/artworks/:id', authenticate, async (req, res) => {
       'DELETE FROM gallery_artworks WHERE id = $1 AND user_id = $2',
       [id, req.user.id]
     );
+    await recalcGalleryDiscoverActivity(client, req.user.id);
 
     // Delete from S3
     if (s3Key) {

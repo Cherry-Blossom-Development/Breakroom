@@ -6,6 +6,7 @@ const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { uploadToS3, deleteFromS3, copyInS3 } = require('../utilities/aws-s3');
 const { extractToken } = require('../utilities/auth');
+const { recalcStorefrontDiscoverActivity, recalcGalleryDiscoverActivity } = require('../utilities/discoverActivity');
 
 require('dotenv').config();
 
@@ -304,6 +305,7 @@ router.post('/:id/items', authenticate, upload.single('image'), async (req, res)
       [id, req.user.id, name.trim(), description || null, s3Key,
        priceCents, isAvailable, inGallery, shippingCents, weightOz, lengthIn, widthIn, heightIn]
     );
+    await recalcStorefrontDiscoverActivity(client, req.user.id);
     const result = await client.query(
       `SELECT id, name, description, image_path, display_order,
               price_cents, is_available, in_gallery, shipping_cost_cents,
@@ -382,6 +384,7 @@ router.put('/:id/items/:itemId', authenticate, upload.single('image'), async (re
        priceCents, isAvailable, inGallery, shippingCents,
        weightOz, lengthIn, widthIn, heightIn, targetCollectionId, itemId]
     );
+    await recalcStorefrontDiscoverActivity(client, req.user.id);
     const result = await client.query(
       `SELECT id, name, description, image_path, display_order,
               price_cents, is_available, in_gallery, shipping_cost_cents,
@@ -454,6 +457,10 @@ router.post('/:id/items/:itemId/export-to-gallery', authenticate, async (req, re
        VALUES ($1, $2, $3, $4, FALSE)`,
       [req.user.id, src.name, src.description || null, newKey]
     );
+    // Unpublished on arrival (the artist reviews it in Gallery before
+    // making it public), so this can't move discover_activity_at yet --
+    // recalculated anyway so publishing later isn't the only path there.
+    await recalcGalleryDiscoverActivity(client, req.user.id);
     const result = await client.query(
       `SELECT id, title, description, image_path, is_published, created_at, updated_at
        FROM gallery_artworks WHERE id = $1`,
@@ -487,6 +494,7 @@ router.delete('/:id/items/:itemId', authenticate, async (req, res) => {
     if (existing.rowCount === 0) return res.status(404).json({ message: 'Item not found' });
 
     await client.query('DELETE FROM collection_items WHERE id = $1', [itemId]);
+    await recalcStorefrontDiscoverActivity(client, req.user.id);
     if (existing.rows[0].image_path) {
       deleteFromS3(existing.rows[0].image_path).catch(() => {});
     }

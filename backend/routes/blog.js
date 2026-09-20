@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { uploadToS3 } = require('../utilities/aws-s3');
 const { extractToken } = require('../utilities/auth');
+const { recalcBlogDiscoverActivity } = require('../utilities/discoverActivity');
 
 require('dotenv').config();
 
@@ -79,7 +80,7 @@ router.get('/public', async (req, res) => {
        WHERE ub.is_public = TRUE
          AND EXISTS (SELECT 1 FROM blog_posts bp
                      WHERE bp.user_id = ub.user_id AND bp.is_published = TRUE AND bp.is_hidden = FALSE)
-       ORDER BY ub.updated_at DESC`
+       ORDER BY ub.discover_activity_at DESC`
     );
 
     res.json({
@@ -275,6 +276,7 @@ router.post('/settings', authenticate, async (req, res) => {
        VALUES ($1, $2, $3, $4)`,
       [req.user.id, finalBlogUrl, finalBlogName, finalIsPublic]
     );
+    await recalcBlogDiscoverActivity(client, req.user.id);
 
     const result = await client.query(
       'SELECT id, blog_url, blog_name, is_public, created_at FROM user_blog WHERE user_id = $1',
@@ -321,6 +323,7 @@ router.put('/settings', authenticate, async (req, res) => {
     if (result.affectedRows === 0) {
       return res.status(404).json({ message: 'Blog settings not found' });
     }
+    await recalcBlogDiscoverActivity(client, req.user.id);
 
     const updated = await client.query(
       'SELECT id, blog_url, blog_name, is_public, created_at FROM user_blog WHERE user_id = $1',
@@ -528,6 +531,7 @@ router.post('/posts', authenticate, async (req, res) => {
        VALUES ($1, $2, $3, $4)`,
       [req.user.id, title.trim(), content || '', isPublished || false]
     );
+    await recalcBlogDiscoverActivity(client, req.user.id);
 
     // Get the inserted post
     const result = await client.query(
@@ -578,6 +582,7 @@ router.put('/posts/:id', authenticate, async (req, res) => {
        WHERE id = $4 AND user_id = $5`,
       [title.trim(), content || '', isPublished || false, id, req.user.id]
     );
+    await recalcBlogDiscoverActivity(client, req.user.id);
 
     // Get updated post
     const result = await client.query(
@@ -610,6 +615,7 @@ router.delete('/posts/:id', authenticate, async (req, res) => {
     if (result.rowCount === 0) {
       return res.status(404).json({ message: 'Post not found' });
     }
+    await recalcBlogDiscoverActivity(client, req.user.id);
 
     res.json({ message: 'Post deleted successfully' });
   } catch (err) {
