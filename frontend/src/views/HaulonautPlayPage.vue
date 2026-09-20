@@ -91,7 +91,7 @@ const BUGGY_CYCLE_COST = 1
 const inventory = ref([])
 const itemsCatalog = ref([])
 const knownLocations = ref([])
-const viewportMode = ref('space') // 'space', 'outpost' (browsing what's for sale), 'cargo' (owned inventory), 'charts' (known planets/outposts), 'planet' (overview menu), 'encounter'/'encounter-attack'/'encounter-trade' (Hail -- see below), 'probe-deploy'/'probe-search' (see below), or 'landing-sequence' (animated descent)
+const viewportMode = ref('space') // 'space', 'outpost' (browsing what's for sale), 'cargo' (owned inventory), 'charts' (known planets/outposts), 'planet' (overview menu), 'encounter'/'encounter-attack'/'encounter-trade' (Hail -- see below), 'probe-deploy'/'probe-search' (see below), 'buoys' (deployed tracking buoys -- see below), or 'landing-sequence' (animated descent)
 const purchasing = ref(false)
 const purchaseError = ref('')
 const chartsError = ref('')
@@ -108,6 +108,18 @@ const chartsError = ref('')
 const activeProbe = ref(null) // { id, mission_type, ticks_elapsed, ticks_to_complete, deployed_at } | null
 const probeReport = ref(null) // { id, mission_type, status, summary } | null
 const deployingProbe = ref(false)
+
+// Magnetic Tracking Buoys (see migration 075 and the /buoys routes in
+// games.js): also a Cargo item, but dropped rather than deployed toward a
+// mission -- clicking one in Cargo drops it immediately in the current
+// sector instead of opening a submenu. 'buoys' is a read-only status
+// screen (like Star Charts) rather than a list-nav overlay with actions of
+// its own. buoyAttachedAlert mirrors the dismissible-banner pattern
+// incomingTradeOffers/probeReport already use, driven by the live
+// haulonaut_buoy_attached socket event below.
+const buoys = ref([]) // [{ id, status, sectorNumber, targetDisplayName }]
+const droppingBuoy = ref(false)
+const buoyAttachedAlert = ref(null) // { targetDisplayName } | null
 
 // Hail: message/trade/attack menu shown when another pilot is in the sector
 // (see actionItems' 'hail' entry). 'encounter' is the top-level 3-option
@@ -423,6 +435,7 @@ const actionItems = computed(() => {
   if (playersHere.value.length > 0) items.push({ key: 'hail', label: 'Hail' })
   items.push({ key: 'view_cargo', label: 'Cargo' })
   items.push({ key: 'view_charts', label: 'Star Charts' })
+  items.push({ key: 'view_buoys', label: 'Buoys' })
   return items
 })
 
@@ -480,6 +493,11 @@ const chartsMenuItems = computed(() => [
   { __leave: true, name: 'Close Star Charts' }
 ])
 
+// Buoys is read-only status (like Star Charts' rows), just a single
+// trailing close entry for the list-nav convention -- nothing in the list
+// itself is clickable.
+const buoysMenuItems = computed(() => [{ __leave: true, name: 'Close Buoys' }])
+
 // Planet Overview's top-level menu: trade (reuses the outpost view/flow
 // entirely -- planets sell the same catalog, see the /purchase route) or
 // land for a randomized surface-expedition roll.
@@ -509,6 +527,7 @@ const viewportMenuItems = computed(() => {
   if (viewportMode.value === 'probe-deploy') return probeDeployMenuItems.value
   if (viewportMode.value === 'probe-search') return probeSearchMenuItems.value
   if (viewportMode.value === 'charts') return chartsMenuItems.value
+  if (viewportMode.value === 'buoys') return buoysMenuItems.value
   if (viewportMode.value === 'planet') return planetMenuItems.value
   if (viewportMode.value === 'encounter') return encounterMenuItems.value
   if (viewportMode.value === 'encounter-attack') {
@@ -624,6 +643,11 @@ function performAction(item) {
     chartsError.value = ''
     logLines.value.push('Pulling up star charts.')
     loadKnownLocations()
+  } else if (item.key === 'view_buoys') {
+    viewportMode.value = 'buoys'
+    selectedIndex.value = -1
+    logLines.value.push('Checking tracking buoy telemetry.')
+    loadBuoys()
   } else if (item.key === 'hail') {
     viewportMode.value = 'encounter'
     selectedIndex.value = -1
@@ -637,6 +661,7 @@ const OVERLAY_CLOSE_MESSAGES = {
   outpost: 'Departing the outpost.',
   cargo: 'Closing the cargo manifest.',
   charts: 'Closing star charts.',
+  buoys: 'Closing buoy telemetry.',
   planet: 'Breaking orbit.',
   encounter: 'Closing hailing frequencies.',
   'encounter-attack': 'Standing down.',
@@ -683,10 +708,17 @@ async function purchaseItem(entry) {
   }
 }
 
-// Only probes do anything when clicked in Cargo right now -- other items
-// have no per-item action yet. Refuses to open the deploy menu if a
-// mission is already active (the server would reject the deploy anyway;
-// this just avoids the click going anywhere).
+// Dispatches a Cargo-item click to whichever item-specific action applies
+// -- probes open the deploy submenu, tracking buoys drop immediately (no
+// submenu, since there's nothing to configure), everything else is inert.
+function selectCargoItem(entry) {
+  if (entry.item_key === 'probe') selectProbeAction(entry)
+  else if (entry.item_key === 'tracking_buoy') dropBuoy()
+}
+
+// Refuses to open the deploy menu if a mission is already active (the
+// server would reject the deploy anyway; this just avoids the click going
+// anywhere).
 function selectProbeAction(entry) {
   if (entry.item_key !== 'probe') return
   if (activeProbe.value) {
@@ -750,6 +782,36 @@ async function acknowledgeProbeReport() {
   }
 }
 
+// Drops a Magnetic Tracking Buoy from Cargo into the current sector (see
+// POST .../buoys/drop). Unlike deployProbe, there's no submenu to step
+// through first -- clicking the item in Cargo is the whole interaction --
+// so this closes the overlay all the way out on success, same as a
+// decisive one-off action.
+async function dropBuoy() {
+  if (droppingBuoy.value) return
+  droppingBuoy.value = true
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/buoys/drop`, {
+      method: 'POST',
+      credentials: 'include'
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Failed to drop tracking buoy')
+    inventory.value = data.inventory || []
+    buoys.value = data.buoys || []
+    logLines.value.push(data.message)
+    playHaulonautSound('success')
+    viewportMode.value = 'space'
+    selectedIndex.value = -1
+  } catch (err) {
+    logLines.value.push(err.message)
+    playHaulonautSound('error')
+  } finally {
+    droppingBuoy.value = false
+    scrollLogToBottom()
+  }
+}
+
 function activateViewportMenuItem(entry) {
   if (entry.__leave) {
     // Multi-level overlays back up one level at a time rather than
@@ -768,7 +830,7 @@ function activateViewportMenuItem(entry) {
   } else if (viewportMode.value === 'outpost') {
     purchaseItem(entry)
   } else if (viewportMode.value === 'cargo') {
-    selectProbeAction(entry)
+    selectCargoItem(entry)
   } else if (viewportMode.value === 'probe-deploy') {
     if (entry.key === 'search') {
       viewportMode.value = 'probe-search'
@@ -1647,6 +1709,18 @@ function connectSectorSocket() {
     playHaulonautSound('notify')
   })
 
+  // A dropped buoy just caught its first ship (see attachBuoysInSector in
+  // games.js) -- live delivery only; there's no offline mailbox for this
+  // one the way probe reports have (the Buoys screen's own GET .../buoys
+  // just reflects the attachment whenever it's next opened).
+  sectorSocket.on('haulonaut_buoy_attached', (data) => {
+    buoyAttachedAlert.value = { buoyId: data.buoyId, targetDisplayName: data.targetDisplayName }
+    logLines.value.push(`[BUOY] Your tracking buoy just attached to ${data.targetDisplayName}'s ship.`)
+    scrollLogToBottom()
+    playHaulonautSound('notify')
+    if (viewportMode.value === 'buoys') loadBuoys()
+  })
+
   // Combat (see /attack in games.js) -- one broadcast to the whole sector
   // room covers attacker, target, and bystanders, each phrased from their
   // own point of view; the attacker's own /attack call deliberately logs
@@ -1911,7 +1985,8 @@ const ACTION_COMMAND_WORDS = {
   visit_outpost: 'outpost',
   planet_overview: 'planet',
   view_cargo: 'cargo',
-  view_charts: 'charts'
+  view_charts: 'charts',
+  view_buoys: 'buoys'
 }
 function actionCommandWord(item) {
   return ACTION_COMMAND_WORDS[item.key] || item.key.replace(/_/g, '')
@@ -2106,6 +2181,22 @@ async function loadProbeStatus() {
     }
   } catch {
     // Non-fatal -- probe state still resolves fine next time this loads.
+  }
+}
+
+// Refreshes the buoy list from GET .../buoys -- called when the Buoys
+// screen opens and after a drop, same as loadKnownLocations for Star
+// Charts (not loaded proactively on every page load, since an attached
+// buoy's target location can only usefully change while this screen is
+// actually open to see it).
+async function loadBuoys() {
+  try {
+    const res = await fetch(`/api/games/haulonaut/characters/${route.params.characterId}/buoys`, { credentials: 'include' })
+    if (!res.ok) return
+    const data = await res.json()
+    buoys.value = data.buoys || []
+  } catch {
+    // Non-fatal -- the Buoys screen just shows nothing new until reopened.
   }
 }
 
@@ -2894,7 +2985,7 @@ watch(ambientContext, (key) => playHaulonautAmbient(key), { immediate: true })
                      loadPendingTradeOffers) -- stays until you Accept or Decline.
                    - Probe report: a completed/failed mission awaiting acknowledgement
                      (haulonaut_probe_report / GET .../probes) -- stays until dismissed. -->
-              <div v-if="sectorArrivalAlerts.length > 0 || incomingTradeOffers.length > 0 || probeReport" class="floating-alerts" aria-live="polite">
+              <div v-if="sectorArrivalAlerts.length > 0 || incomingTradeOffers.length > 0 || probeReport || buoyAttachedAlert" class="floating-alerts" aria-live="polite">
                 <div v-for="a in sectorArrivalAlerts" :key="'arrival-' + a.id" class="sector-arrival-alert">
                   <span class="sector-arrival-icon" aria-hidden="true">&#9673;</span>
                   <span>{{ a.displayName }}{{ a.isNpc ? ' [NPC]' : '' }} has entered the sector</span>
@@ -2910,6 +3001,12 @@ watch(ambientContext, (key) => playHaulonautAmbient(key), { immediate: true })
                   <p class="trade-offer-text">[PROBE -- {{ PROBE_MISSION_LABELS[probeReport.mission_type] || probeReport.mission_type }}] {{ probeReport.summary }}</p>
                   <div class="trade-offer-actions">
                     <button class="trade-offer-btn" @click="acknowledgeProbeReport">Dismiss</button>
+                  </div>
+                </div>
+                <div v-if="buoyAttachedAlert" class="trade-offer-alert">
+                  <p class="trade-offer-text">[BUOY] Attached to {{ buoyAttachedAlert.targetDisplayName }}'s ship -- now tracking.</p>
+                  <div class="trade-offer-actions">
+                    <button class="trade-offer-btn" @click="buoyAttachedAlert = null">Dismiss</button>
                   </div>
                 </div>
               </div>
@@ -3029,6 +3126,27 @@ watch(ambientContext, (key) => playHaulonautAmbient(key), { immediate: true })
                       </div>
                     </template>
                     <p v-if="chartsError" class="outpost-error">{{ chartsError }}</p>
+                  </div>
+
+                  <!-- Buoys: read-only telemetry -- a dropped buoy shows where it was
+                       left, an attached one shows its target's LIVE sector (refetched
+                       whenever this screen is opened, not polled while it's open). -->
+                  <div v-else-if="viewportMode === 'buoys'" class="tui-panel-body outpost-body">
+                    <div class="outpost-heading-row">
+                      <p class="outpost-heading">TRACKING BUOYS</p>
+                      <button class="outpost-close-btn" aria-label="Close Buoys" @click="exitViewportOverlay()">&times;</button>
+                    </div>
+                    <div v-if="buoys.length === 0" class="cargo-empty">No buoys deployed -- buy one at a trading outpost and drop it from Cargo.</div>
+                    <div v-else class="cargo-list">
+                      <p v-for="b in buoys" :key="b.id" class="cargo-list-row">
+                        <template v-if="b.status === 'attached'">
+                          Attached to <strong>{{ b.targetDisplayName }}</strong> &mdash; Sector {{ b.sectorNumber }}
+                        </template>
+                        <template v-else>
+                          Dropped &mdash; Sector {{ b.sectorNumber }} &middot; <span class="chart-type-tag">awaiting contact</span>
+                        </template>
+                      </p>
+                    </div>
                   </div>
 
                   <div v-else-if="viewportMode === 'planet'" class="tui-panel-body outpost-body">

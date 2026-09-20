@@ -449,6 +449,39 @@ async function loadInventory(client, gameUserId) {
   return result.rows;
 }
 
+// Every Magnetic Tracking Buoy `gameUserId` owns (see migration 075),
+// dropped or attached. A dropped buoy's location is its drop sector; an
+// attached one is joined straight through to the target pilot's LIVE
+// haulonaut_pilots.current_sector_id rather than anything cached here, so
+// it's never stale even mid-session (the target's own current sector can
+// have moved several times since attachment). targetDisplayName/
+// targetSectorNumber come back null for a dropped buoy that hasn't caught
+// anyone yet.
+async function loadBuoys(client, gameUserId) {
+  const result = await client.query(
+    `SELECT b.id, b.status, b.dropped_at, b.attached_at,
+            ds.sector_number AS drop_sector_number,
+            tgu.display_name AS target_display_name,
+            ts.sector_number AS target_sector_number
+     FROM haulonaut_tracking_buoys b
+     JOIN haulonaut_sectors ds ON ds.id = b.sector_id
+     LEFT JOIN game_users tgu ON tgu.id = b.attached_game_user_id
+     LEFT JOIN haulonaut_pilots thp ON thp.game_user_id = b.attached_game_user_id
+     LEFT JOIN haulonaut_sectors ts ON ts.id = thp.current_sector_id
+     WHERE b.owner_game_user_id = $1
+     ORDER BY b.id DESC`,
+    [gameUserId]
+  );
+  return result.rows.map(r => ({
+    id: r.id,
+    status: r.status,
+    sectorNumber: r.status === 'attached' ? r.target_sector_number : r.drop_sector_number,
+    targetDisplayName: r.target_display_name,
+    droppedAt: r.dropped_at,
+    attachedAt: r.attached_at
+  }));
+}
+
 // Breadth-first search over one instance's sector graph from startSectorId.
 // Every warp costs the same (unweighted edges), so BFS gives true shortest
 // hop-count paths. Returns Map<sectorId, { distance, prevSectorId }> for
@@ -513,6 +546,42 @@ async function markSectorVisited(client, gameUserId, sectorId) {
      ON DUPLICATE KEY UPDATE last_visited_at = NOW()`,
     [gameUserId, sectorId]
   );
+}
+
+// A dropped Magnetic Tracking Buoy (migration 075, haulonaut_tracking_buoys)
+// sits invisibly in whatever sector it was left in until another *human*
+// pilot's ship passes through -- NPCs are excluded, same reasoning as the
+// NPC magnet logic never targeting another NPC. The first such arrival
+// attaches it (status flips to 'attached', pinned to that pilot from then
+// on with no detach/expire mechanic) and, if the owner's account has an
+// open socket connection, pushes a live heads-up; otherwise they'll just
+// see it in GET .../buoys next time they look. Called from /navigate and
+// /drift right after current_sector_id is updated to `sectorId` --
+// `enteringGameUserId` is who just arrived there.
+async function attachBuoysInSector(client, sectorId, enteringGameUserId, enteringDisplayName) {
+  const candidates = await client.query(
+    `SELECT id, owner_game_user_id FROM haulonaut_tracking_buoys
+     WHERE sector_id = $1 AND status = 'dropped' AND owner_game_user_id != $2`,
+    [sectorId, enteringGameUserId]
+  );
+  for (const buoy of candidates.rows) {
+    // Guarded on status = 'dropped' in case two arrivals into the same
+    // sector ever raced this loop -- only the first should win.
+    const attached = await client.query(
+      `UPDATE haulonaut_tracking_buoys SET status = 'attached', attached_game_user_id = $1, attached_at = NOW()
+       WHERE id = $2 AND status = 'dropped'`,
+      [enteringGameUserId, buoy.id]
+    );
+    if (!attached.affectedRows) continue;
+
+    const ownerResult = await client.query('SELECT user_id FROM game_users WHERE id = $1', [buoy.owner_game_user_id]);
+    if (ownerResult.rows[0]?.user_id) {
+      emitToUser(ownerResult.rows[0].user_id, 'haulonaut_buoy_attached', {
+        buoyId: buoy.id,
+        targetDisplayName: enteringDisplayName
+      });
+    }
+  }
 }
 
 // Creates gameUserId's haulonaut_pilots row at a specific, already-resolved
@@ -838,6 +907,7 @@ router.post('/:gameKey/characters/:id/navigate', authenticate, async (req, res) 
     // scheduler applies to its own warp).
     if (!died) {
       emitHaulonautSectorArrival(toSectorId, { id: Number(req.params.id), display_name: ownerCheck.rows[0].display_name, is_npc: false });
+      await attachBuoysInSector(client, toSectorId, Number(req.params.id), ownerCheck.rows[0].display_name);
     }
 
     const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel, health, cycles, cyclesUpdatedAt } = await loadPilotLocation(client, req.params.id);
@@ -940,6 +1010,7 @@ router.post('/:gameKey/characters/:id/drift', authenticate, async (req, res) => 
     await markSectorVisited(client, req.params.id, nextSectorId);
     await client.query('UPDATE game_users SET last_played_at = NOW() WHERE id = $1', [req.params.id]);
     emitHaulonautSectorArrival(nextSectorId, { id: Number(req.params.id), display_name: ownerCheck.rows[0].display_name, is_npc: false });
+    await attachBuoysInSector(client, nextSectorId, Number(req.params.id), ownerCheck.rows[0].display_name);
 
     const { currentSector, connectedSectors, features, playersHere, credits, rations, fuel, health, cycles, cyclesUpdatedAt } = await loadPilotLocation(client, req.params.id);
 
@@ -1280,6 +1351,102 @@ router.post('/:gameKey/characters/:id/probes/:missionId/acknowledge', authentica
   } catch (err) {
     console.error('Error acknowledging probe report:', err);
     res.status(500).json({ message: 'Failed to acknowledge probe report' });
+  } finally {
+    client.release();
+  }
+});
+
+// ---- Magnetic Tracking Buoys (see migration 075, haulonaut_tracking_buoys) ----
+//
+// A buoy is bought like any other item (no restriction, unlike probes'
+// sells_probe) and sits in Cargo until dropped. Dropping just leaves it in
+// the character's current sector -- unlike a probe, nothing resolves it on
+// a scheduler tick; it waits, silently, until attachBuoysInSector (called
+// from /navigate and /drift) attaches it to whichever human pilot passes
+// through next.
+
+/**
+ * GET /api/games/:gameKey/characters/:id/buoys
+ * Every buoy this character owns and where it currently is -- see
+ * loadBuoys for how an attached buoy's location stays live.
+ */
+router.get('/:gameKey/characters/:id/buoys', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+
+    res.json({ buoys: await loadBuoys(client, req.params.id) });
+  } catch (err) {
+    console.error('Error loading buoys:', err);
+    res.status(500).json({ message: 'Failed to load buoys' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * POST /api/games/:gameKey/characters/:id/buoys/drop
+ * Consumes one Magnetic Tracking Buoy from Cargo and leaves it in the
+ * character's current sector. No location restriction beyond having
+ * somewhere to be -- unlike purchasing, this doesn't require standing at a
+ * trading outpost or planet.
+ */
+router.post('/:gameKey/characters/:id/buoys/drop', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const ownerCheck = await client.query(
+      `SELECT gu.id FROM game_users gu
+       JOIN game_instances gi ON gi.id = gu.game_instance_id
+       JOIN games g ON g.id = gi.game_id
+       WHERE gu.id = $1 AND gu.user_id = $2 AND g.game_key = $3`,
+      [req.params.id, req.user.id, req.params.gameKey]
+    );
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ message: 'Character not found' });
+    if (!(await isAlive(client, req.params.id))) return res.status(409).json({ message: 'This pilot is lost.' });
+
+    const pilotResult = await client.query('SELECT current_sector_id FROM haulonaut_pilots WHERE game_user_id = $1', [req.params.id]);
+    if (pilotResult.rowCount === 0) return res.status(409).json({ message: 'Character has no location' });
+    const sectorId = pilotResult.rows[0].current_sector_id;
+
+    const buoyItemResult = await client.query('SELECT id FROM haulonaut_items WHERE item_key = $1', ['tracking_buoy']);
+    if (buoyItemResult.rowCount === 0) return res.status(500).json({ message: 'Tracking buoy item is not configured' });
+    const buoyItemId = buoyItemResult.rows[0].id;
+
+    await client.beginTransaction();
+    // quantity >= 1 guard -- same race-safe pattern as probes/deploy above.
+    const takeItem = await client.query(
+      `UPDATE haulonaut_pilot_inventory SET quantity = quantity - 1 WHERE game_user_id = $1 AND item_id = $2 AND quantity >= 1`,
+      [req.params.id, buoyItemId]
+    );
+    if (!takeItem.affectedRows) {
+      await client.rollback();
+      return res.status(400).json({ message: 'No tracking buoys in cargo' });
+    }
+    await client.query(
+      'INSERT INTO haulonaut_tracking_buoys (owner_game_user_id, sector_id) VALUES ($1, $2)',
+      [req.params.id, sectorId]
+    );
+    await client.commit();
+
+    const inventory = await loadInventory(client, req.params.id);
+    const sectorResult = await client.query('SELECT sector_number FROM haulonaut_sectors WHERE id = $1', [sectorId]);
+
+    res.status(201).json({
+      message: `Dropped a Magnetic Tracking Buoy in Sector ${sectorResult.rows[0].sector_number}.`,
+      inventory,
+      buoys: await loadBuoys(client, req.params.id)
+    });
+  } catch (err) {
+    await client.rollback();
+    console.error('Error dropping tracking buoy:', err);
+    res.status(500).json({ message: 'Failed to drop tracking buoy' });
   } finally {
     client.release();
   }
