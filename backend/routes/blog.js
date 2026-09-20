@@ -61,6 +61,48 @@ const authenticate = async (req, res, next) => {
 // PUBLIC BLOG ENDPOINTS (no auth required)
 // =====================
 
+// Directory of blogs the author has opted in to list publicly. Only blogs
+// with at least one published (and unmoderated) post are included, so the
+// directory doesn't surface empty/placeholder blogs -- same pattern as
+// GET /api/gallery/public and GET /api/storefront/public.
+router.get('/public', async (req, res) => {
+  const client = await getClient();
+
+  try {
+    const result = await client.query(
+      `SELECT ub.blog_url, ub.blog_name, ub.updated_at,
+              u.handle, u.first_name, u.last_name, u.photo_path,
+              (SELECT COUNT(*) FROM blog_posts bp
+                 WHERE bp.user_id = ub.user_id AND bp.is_published = TRUE AND bp.is_hidden = FALSE) AS post_count
+       FROM user_blog ub
+       JOIN users u ON u.id = ub.user_id
+       WHERE ub.is_public = TRUE
+         AND EXISTS (SELECT 1 FROM blog_posts bp
+                     WHERE bp.user_id = ub.user_id AND bp.is_published = TRUE AND bp.is_hidden = FALSE)
+       ORDER BY ub.updated_at DESC`
+    );
+
+    res.json({
+      blogs: result.rows.map(row => ({
+        blog_url: row.blog_url,
+        blog_name: row.blog_name,
+        post_count: row.post_count,
+        artist: {
+          handle: row.handle,
+          first_name: row.first_name,
+          last_name: row.last_name,
+          photo_path: row.photo_path
+        }
+      }))
+    });
+  } catch (err) {
+    console.error('Error fetching public blog directory:', err);
+    res.status(500).json({ message: 'Failed to fetch blogs' });
+  } finally {
+    client.release();
+  }
+});
+
 // Get public blog by URL - returns blog info and all published posts
 router.get('/public/:blogUrl', async (req, res) => {
   const { blogUrl } = req.params;
@@ -176,7 +218,7 @@ router.get('/settings', authenticate, async (req, res) => {
 
   try {
     const result = await client.query(
-      `SELECT id, blog_url, blog_name, created_at
+      `SELECT id, blog_url, blog_name, is_public, created_at
        FROM user_blog
        WHERE user_id = $1`,
       [req.user.id]
@@ -197,7 +239,7 @@ router.get('/settings', authenticate, async (req, res) => {
 
 // Create blog settings
 router.post('/settings', authenticate, async (req, res) => {
-  const { blog_url, blog_name } = req.body;
+  const { blog_url, blog_name, is_public } = req.body;
   const client = await getClient();
 
   try {
@@ -214,6 +256,9 @@ router.post('/settings', authenticate, async (req, res) => {
     // Use handle as default blog_url if not provided
     const finalBlogUrl = blog_url || req.user.handle;
     const finalBlogName = blog_name || `${req.user.handle}'s Blog`;
+    // Defaults to discoverable unless the form explicitly says otherwise --
+    // matches the column's own DEFAULT TRUE (migration 076).
+    const finalIsPublic = is_public === undefined ? true : !!is_public;
 
     // Check uniqueness
     const urlCheck = await client.query(
@@ -226,13 +271,13 @@ router.post('/settings', authenticate, async (req, res) => {
     }
 
     await client.query(
-      `INSERT INTO user_blog (user_id, blog_url, blog_name)
-       VALUES ($1, $2, $3)`,
-      [req.user.id, finalBlogUrl, finalBlogName]
+      `INSERT INTO user_blog (user_id, blog_url, blog_name, is_public)
+       VALUES ($1, $2, $3, $4)`,
+      [req.user.id, finalBlogUrl, finalBlogName, finalIsPublic]
     );
 
     const result = await client.query(
-      'SELECT id, blog_url, blog_name, created_at FROM user_blog WHERE user_id = $1',
+      'SELECT id, blog_url, blog_name, is_public, created_at FROM user_blog WHERE user_id = $1',
       [req.user.id]
     );
 
@@ -250,7 +295,7 @@ router.post('/settings', authenticate, async (req, res) => {
 
 // Update blog settings
 router.put('/settings', authenticate, async (req, res) => {
-  const { blog_url, blog_name } = req.body;
+  const { blog_url, blog_name, is_public } = req.body;
   const client = await getClient();
 
   try {
@@ -269,8 +314,8 @@ router.put('/settings', authenticate, async (req, res) => {
     }
 
     const result = await client.query(
-      `UPDATE user_blog SET blog_url = $1, blog_name = $2 WHERE user_id = $3`,
-      [blog_url.trim(), blog_name || `${req.user.handle}'s Blog`, req.user.id]
+      `UPDATE user_blog SET blog_url = $1, blog_name = $2, is_public = $3 WHERE user_id = $4`,
+      [blog_url.trim(), blog_name || `${req.user.handle}'s Blog`, !!is_public, req.user.id]
     );
 
     if (result.affectedRows === 0) {
@@ -278,7 +323,7 @@ router.put('/settings', authenticate, async (req, res) => {
     }
 
     const updated = await client.query(
-      'SELECT id, blog_url, blog_name, created_at FROM user_blog WHERE user_id = $1',
+      'SELECT id, blog_url, blog_name, is_public, created_at FROM user_blog WHERE user_id = $1',
       [req.user.id]
     );
 

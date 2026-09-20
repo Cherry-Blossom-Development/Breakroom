@@ -7,6 +7,7 @@ const router = useRouter()
 
 const showcases = ref([])
 const galleries = ref([])
+const blogs = ref([])
 const loading = ref(true)
 const error = ref('')
 const searchQuery = ref('')
@@ -19,15 +20,18 @@ async function loadAll() {
   loading.value = true
   error.value = ''
   try {
-    const [galleryRes, storefrontRes] = await Promise.all([
+    const [galleryRes, storefrontRes, blogRes] = await Promise.all([
       fetch('/api/gallery/public', { credentials: 'include' }),
-      fetch('/api/storefront/public', { credentials: 'include' })
+      fetch('/api/storefront/public', { credentials: 'include' }),
+      fetch('/api/blog/public', { credentials: 'include' })
     ])
-    if (!galleryRes.ok || !storefrontRes.ok) throw new Error('Failed to load')
+    if (!galleryRes.ok || !storefrontRes.ok || !blogRes.ok) throw new Error('Failed to load')
     const galleryData = await galleryRes.json()
     const storefrontData = await storefrontRes.json()
+    const blogData = await blogRes.json()
     galleries.value = galleryData.galleries || []
     showcases.value = storefrontData.storefronts || []
+    blogs.value = blogData.blogs || []
   } catch (err) {
     error.value = 'Failed to load Discover content'
     console.error(err)
@@ -55,6 +59,12 @@ const filteredGalleries = computed(() => {
   return galleries.value.filter(g => matchesQuery(g.gallery_name, g.artist, q))
 })
 
+const filteredBlogs = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return blogs.value
+  return blogs.value.filter(b => matchesQuery(b.blog_name, b.artist, q))
+})
+
 function artistName(artist) {
   const { first_name, last_name, handle } = artist
   if (first_name || last_name) return `${first_name || ''} ${last_name || ''}`.trim()
@@ -76,12 +86,16 @@ function openShowcase(s) {
 function openGallery(g) {
   router.push(`/g/${g.gallery_url}`)
 }
+
+function openBlog(b) {
+  router.push(`/b/${b.blog_url}`)
+}
 </script>
 
 <template>
   <div class="page-container discover-page">
     <h1>Discover</h1>
-    <p class="page-subtitle">Browse art galleries and artist showcases people have made discoverable.</p>
+    <p class="page-subtitle">Browse artist showcases, galleries, and blogs people have made discoverable.</p>
 
     <input
       v-model="searchQuery"
@@ -162,6 +176,41 @@ function openGallery(g) {
                 <span class="artist-name">{{ artistName(gallery.artist) }}</span>
               </div>
               <span class="item-count">{{ gallery.artwork_count }} artwork{{ gallery.artwork_count === 1 ? '' : 's' }}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="discover-section">
+        <h2 class="section-heading">Blogs</h2>
+        <div v-if="filteredBlogs.length === 0" class="empty-state">
+          {{ blogs.length === 0 ? 'Nothing to discover yet.' : 'No blogs match your search.' }}
+        </div>
+        <div v-else class="discover-grid">
+          <div
+            v-for="blogEntry in filteredBlogs"
+            :key="blogEntry.blog_url"
+            class="discover-card"
+            tabindex="0"
+            role="button"
+            :aria-label="`Open ${blogEntry.blog_name} blog by ${artistName(blogEntry.artist)}, ${blogEntry.post_count} post${blogEntry.post_count === 1 ? '' : 's'}`"
+            @click="openBlog(blogEntry)"
+            @keydown.enter="openBlog(blogEntry)"
+            @keydown.space.prevent="openBlog(blogEntry)"
+          >
+            <div class="discover-cover" aria-hidden="true">
+              <div class="cover-placeholder">No preview</div>
+            </div>
+            <div class="discover-info" aria-hidden="true">
+              <h3 class="discover-name">{{ blogEntry.blog_name }}</h3>
+              <div class="discover-artist">
+                <div class="artist-avatar">
+                  <img v-if="getPhotoUrl(blogEntry.artist.photo_path)" :src="getPhotoUrl(blogEntry.artist.photo_path)" alt="" />
+                  <span v-else class="avatar-placeholder">{{ getInitial(blogEntry.artist) }}</span>
+                </div>
+                <span class="artist-name">{{ artistName(blogEntry.artist) }}</span>
+              </div>
+              <span class="item-count">{{ blogEntry.post_count }} post{{ blogEntry.post_count === 1 ? '' : 's' }}</span>
             </div>
           </div>
         </div>

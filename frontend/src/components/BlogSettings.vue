@@ -16,7 +16,10 @@ const closeBtn = ref(null)
 
 const form = ref({
   blog_url: '',
-  blog_name: ''
+  blog_name: '',
+  // Defaults to checked -- a brand-new blog (no settings row yet) is
+  // discoverable from the start unless the author unchecks it here.
+  is_public: true
 })
 
 const urlAvailable = ref(null)
@@ -63,6 +66,7 @@ async function fetchSettings() {
       if (data.settings) {
         form.value.blog_url = data.settings.blog_url
         form.value.blog_name = data.settings.blog_name
+        form.value.is_public = !!data.settings.is_public
       }
     }
   } catch (err) {
@@ -109,7 +113,8 @@ async function saveSettings() {
       credentials: 'include',
       body: JSON.stringify({
         blog_url: form.value.blog_url.trim(),
-        blog_name: form.value.blog_name.trim() || `${form.value.blog_url}'s Blog`
+        blog_name: form.value.blog_name.trim() || `${form.value.blog_url}'s Blog`,
+        is_public: form.value.is_public
       })
     })
 
@@ -176,6 +181,13 @@ function close() {
           <div v-else-if="urlAvailable === false" class="url-status taken">
             URL is already taken
           </div>
+        </div>
+
+        <div class="form-group">
+          <label class="checkbox-label">
+            <input type="checkbox" v-model="form.is_public" />
+            Make Discoverable
+          </label>
         </div>
 
         <div v-if="publicUrl" class="public-url-preview">
@@ -291,6 +303,19 @@ function close() {
 .form-group input:focus {
   outline: none;
   border-color: var(--color-accent);
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: auto;
 }
 
 .url-input-wrapper {
