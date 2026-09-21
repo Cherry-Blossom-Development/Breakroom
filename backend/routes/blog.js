@@ -93,10 +93,32 @@ function makeExcerpt(html, maxLen = 160) {
 // title + a short excerpt of the most recent qualifying post, so Discover
 // has something to actually show in a blog's preview slot (blogs have no
 // cover image the way galleries/showcases do).
+// Paginated (limit/offset) and searchable (q) -- see gallery.js's /public
+// for the same pattern applied to Discover's Galleries section.
 router.get('/public', async (req, res) => {
   const client = await getClient();
+  const limit = Math.min(parseInt(req.query.limit, 10) || 8, 48);
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+  const q = (req.query.q || '').trim();
 
   try {
+    const searchClause = q
+      ? `AND (ub.blog_name LIKE $1 OR u.handle LIKE $1 OR u.first_name LIKE $1 OR u.last_name LIKE $1)`
+      : '';
+    const searchParams = q ? [`%${q}%`] : [];
+    const nextIndex = searchParams.length + 1;
+
+    const countResult = await client.query(
+      `SELECT COUNT(*) AS total
+       FROM user_blog ub
+       JOIN users u ON u.id = ub.user_id
+       WHERE ub.is_public = TRUE
+         AND EXISTS (SELECT 1 FROM blog_posts bp
+                     WHERE bp.user_id = ub.user_id AND bp.is_published = TRUE AND bp.is_hidden = FALSE)
+         ${searchClause}`,
+      searchParams
+    );
+
     const result = await client.query(
       `SELECT ub.blog_url, ub.blog_name, ub.updated_at,
               u.handle, u.first_name, u.last_name, u.photo_path,
@@ -113,7 +135,10 @@ router.get('/public', async (req, res) => {
        WHERE ub.is_public = TRUE
          AND EXISTS (SELECT 1 FROM blog_posts bp
                      WHERE bp.user_id = ub.user_id AND bp.is_published = TRUE AND bp.is_hidden = FALSE)
-       ORDER BY ub.discover_activity_at DESC`
+         ${searchClause}
+       ORDER BY ub.discover_activity_at DESC
+       LIMIT $${nextIndex} OFFSET $${nextIndex + 1}`,
+      [...searchParams, limit, offset]
     );
 
     res.json({
@@ -129,7 +154,10 @@ router.get('/public', async (req, res) => {
           last_name: row.last_name,
           photo_path: row.photo_path
         }
-      }))
+      })),
+      total: countResult.rows[0].total,
+      limit,
+      offset
     });
   } catch (err) {
     console.error('Error fetching public blog directory:', err);

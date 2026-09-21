@@ -56,10 +56,36 @@ const DEFAULT_SECTIONS = [
 // GET /api/storefront/public  (no auth) — Discover directory of storefronts the
 // artist has opted in to list publicly. Only storefronts with a completed URL and
 // at least one item image are included, so the directory doesn't surface empty stores.
+// Paginated (limit/offset) and searchable (q) -- see gallery.js's /public for
+// the same pattern applied to Discover's Galleries section.
 router.get('/public', async (req, res) => {
   let client;
+  const limit = Math.min(parseInt(req.query.limit, 10) || 8, 48);
+  const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+  const q = (req.query.q || '').trim();
+
   try {
     client = await getClient();
+
+    const searchClause = q
+      ? `AND (us.page_title LIKE $1 OR u.handle LIKE $1 OR u.first_name LIKE $1 OR u.last_name LIKE $1)`
+      : '';
+    const searchParams = q ? [`%${q}%`] : [];
+    const nextIndex = searchParams.length + 1;
+
+    const countResult = await client.query(
+      `SELECT COUNT(*) AS total
+       FROM user_storefront us
+       JOIN users u ON u.id = us.user_id
+       WHERE us.is_public = TRUE
+         AND us.store_url IS NOT NULL
+         AND EXISTS (SELECT 1 FROM collection_items ci
+                     JOIN user_collections uc ON uc.id = ci.collection_id
+                     WHERE uc.user_id = us.user_id AND ci.image_path IS NOT NULL)
+         ${searchClause}`,
+      searchParams
+    );
+
     const result = await client.query(
       `SELECT us.store_url, us.page_title, us.updated_at,
               u.handle, u.first_name, u.last_name, u.photo_path,
@@ -77,7 +103,10 @@ router.get('/public', async (req, res) => {
          AND EXISTS (SELECT 1 FROM collection_items ci
                      JOIN user_collections uc ON uc.id = ci.collection_id
                      WHERE uc.user_id = us.user_id AND ci.image_path IS NOT NULL)
-       ORDER BY us.discover_activity_at DESC`
+         ${searchClause}
+       ORDER BY us.discover_activity_at DESC
+       LIMIT $${nextIndex} OFFSET $${nextIndex + 1}`,
+      [...searchParams, limit, offset]
     );
 
     res.json({
@@ -92,7 +121,10 @@ router.get('/public', async (req, res) => {
           last_name: row.last_name,
           photo_path: row.photo_path
         }
-      }))
+      })),
+      total: countResult.rows[0].total,
+      limit,
+      offset
     });
   } catch (err) {
     console.error('Error fetching public storefront directory:', err);

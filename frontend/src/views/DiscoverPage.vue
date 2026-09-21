@@ -1,69 +1,95 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { reactive, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import LoadingSpinner from '@/components/LoadingSpinner.vue'
 
 const router = useRouter()
 
-const showcases = ref([])
-const galleries = ref([])
-const blogs = ref([])
+// Each Discover section shows at most PAGE_SIZE items at a time (roughly
+// two rows at the grid's widest breakpoint -- 4 columns) instead of every
+// public gallery/showcase/blog on the site. "Load more" pages in the next
+// batch from the server rather than growing an already-fetched full list,
+// so this keeps working as the number of artists grows.
+const PAGE_SIZE = 8
+
+function createSection() {
+  return reactive({ items: [], total: 0, offset: 0, loadingMore: false })
+}
+
+const showcaseSection = createSection()
+const gallerySection = createSection()
+const blogSection = createSection()
+
 const loading = ref(true)
+const hasLoadedOnce = ref(false)
 const error = ref('')
 const searchQuery = ref('')
 
-onMounted(async () => {
-  await loadAll()
+let debounceTimer = null
+
+onMounted(() => {
+  loadAll()
 })
 
+onBeforeUnmount(() => {
+  clearTimeout(debounceTimer)
+})
+
+watch(searchQuery, () => {
+  clearTimeout(debounceTimer)
+  debounceTimer = setTimeout(loadAll, 350)
+})
+
+// Fetches one page for a section. `reset: true` replaces the list (a fresh
+// search or the initial load); `reset: false` appends the next page onto
+// what's already showing (a "Load more" click).
+async function loadSectionPage(state, url, key, { reset }) {
+  const offset = reset ? 0 : state.offset
+  const params = new URLSearchParams({ limit: PAGE_SIZE, offset })
+  const q = searchQuery.value.trim()
+  if (q) params.set('q', q)
+
+  const res = await fetch(`${url}?${params}`, { credentials: 'include' })
+  if (!res.ok) throw new Error(`Failed to load ${key}`)
+  const data = await res.json()
+  const items = data[key] || []
+  state.items = reset ? items : [...state.items, ...items]
+  state.total = data.total || 0
+  state.offset = offset + items.length
+}
+
+// Only the very first load shows the full-page spinner. Later calls (a
+// debounced search) fetch in the background and swap section contents in
+// place once done, so typing doesn't blank the whole page each time.
 async function loadAll() {
-  loading.value = true
+  if (!hasLoadedOnce.value) loading.value = true
   error.value = ''
   try {
-    const [galleryRes, storefrontRes, blogRes] = await Promise.all([
-      fetch('/api/gallery/public', { credentials: 'include' }),
-      fetch('/api/storefront/public', { credentials: 'include' }),
-      fetch('/api/blog/public', { credentials: 'include' })
+    await Promise.all([
+      loadSectionPage(showcaseSection, '/api/storefront/public', 'storefronts', { reset: true }),
+      loadSectionPage(gallerySection, '/api/gallery/public', 'galleries', { reset: true }),
+      loadSectionPage(blogSection, '/api/blog/public', 'blogs', { reset: true })
     ])
-    if (!galleryRes.ok || !storefrontRes.ok || !blogRes.ok) throw new Error('Failed to load')
-    const galleryData = await galleryRes.json()
-    const storefrontData = await storefrontRes.json()
-    const blogData = await blogRes.json()
-    galleries.value = galleryData.galleries || []
-    showcases.value = storefrontData.storefronts || []
-    blogs.value = blogData.blogs || []
   } catch (err) {
     error.value = 'Failed to load Discover content'
     console.error(err)
   } finally {
     loading.value = false
+    hasLoadedOnce.value = true
   }
 }
 
-function matchesQuery(name, artist, q) {
-  const artistName = `${artist.first_name || ''} ${artist.last_name || ''}`.toLowerCase()
-  return name.toLowerCase().includes(q) ||
-    artistName.includes(q) ||
-    artist.handle.toLowerCase().includes(q)
+async function loadMore(state, url, key) {
+  if (state.loadingMore || state.items.length >= state.total) return
+  state.loadingMore = true
+  try {
+    await loadSectionPage(state, url, key, { reset: false })
+  } catch (err) {
+    console.error(err)
+  } finally {
+    state.loadingMore = false
+  }
 }
-
-const filteredShowcases = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return showcases.value
-  return showcases.value.filter(s => matchesQuery(s.page_title || s.store_url, s.artist, q))
-})
-
-const filteredGalleries = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return galleries.value
-  return galleries.value.filter(g => matchesQuery(g.gallery_name, g.artist, q))
-})
-
-const filteredBlogs = computed(() => {
-  const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return blogs.value
-  return blogs.value.filter(b => matchesQuery(b.blog_name, b.artist, q))
-})
 
 function artistName(artist) {
   const { first_name, last_name, handle } = artist
@@ -111,114 +137,144 @@ function openBlog(b) {
     <template v-else>
       <section class="discover-section">
         <h2 class="section-heading">Showcases</h2>
-        <div v-if="filteredShowcases.length === 0" class="empty-state">
-          {{ showcases.length === 0 ? 'Nothing to discover yet.' : 'No showcases match your search.' }}
+        <div v-if="showcaseSection.items.length === 0" class="empty-state">
+          {{ searchQuery.trim() ? 'No showcases match your search.' : 'Nothing to discover yet.' }}
         </div>
-        <div v-else class="discover-grid">
-          <div
-            v-for="showcase in filteredShowcases"
-            :key="showcase.store_url"
-            class="discover-card"
-            tabindex="0"
-            role="button"
-            :aria-label="`Open ${showcase.page_title || showcase.store_url} showcase by ${artistName(showcase.artist)}, ${showcase.item_count} item${showcase.item_count === 1 ? '' : 's'}`"
-            @click="openShowcase(showcase)"
-            @keydown.enter="openShowcase(showcase)"
-            @keydown.space.prevent="openShowcase(showcase)"
-          >
-            <div class="discover-cover" aria-hidden="true">
-              <img v-if="showcase.cover_image_path" :src="getPhotoUrl(showcase.cover_image_path)" alt="" />
-              <div v-else class="cover-placeholder">No preview</div>
-            </div>
-            <div class="discover-info" aria-hidden="true">
-              <h3 class="discover-name">{{ showcase.page_title || showcase.store_url }}</h3>
-              <div class="discover-artist">
-                <div class="artist-avatar">
-                  <img v-if="getPhotoUrl(showcase.artist.photo_path)" :src="getPhotoUrl(showcase.artist.photo_path)" alt="" />
-                  <span v-else class="avatar-placeholder">{{ getInitial(showcase.artist) }}</span>
-                </div>
-                <span class="artist-name">{{ artistName(showcase.artist) }}</span>
+        <template v-else>
+          <div class="discover-grid">
+            <div
+              v-for="showcase in showcaseSection.items"
+              :key="showcase.store_url"
+              class="discover-card"
+              tabindex="0"
+              role="button"
+              :aria-label="`Open ${showcase.page_title || showcase.store_url} showcase by ${artistName(showcase.artist)}, ${showcase.item_count} item${showcase.item_count === 1 ? '' : 's'}`"
+              @click="openShowcase(showcase)"
+              @keydown.enter="openShowcase(showcase)"
+              @keydown.space.prevent="openShowcase(showcase)"
+            >
+              <div class="discover-cover" aria-hidden="true">
+                <img v-if="showcase.cover_image_path" :src="getPhotoUrl(showcase.cover_image_path)" alt="" />
+                <div v-else class="cover-placeholder">No preview</div>
               </div>
-              <span class="item-count">{{ showcase.item_count }} item{{ showcase.item_count === 1 ? '' : 's' }}</span>
+              <div class="discover-info" aria-hidden="true">
+                <h3 class="discover-name">{{ showcase.page_title || showcase.store_url }}</h3>
+                <div class="discover-artist">
+                  <div class="artist-avatar">
+                    <img v-if="getPhotoUrl(showcase.artist.photo_path)" :src="getPhotoUrl(showcase.artist.photo_path)" alt="" />
+                    <span v-else class="avatar-placeholder">{{ getInitial(showcase.artist) }}</span>
+                  </div>
+                  <span class="artist-name">{{ artistName(showcase.artist) }}</span>
+                </div>
+                <span class="item-count">{{ showcase.item_count }} item{{ showcase.item_count === 1 ? '' : 's' }}</span>
+              </div>
             </div>
           </div>
-        </div>
+          <button
+            v-if="showcaseSection.items.length < showcaseSection.total"
+            class="load-more-btn"
+            :disabled="showcaseSection.loadingMore"
+            @click="loadMore(showcaseSection, '/api/storefront/public', 'storefronts')"
+          >
+            {{ showcaseSection.loadingMore ? 'Loading...' : `Load more (${showcaseSection.total - showcaseSection.items.length} more)` }}
+          </button>
+        </template>
       </section>
 
       <section class="discover-section">
         <h2 class="section-heading">Galleries</h2>
-        <div v-if="filteredGalleries.length === 0" class="empty-state">
-          {{ galleries.length === 0 ? 'Nothing to discover yet.' : 'No galleries match your search.' }}
+        <div v-if="gallerySection.items.length === 0" class="empty-state">
+          {{ searchQuery.trim() ? 'No galleries match your search.' : 'Nothing to discover yet.' }}
         </div>
-        <div v-else class="discover-grid">
-          <div
-            v-for="gallery in filteredGalleries"
-            :key="gallery.gallery_url"
-            class="discover-card"
-            tabindex="0"
-            role="button"
-            :aria-label="`Open ${gallery.gallery_name} gallery by ${artistName(gallery.artist)}, ${gallery.artwork_count} artwork${gallery.artwork_count === 1 ? '' : 's'}`"
-            @click="openGallery(gallery)"
-            @keydown.enter="openGallery(gallery)"
-            @keydown.space.prevent="openGallery(gallery)"
-          >
-            <div class="discover-cover" aria-hidden="true">
-              <img v-if="gallery.cover_image_path" :src="getPhotoUrl(gallery.cover_image_path)" alt="" />
-              <div v-else class="cover-placeholder">No preview</div>
-            </div>
-            <div class="discover-info" aria-hidden="true">
-              <h3 class="discover-name">{{ gallery.gallery_name }}</h3>
-              <div class="discover-artist">
-                <div class="artist-avatar">
-                  <img v-if="getPhotoUrl(gallery.artist.photo_path)" :src="getPhotoUrl(gallery.artist.photo_path)" alt="" />
-                  <span v-else class="avatar-placeholder">{{ getInitial(gallery.artist) }}</span>
-                </div>
-                <span class="artist-name">{{ artistName(gallery.artist) }}</span>
+        <template v-else>
+          <div class="discover-grid">
+            <div
+              v-for="gallery in gallerySection.items"
+              :key="gallery.gallery_url"
+              class="discover-card"
+              tabindex="0"
+              role="button"
+              :aria-label="`Open ${gallery.gallery_name} gallery by ${artistName(gallery.artist)}, ${gallery.artwork_count} artwork${gallery.artwork_count === 1 ? '' : 's'}`"
+              @click="openGallery(gallery)"
+              @keydown.enter="openGallery(gallery)"
+              @keydown.space.prevent="openGallery(gallery)"
+            >
+              <div class="discover-cover" aria-hidden="true">
+                <img v-if="gallery.cover_image_path" :src="getPhotoUrl(gallery.cover_image_path)" alt="" />
+                <div v-else class="cover-placeholder">No preview</div>
               </div>
-              <span class="item-count">{{ gallery.artwork_count }} artwork{{ gallery.artwork_count === 1 ? '' : 's' }}</span>
+              <div class="discover-info" aria-hidden="true">
+                <h3 class="discover-name">{{ gallery.gallery_name }}</h3>
+                <div class="discover-artist">
+                  <div class="artist-avatar">
+                    <img v-if="getPhotoUrl(gallery.artist.photo_path)" :src="getPhotoUrl(gallery.artist.photo_path)" alt="" />
+                    <span v-else class="avatar-placeholder">{{ getInitial(gallery.artist) }}</span>
+                  </div>
+                  <span class="artist-name">{{ artistName(gallery.artist) }}</span>
+                </div>
+                <span class="item-count">{{ gallery.artwork_count }} artwork{{ gallery.artwork_count === 1 ? '' : 's' }}</span>
+              </div>
             </div>
           </div>
-        </div>
+          <button
+            v-if="gallerySection.items.length < gallerySection.total"
+            class="load-more-btn"
+            :disabled="gallerySection.loadingMore"
+            @click="loadMore(gallerySection, '/api/gallery/public', 'galleries')"
+          >
+            {{ gallerySection.loadingMore ? 'Loading...' : `Load more (${gallerySection.total - gallerySection.items.length} more)` }}
+          </button>
+        </template>
       </section>
 
       <section class="discover-section">
         <h2 class="section-heading">Blogs</h2>
-        <div v-if="filteredBlogs.length === 0" class="empty-state">
-          {{ blogs.length === 0 ? 'Nothing to discover yet.' : 'No blogs match your search.' }}
+        <div v-if="blogSection.items.length === 0" class="empty-state">
+          {{ searchQuery.trim() ? 'No blogs match your search.' : 'Nothing to discover yet.' }}
         </div>
-        <div v-else class="discover-grid">
-          <div
-            v-for="blogEntry in filteredBlogs"
-            :key="blogEntry.blog_url"
-            class="discover-card"
-            tabindex="0"
-            role="button"
-            :aria-label="`Open ${blogEntry.blog_name} blog by ${artistName(blogEntry.artist)}, ${blogEntry.post_count} post${blogEntry.post_count === 1 ? '' : 's'}${blogEntry.latest_post_title ? ', latest post ' + blogEntry.latest_post_title : ''}`"
-            @click="openBlog(blogEntry)"
-            @keydown.enter="openBlog(blogEntry)"
-            @keydown.space.prevent="openBlog(blogEntry)"
-          >
-            <div class="discover-cover blog-cover" aria-hidden="true">
-              <template v-if="blogEntry.latest_post_title">
-                <span class="blog-preview-label">Latest post</span>
-                <p class="blog-preview-title">{{ blogEntry.latest_post_title }}</p>
-                <p v-if="blogEntry.latest_post_excerpt" class="blog-preview-excerpt">{{ blogEntry.latest_post_excerpt }}</p>
-              </template>
-              <div v-else class="cover-placeholder">No preview</div>
-            </div>
-            <div class="discover-info" aria-hidden="true">
-              <h3 class="discover-name">{{ blogEntry.blog_name }}</h3>
-              <div class="discover-artist">
-                <div class="artist-avatar">
-                  <img v-if="getPhotoUrl(blogEntry.artist.photo_path)" :src="getPhotoUrl(blogEntry.artist.photo_path)" alt="" />
-                  <span v-else class="avatar-placeholder">{{ getInitial(blogEntry.artist) }}</span>
-                </div>
-                <span class="artist-name">{{ artistName(blogEntry.artist) }}</span>
+        <template v-else>
+          <div class="discover-grid">
+            <div
+              v-for="blogEntry in blogSection.items"
+              :key="blogEntry.blog_url"
+              class="discover-card"
+              tabindex="0"
+              role="button"
+              :aria-label="`Open ${blogEntry.blog_name} blog by ${artistName(blogEntry.artist)}, ${blogEntry.post_count} post${blogEntry.post_count === 1 ? '' : 's'}${blogEntry.latest_post_title ? ', latest post ' + blogEntry.latest_post_title : ''}`"
+              @click="openBlog(blogEntry)"
+              @keydown.enter="openBlog(blogEntry)"
+              @keydown.space.prevent="openBlog(blogEntry)"
+            >
+              <div class="discover-cover blog-cover" aria-hidden="true">
+                <template v-if="blogEntry.latest_post_title">
+                  <span class="blog-preview-label">Latest post</span>
+                  <p class="blog-preview-title">{{ blogEntry.latest_post_title }}</p>
+                  <p v-if="blogEntry.latest_post_excerpt" class="blog-preview-excerpt">{{ blogEntry.latest_post_excerpt }}</p>
+                </template>
+                <div v-else class="cover-placeholder">No preview</div>
               </div>
-              <span class="item-count">{{ blogEntry.post_count }} post{{ blogEntry.post_count === 1 ? '' : 's' }}</span>
+              <div class="discover-info" aria-hidden="true">
+                <h3 class="discover-name">{{ blogEntry.blog_name }}</h3>
+                <div class="discover-artist">
+                  <div class="artist-avatar">
+                    <img v-if="getPhotoUrl(blogEntry.artist.photo_path)" :src="getPhotoUrl(blogEntry.artist.photo_path)" alt="" />
+                    <span v-else class="avatar-placeholder">{{ getInitial(blogEntry.artist) }}</span>
+                  </div>
+                  <span class="artist-name">{{ artistName(blogEntry.artist) }}</span>
+                </div>
+                <span class="item-count">{{ blogEntry.post_count }} post{{ blogEntry.post_count === 1 ? '' : 's' }}</span>
+              </div>
             </div>
           </div>
-        </div>
+          <button
+            v-if="blogSection.items.length < blogSection.total"
+            class="load-more-btn"
+            :disabled="blogSection.loadingMore"
+            @click="loadMore(blogSection, '/api/blog/public', 'blogs')"
+          >
+            {{ blogSection.loadingMore ? 'Loading...' : `Load more (${blogSection.total - blogSection.items.length} more)` }}
+          </button>
+        </template>
       </section>
     </template>
   </div>
@@ -271,6 +327,27 @@ function openBlog(b) {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 20px;
+}
+
+.load-more-btn {
+  display: block;
+  margin: 16px auto 0;
+  padding: 8px 18px;
+  border-radius: var(--card-radius);
+  border: 1px solid var(--color-border);
+  background: var(--color-background-soft);
+  color: var(--color-text);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.load-more-btn:hover:not(:disabled) {
+  background: var(--color-background-mute);
+}
+
+.load-more-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
 }
 
 .discover-card {
