@@ -256,6 +256,34 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      // Project workspace: App.vue swaps the main sidebar for the
+      // workspace's own project menu on projectLayout routes.
+      path: '/projects/:id',
+      component: () => import('../views/ProjectWorkspacePage.vue'),
+      meta: { requiresAuth: true, projectLayout: true },
+      children: [
+        { path: '', name: 'projectWorkspace', redirect: to => ({ name: 'projectKanban', params: to.params }) },
+        {
+          path: 'kanban',
+          name: 'projectKanban',
+          component: () => import('../views/ProjectPage.vue'),
+          props: { embedded: true },
+        },
+        {
+          path: 'gantt',
+          name: 'projectGantt',
+          component: () => import('../views/ProjectChartPlaceholder.vue'),
+          meta: { title: 'GANTT Chart' },
+        },
+        {
+          path: 'burndown',
+          name: 'projectBurndown',
+          component: () => import('../views/ProjectChartPlaceholder.vue'),
+          meta: { title: 'Burndown Chart' },
+        },
+      ],
+    },
+    {
       path: '/user/:handle',
       name: 'publicProfile',
       component: () => import('../views/PublicProfilePage.vue'),
@@ -527,7 +555,7 @@ const FEATURE_ROUTES = {
   ],
   kanban: ['kanban'],
   tool_shed: ['toolShed'],
-  company_portal: ['aboutCompany', 'employment', 'helpDesk', 'companyPortal', 'companyDetail', 'projectDetail', 'projects'],
+  company_portal: ['aboutCompany', 'employment', 'helpDesk', 'companyPortal', 'companyDetail', 'projectDetail', 'projects', 'projectKanban', 'projectGantt', 'projectBurndown'],
   band_pages: ['bandPageSetup', 'bandDomainSetup'],
 }
 

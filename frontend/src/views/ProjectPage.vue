@@ -8,6 +8,12 @@ import LoadingSpinner from '../components/LoadingSpinner.vue'
 import RichTextEditor from '../components/RichTextEditor.vue'
 import { user } from '../stores/user'
 
+// embedded: rendered as the Kanban tab inside ProjectWorkspacePage, which
+// already shows the project title and its own Back button.
+const props = defineProps({
+  embedded: { type: Boolean, default: false }
+})
+
 const route = useRoute()
 const router = useRouter()
 
@@ -445,8 +451,8 @@ onMounted(async () => {
 
 <template>
   <div class="page-container project-page">
-    <header class="project-header">
-      <div>
+    <header class="project-header" :class="{ embedded: props.embedded }">
+      <div v-if="!props.embedded">
         <h1>{{ project?.title || 'Loading...' }}</h1>
         <p v-if="project" class="company-name">{{ project.company_name }}</p>
       </div>
@@ -454,7 +460,7 @@ onMounted(async () => {
         <button class="new-ticket-btn" @click="showNewTicketForm = true" :disabled="loading || error">
           + New Ticket
         </button>
-        <button @click="goBack" class="btn-secondary">Back</button>
+        <button v-if="!props.embedded" @click="goBack" class="btn-secondary">Back</button>
       </div>
     </header>
 
@@ -730,6 +736,10 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 1.5rem;
+}
+
+.project-header.embedded {
+  justify-content: flex-end;
 }
 
 .project-header h1 {

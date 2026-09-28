@@ -374,7 +374,10 @@ setInterval(() => {
       <button class="impersonation-stop" @click="stopImpersonation">Stop Impersonating</button>
     </div>
 
+    <!-- Project workspace routes (meta.projectLayout) replace the main
+         sidebar/tab bar with their own project menu -->
     <AppSidebar
+      v-if="!route.meta.projectLayout"
       :is-admin="isAdmin"
       :is-marketing="isMarketing"
       :visible="sidebarOpen"
@@ -384,7 +387,7 @@ setInterval(() => {
     />
 
     <!-- Tablet hamburger top bar -->
-    <div class="tablet-top-bar">
+    <div v-if="!route.meta.projectLayout" class="tablet-top-bar">
       <button
         class="hamburger-btn"
         @click="toggleSidebar"
@@ -401,11 +404,12 @@ setInterval(() => {
       <img src="/logo-192x192-no-text.png" alt="Prosaurus" class="tablet-logo" />
     </div>
 
-    <div class="app-content">
+    <div class="app-content" :class="{ 'project-layout': route.meta.projectLayout }">
       <RouterView />
     </div>
 
     <BottomTabBar
+      v-if="!route.meta.projectLayout"
       :is-admin="isAdmin"
       :is-marketing="isMarketing"
       @logout="logout"
@@ -635,6 +639,16 @@ body {
   .has-impersonation-banner .tablet-top-bar {
     top: 40px;
   }
+}
+
+/* Project workspace: no main sidebar, hamburger bar or bottom tab bar */
+.app-content.project-layout {
+  margin-left: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.has-impersonation-banner .app-content.project-layout {
+  padding-top: 40px;
 }
 
 .hamburger-btn {

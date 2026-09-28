@@ -140,7 +140,7 @@ onMounted(() => {
           <div class="project-main">
             <RouterLink :to="`/company/${proj.company_id}`" class="project-company">{{ proj.company_name }}</RouterLink>
             <div class="project-header">
-              <h3>{{ proj.title }}</h3>
+              <h3><RouterLink :to="`/projects/${proj.id}`" class="project-title-link">{{ proj.title }}</RouterLink></h3>
               <div class="project-badges">
                 <StatusBadge v-if="proj.is_default" color="purple" size="xs">Default</StatusBadge>
                 <StatusBadge :color="proj.is_public ? 'green' : 'orange'" soft size="xs">
@@ -278,6 +278,18 @@ onMounted(() => {
   margin: 0;
   color: var(--color-text);
   font-size: 1.1rem;
+}
+
+.project-title-link {
+  padding: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.project-title-link:hover {
+  background: none;
+  color: var(--color-accent);
+  text-decoration: underline;
 }
 
 .project-badges {
