@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getClient } = require('../utilities/db');
 const { sendMail } = require('../utilities/aws-ses-email');
+const { recordStatusChange } = require('../utilities/ticketStatusHistory');
 
 // IDs for filing anonymous support tickets
 const SUPPORT_COMPANY_ID = 1;   // Cherry Blossom Development LLC
@@ -36,6 +37,7 @@ router.post('/', async (req, res) => {
       `INSERT INTO ticket_projects (ticket_id, project_id) VALUES ($1, $2)`,
       [insert.insertId, SUPPORT_PROJECT_ID]
     );
+    await recordStatusChange(client, insert.insertId, null, 'open', SUPPORT_CREATOR_ID);
 
     // Email notification to admin
     const html = `

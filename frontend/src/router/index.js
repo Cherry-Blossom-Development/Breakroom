@@ -278,8 +278,7 @@ const router = createRouter({
         {
           path: 'gantt',
           name: 'projectGantt',
-          component: () => import('../views/ProjectChartPlaceholder.vue'),
-          meta: { title: 'GANTT Chart' },
+          component: () => import('../views/ProjectGanttPage.vue'),
         },
         {
           path: 'burndown',

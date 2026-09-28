@@ -6,6 +6,7 @@ const { extractToken } = require('../utilities/auth');
 const { getProjectDependencyEdges } = require('../utilities/ticketDependencies');
 const { isActiveEmployee, getTicketAccess } = require('../utilities/ticketAccess');
 const { parseEstimateHours } = require('../utilities/ticketEstimates');
+const { recordStatusChange, getProjectTicketTimeline } = require('../utilities/ticketStatusHistory');
 
 require('dotenv').config();
 
@@ -166,6 +167,8 @@ router.get('/:id', authenticate, async (req, res) => {
       project: projectResult.rows[0],
       tickets: ticketsResult.rows,
       dependencies: await getProjectDependencyEdges(client, id),
+      // [{ ticket_id, started_at, done_at }] from status history (GANTT/Burndown)
+      timeline: await getProjectTicketTimeline(client, id),
       is_employee: isEmployee
     });
   } catch (err) {
@@ -563,6 +566,7 @@ router.post('/:id/tickets', authenticate, async (req, res) => {
     );
 
     const ticketId = result.rows[0].id;
+    await recordStatusChange(client, ticketId, null, 'backlog', req.user.id);
 
     // Associate ticket ONLY with this specific project
     await client.query(

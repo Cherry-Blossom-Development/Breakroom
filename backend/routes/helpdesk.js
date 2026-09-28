@@ -6,6 +6,7 @@ const { extractToken } = require('../utilities/auth');
 const { getTicketDependencyEdges, wouldCreateCycle } = require('../utilities/ticketDependencies');
 const { CREATOR_STATUSES, isActiveEmployee, getTicketAccess } = require('../utilities/ticketAccess');
 const { parseEstimateHours } = require('../utilities/ticketEstimates');
+const { recordStatusChange } = require('../utilities/ticketStatusHistory');
 
 require('dotenv').config();
 
@@ -191,6 +192,7 @@ router.post('/tickets', authenticate, async (req, res) => {
     );
 
     const ticketId = result.rows[0].id;
+    await recordStatusChange(client, ticketId, null, result.rows[0].status, req.user.id);
 
     // Associate ticket with the company's default project
     await client.query(
@@ -289,6 +291,10 @@ router.put('/ticket/:id', authenticate, async (req, res) => {
       `UPDATE tickets SET ${updates.join(', ')} WHERE id = $${paramCount}`,
       values
     );
+
+    if (status !== undefined) {
+      await recordStatusChange(client, access.ticket.id, access.ticket.status, status, req.user.id);
+    }
 
     // Get updated ticket with all fields needed by mobile
     const result = await client.query(

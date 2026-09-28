@@ -21,10 +21,10 @@ async function isActiveEmployee(client, userId, companyId) {
 }
 
 // Returns null if the ticket doesn't exist, otherwise
-// { ticket: { id, company_id, creator_id }, isEmployee, isCreator, canView }.
+// { ticket: { id, company_id, creator_id, status }, isEmployee, isCreator, canView }.
 async function getTicketAccess(client, ticketId, userId) {
   const ticketResult = await client.query(
-    `SELECT t.id, t.company_id, t.creator_id,
+    `SELECT t.id, t.company_id, t.creator_id, t.status,
             EXISTS (
               SELECT 1 FROM ticket_projects tp
               JOIN projects p ON p.id = tp.project_id
