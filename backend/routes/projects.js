@@ -4,6 +4,8 @@ const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { getProjectDependencyEdges } = require('../utilities/ticketDependencies');
+const { isActiveEmployee, getTicketAccess } = require('../utilities/ticketAccess');
+const { parseEstimateHours } = require('../utilities/ticketEstimates');
 
 require('dotenv').config();
 
@@ -131,7 +133,7 @@ router.get('/:id', authenticate, async (req, res) => {
 
     const ticketsResult = await client.query(
       `SELECT t.id, t.company_id, t.creator_id, t.assigned_to, t.title, t.description, t.status, t.priority,
-              t.created_at, t.updated_at, t.resolved_at,
+              t.estimate_hours, t.created_at, t.updated_at, t.resolved_at,
               creator.handle as creator_handle, creator.first_name as creator_first_name,
               creator.last_name as creator_last_name,
               assignee.handle as assignee_handle, assignee.first_name as assignee_first_name,
@@ -370,6 +372,10 @@ router.post('/:projectId/tickets/:ticketId', authenticate, async (req, res) => {
       return res.status(404).json({ message: 'Project not found' });
     }
 
+    if (!(await isActiveEmployee(client, req.user.id, projectResult.rows[0].company_id))) {
+      return res.status(403).json({ message: 'Not authorized to change this project' });
+    }
+
     // Verify ticket exists and belongs to same company
     const ticketResult = await client.query(
       'SELECT company_id FROM tickets WHERE id = $1',
@@ -416,12 +422,16 @@ router.delete('/:projectId/tickets/:ticketId', authenticate, async (req, res) =>
   try {
     // Verify project exists
     const projectResult = await client.query(
-      'SELECT is_default FROM projects WHERE id = $1',
+      'SELECT is_default, company_id FROM projects WHERE id = $1',
       [projectId]
     );
 
     if (projectResult.rowCount === 0) {
       return res.status(404).json({ message: 'Project not found' });
+    }
+
+    if (!(await isActiveEmployee(client, req.user.id, projectResult.rows[0].company_id))) {
+      return res.status(403).json({ message: 'Not authorized to change this project' });
     }
 
     // Check how many projects this ticket belongs to
@@ -459,13 +469,23 @@ router.get('/ticket/:ticketId', authenticate, async (req, res) => {
   const client = await getClient();
 
   try {
+    const access = await getTicketAccess(client, ticketId, req.user.id);
+    if (!access) {
+      return res.status(404).json({ message: 'Ticket not found' });
+    }
+    if (!access.canView) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    // Non-employees only see the public / Help Desk projects the ticket is in
     const result = await client.query(
       `SELECT p.id, p.title, p.description, p.is_default, p.is_active, p.is_public
        FROM projects p
        JOIN ticket_projects tp ON p.id = tp.project_id
        WHERE tp.ticket_id = $1
+         AND ($2 = TRUE OR p.is_public = TRUE OR p.is_default = TRUE)
        ORDER BY p.is_default DESC, p.title`,
-      [ticketId]
+      [ticketId, access.isEmployee]
     );
 
     res.json({ projects: result.rows });
@@ -480,7 +500,7 @@ router.get('/ticket/:ticketId', authenticate, async (req, res) => {
 // Create a ticket for a specific project
 router.post('/:id/tickets', authenticate, async (req, res) => {
   const { id } = req.params;
-  const { title, description, priority } = req.body;
+  const { title, description, priority, estimate_hours } = req.body;
   const client = await getClient();
 
   try {
@@ -490,7 +510,7 @@ router.post('/:id/tickets', authenticate, async (req, res) => {
 
     // Get project and verify it exists
     const projectResult = await client.query(
-      'SELECT company_id, is_active FROM projects WHERE id = $1',
+      'SELECT company_id, is_active, is_public, is_default FROM projects WHERE id = $1',
       [id]
     );
 
@@ -504,17 +524,34 @@ router.post('/:id/tickets', authenticate, async (req, res) => {
       return res.status(400).json({ message: 'Cannot create tickets for inactive projects' });
     }
 
+    // Anyone may file into a public or Help Desk project (same rule as
+    // viewing it); private projects are employee-only. Estimates are an
+    // employee-only field, same as on update.
+    const isEmployee = await isActiveEmployee(client, req.user.id, project.company_id);
+    if (!isEmployee && !project.is_public && !project.is_default) {
+      return res.status(403).json({ message: 'Not authorized to create tickets in this project' });
+    }
+
+    let estimateHours = null;
+    if (isEmployee && estimate_hours !== undefined) {
+      const estimate = parseEstimateHours(estimate_hours);
+      if (estimate.error) {
+        return res.status(400).json({ message: estimate.error });
+      }
+      estimateHours = estimate.value;
+    }
+
     // Insert the ticket with 'backlog' status for project tickets
     await client.query(
-      `INSERT INTO tickets (company_id, creator_id, title, description, priority, status)
-       VALUES ($1, $2, $3, $4, $5, 'backlog')`,
-      [project.company_id, req.user.id, title.trim(), description || '', priority || 'medium']
+      `INSERT INTO tickets (company_id, creator_id, title, description, priority, estimate_hours, status)
+       VALUES ($1, $2, $3, $4, $5, $6, 'backlog')`,
+      [project.company_id, req.user.id, title.trim(), description || '', priority || 'medium', estimateHours]
     );
 
     // Get the inserted ticket with all fields needed by mobile
     const result = await client.query(
       `SELECT t.id, t.company_id, t.creator_id, t.assigned_to, t.title, t.description, t.status, t.priority,
-              t.created_at, t.updated_at, t.resolved_at,
+              t.estimate_hours, t.created_at, t.updated_at, t.resolved_at,
               creator.handle as creator_handle,
               creator.first_name as creator_first_name,
               creator.last_name as creator_last_name

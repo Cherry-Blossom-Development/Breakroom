@@ -419,11 +419,12 @@ onMounted(() => {
             <p v-else class="no-description">No description provided.</p>
           </div>
 
-          <div class="detail-actions" v-if="selectedTicket.status !== 'closed'">
+          <!-- Employees can move tickets freely; a customer can only resolve/close their own -->
+          <div class="detail-actions" v-if="selectedTicket.status !== 'closed' && (isEmployee || selectedTicket.creator_handle === user.username)">
             <h3>Update Status</h3>
             <div class="status-buttons">
               <button
-                v-if="selectedTicket.status === 'open' || selectedTicket.status === 'backlog'"
+                v-if="isEmployee && (selectedTicket.status === 'open' || selectedTicket.status === 'backlog')"
                 @click="updateTicketStatus(selectedTicket.id, 'in_progress')"
                 class="btn-status in-progress"
               >

@@ -28,7 +28,8 @@ const showNewTicketForm = ref(false)
 const newTicket = ref({
   title: '',
   description: '',
-  priority: 'medium'
+  priority: 'medium',
+  estimate_hours: ''
 })
 const submitting = ref(false)
 
@@ -265,6 +266,52 @@ async function removeDependency(dependsOnId) {
   }
 }
 
+// ---- Time estimates (migration 080), in hours; employees set them ----
+// DECIMAL comes back from MySQL as a string ("4.00")
+function formatEstimate(hours) {
+  if (hours === null || hours === undefined || hours === '') return ''
+  return `${Number(hours)}h`
+}
+
+const estimateInput = ref('')
+const estimateError = ref('')
+const savingEstimate = ref(false)
+
+async function saveEstimate() {
+  const ticket = selectedTicket.value
+  if (!ticket) return
+  const current = ticket.estimate_hours === null ? '' : String(Number(ticket.estimate_hours))
+  if (String(estimateInput.value) === current) return
+
+  savingEstimate.value = true
+  estimateError.value = ''
+  try {
+    const res = await authFetch(`/api/helpdesk/ticket/${ticket.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ estimate_hours: estimateInput.value === '' ? null : estimateInput.value })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Failed to save estimate')
+    ticket.estimate_hours = data.ticket.estimate_hours
+    const boardTicket = ticketsById.value.get(ticket.id)
+    if (boardTicket) boardTicket.estimate_hours = data.ticket.estimate_hours
+  } catch (err) {
+    estimateError.value = err.message
+  } finally {
+    savingEstimate.value = false
+  }
+}
+
+// Status changes: employees can make any move; a non-employee who created
+// the ticket may only resolve or close it (mirrors PUT /api/helpdesk/ticket).
+function allowedTransitions(ticket) {
+  const transitions = getAvailableTransitions(ticket.status)
+  if (isEmployee.value) return transitions
+  if (ticket.creator_handle === user.username) return transitions.filter(s => s === 'resolved' || s === 'closed')
+  return []
+}
+
 // Jump to a linked ticket if it's on this board (it may be in another project)
 function openLinkedTicket(id) {
   const ticket = ticketsById.value.get(id)
@@ -322,7 +369,10 @@ async function createTicket() {
       body: JSON.stringify({
         title: newTicket.value.title,
         description: newTicket.value.description,
-        priority: newTicket.value.priority
+        priority: newTicket.value.priority,
+        ...(isEmployee.value && newTicket.value.estimate_hours !== ''
+          ? { estimate_hours: newTicket.value.estimate_hours }
+          : {})
       })
     })
 
@@ -331,7 +381,7 @@ async function createTicket() {
     }
 
     // Reset form and refresh project data
-    newTicket.value = { title: '', description: '', priority: 'medium' }
+    newTicket.value = { title: '', description: '', priority: 'medium', estimate_hours: '' }
     showNewTicketForm.value = false
     await fetchProject()
   } catch (err) {
@@ -398,6 +448,8 @@ function selectTicket(ticket) {
   editingTicket.value = false
   newDependencyId.value = ''
   dependencyError.value = ''
+  estimateInput.value = ticket.estimate_hours === null || ticket.estimate_hours === undefined ? '' : String(Number(ticket.estimate_hours))
+  estimateError.value = ''
   fetchComments(ticket.id)
 }
 
@@ -636,6 +688,19 @@ onMounted(async () => {
             </select>
           </div>
 
+          <div v-if="isEmployee" class="form-group">
+            <label for="estimate">Estimate (hours, optional)</label>
+            <input
+              id="estimate"
+              v-model="newTicket.estimate_hours"
+              type="number"
+              min="0.25"
+              max="9999"
+              step="0.25"
+              placeholder="e.g. 4"
+            />
+          </div>
+
           <div class="modal-actions">
             <button type="submit" class="btn-primary" :disabled="submitting">
               {{ submitting ? 'Creating...' : 'Create Ticket' }}
@@ -676,9 +741,29 @@ onMounted(async () => {
             <p><strong>Created:</strong> {{ formatDate(selectedTicket.created_at) }}</p>
             <p v-if="selectedTicket.resolved_at"><strong>Resolved:</strong> {{ formatDate(selectedTicket.resolved_at) }}</p>
             <p><strong>Assigned to:</strong> {{ getAssigneeName(selectedTicket) }}</p>
+            <p v-if="!isEmployee"><strong>Estimate:</strong> {{ formatEstimate(selectedTicket.estimate_hours) || 'Not estimated' }}</p>
           </div>
 
-          <div class="detail-assign">
+          <div v-if="isEmployee" class="detail-estimate">
+            <label for="estimate-input"><strong>Estimate:</strong></label>
+            <input
+              id="estimate-input"
+              v-model="estimateInput"
+              type="number"
+              min="0.25"
+              max="9999"
+              step="0.25"
+              placeholder="Not estimated"
+              :disabled="savingEstimate"
+              @change="saveEstimate"
+              @keydown.enter.prevent="saveEstimate"
+            />
+            <span class="estimate-unit">hours</span>
+            <span v-if="savingEstimate" class="estimate-status">Saving...</span>
+          </div>
+          <p v-if="estimateError" class="dependency-error">{{ estimateError }}</p>
+
+          <div v-if="isEmployee" class="detail-assign">
             <label for="assign-select"><strong>Assign to:</strong></label>
             <select
               id="assign-select"
@@ -698,11 +783,11 @@ onMounted(async () => {
             <p v-else class="no-description">No description provided.</p>
           </div>
 
-          <div class="detail-actions" v-if="getAvailableTransitions(selectedTicket.status).length > 0">
+          <div class="detail-actions" v-if="allowedTransitions(selectedTicket).length > 0">
             <h3>Move to</h3>
             <div class="status-buttons">
               <button
-                v-for="nextStatus in getAvailableTransitions(selectedTicket.status)"
+                v-for="nextStatus in allowedTransitions(selectedTicket)"
                 :key="nextStatus"
                 @click="updateTicketStatus(selectedTicket.id, nextStatus)"
                 class="btn-status"
@@ -892,6 +977,7 @@ onMounted(async () => {
           group="tickets"
           item-key="id"
           class="ticket-list"
+          :disabled="!isEmployee"
           :data-status="status"
           @change="(e) => onDragChange(e, status)"
         >
@@ -903,9 +989,16 @@ onMounted(async () => {
             >
               <div class="ticket-header">
                 <span class="ticket-id">#{{ ticket.id }}</span>
-                <StatusBadge :color="priorityColor[ticket.priority]" size="xs">
-                  {{ ticket.priority }}
-                </StatusBadge>
+                <span class="ticket-header-right">
+                  <span
+                    v-if="ticket.estimate_hours !== null && ticket.estimate_hours !== undefined"
+                    class="ticket-estimate"
+                    :title="`Estimate: ${formatEstimate(ticket.estimate_hours)}`"
+                  >{{ formatEstimate(ticket.estimate_hours) }}</span>
+                  <StatusBadge :color="priorityColor[ticket.priority]" size="xs">
+                    {{ ticket.priority }}
+                  </StatusBadge>
+                </span>
               </div>
               <h4 class="ticket-title">{{ ticket.title }}</h4>
               <div
@@ -1602,6 +1695,46 @@ onMounted(async () => {
 .btn-sm {
   padding: 6px 14px;
   font-size: 0.85rem;
+}
+
+/* Estimates */
+.ticket-header-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ticket-estimate {
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--color-background-soft);
+  border: 1px solid var(--color-border);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.detail-estimate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.detail-estimate input {
+  width: 90px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background-card);
+  color: var(--color-text);
+  font-size: 0.875rem;
+}
+
+.estimate-unit,
+.estimate-status {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
 }
 
 /* Dependencies */

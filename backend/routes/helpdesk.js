@@ -4,6 +4,8 @@ const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { getTicketDependencyEdges, wouldCreateCycle } = require('../utilities/ticketDependencies');
+const { CREATOR_STATUSES, isActiveEmployee, getTicketAccess } = require('../utilities/ticketAccess');
+const { parseEstimateHours } = require('../utilities/ticketEstimates');
 
 require('dotenv').config();
 
@@ -118,8 +120,16 @@ router.get('/ticket/:id', authenticate, async (req, res) => {
   const client = await getClient();
 
   try {
+    const access = await getTicketAccess(client, id, req.user.id);
+    if (!access) {
+      return res.status(404).json({ message: 'Ticket not found' });
+    }
+    if (!access.canView) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
     const result = await client.query(
-      `SELECT t.id, t.title, t.description, t.status, t.priority,
+      `SELECT t.id, t.title, t.description, t.status, t.priority, t.estimate_hours,
               t.created_at, t.updated_at, t.resolved_at, t.company_id,
               c.name as company_name,
               creator.id as creator_id, creator.handle as creator_handle,
@@ -201,14 +211,32 @@ router.post('/tickets', authenticate, async (req, res) => {
 // Update a ticket
 router.put('/ticket/:id', authenticate, async (req, res) => {
   const { id } = req.params;
-  const { title, description, status, priority, assigned_to } = req.body;
+  const { title, description, status, priority, assigned_to, estimate_hours } = req.body;
   const client = await getClient();
 
   try {
-    // Check if ticket exists
-    const check = await client.query('SELECT id, creator_id FROM tickets WHERE id = $1', [id]);
-    if (check.rowCount === 0) {
+    // Employees of the ticket's company can change anything; a non-employee
+    // creator can only edit their own ticket's text/priority and mark it
+    // resolved/closed; everyone else is refused (see utilities/ticketAccess.js).
+    const access = await getTicketAccess(client, id, req.user.id);
+    if (!access) {
       return res.status(404).json({ message: 'Ticket not found' });
+    }
+    if (!access.isEmployee) {
+      if (!access.isCreator) {
+        return res.status(403).json({ message: 'Not authorized to update this ticket' });
+      }
+      if (assigned_to !== undefined || estimate_hours !== undefined) {
+        return res.status(403).json({ message: 'Only company employees can assign or estimate tickets' });
+      }
+      if (status !== undefined && !CREATOR_STATUSES.includes(status)) {
+        return res.status(403).json({ message: 'Only company employees can move tickets to that status' });
+      }
+    }
+
+    // An assignee must be an active employee of the ticket's company
+    if (assigned_to && !(await isActiveEmployee(client, assigned_to, access.ticket.company_id))) {
+      return res.status(400).json({ message: 'Assignee must be an active employee of this company' });
     }
 
     // Build update query dynamically
@@ -243,6 +271,14 @@ router.put('/ticket/:id', authenticate, async (req, res) => {
       updates.push(`assigned_to = $${paramCount++}`);
       values.push(assigned_to || null);
     }
+    if (estimate_hours !== undefined) {
+      const estimate = parseEstimateHours(estimate_hours);
+      if (estimate.error) {
+        return res.status(400).json({ message: estimate.error });
+      }
+      updates.push(`estimate_hours = $${paramCount++}`);
+      values.push(estimate.value);
+    }
 
     if (updates.length === 0) {
       return res.status(400).json({ message: 'No updates provided' });
@@ -257,7 +293,7 @@ router.put('/ticket/:id', authenticate, async (req, res) => {
     // Get updated ticket with all fields needed by mobile
     const result = await client.query(
       `SELECT t.id, t.company_id, t.creator_id, t.assigned_to, t.title, t.description, t.status, t.priority,
-              t.created_at, t.updated_at, t.resolved_at,
+              t.estimate_hours, t.created_at, t.updated_at, t.resolved_at,
               creator.handle as creator_handle, creator.first_name as creator_first_name,
               creator.last_name as creator_last_name,
               assignee.handle as assignee_handle, assignee.first_name as assignee_first_name,
@@ -283,13 +319,8 @@ router.put('/ticket/:id', authenticate, async (req, res) => {
 // touching the ticket (see utilities/ticketDependencies.js) so the client
 // can swap in the fresh set without refetching the whole board.
 async function requireTicketEmployee(client, ticketId, userId) {
-  const result = await client.query(
-    `SELECT t.id, t.company_id FROM tickets t
-     JOIN employees e ON e.company_id = t.company_id AND e.user_id = $2 AND e.status = 'active'
-     WHERE t.id = $1`,
-    [ticketId, userId]
-  );
-  return result.rows[0] || null;
+  const access = await getTicketAccess(client, ticketId, userId);
+  return access?.isEmployee ? access.ticket : null;
 }
 
 // Add a dependency: :id can't finish until depends_on_ticket_id does
@@ -376,6 +407,14 @@ router.get('/ticket/:ticketId/comments', authenticate, async (req, res) => {
   const client = await getClient();
 
   try {
+    const access = await getTicketAccess(client, ticketId, req.user.id);
+    if (!access) {
+      return res.status(404).json({ message: 'Ticket not found' });
+    }
+    if (!access.canView) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
     const result = await client.query(
       `SELECT tc.id, tc.ticket_id, tc.user_id, tc.content, tc.is_deleted,
               tc.created_at, tc.updated_at, u.handle
@@ -406,10 +445,12 @@ router.post('/ticket/:ticketId/comments', authenticate, async (req, res) => {
       return res.status(400).json({ message: 'Content is required' });
     }
 
-    // Verify ticket exists
-    const ticketCheck = await client.query('SELECT id FROM tickets WHERE id = $1', [ticketId]);
-    if (ticketCheck.rowCount === 0) {
+    const access = await getTicketAccess(client, ticketId, req.user.id);
+    if (!access) {
       return res.status(404).json({ message: 'Ticket not found' });
+    }
+    if (!access.canView) {
+      return res.status(403).json({ message: 'Access denied' });
     }
 
     await client.query(
