@@ -68,6 +68,35 @@ router.get('/company/:companyId', authenticate, async (req, res) => {
   }
 });
 
+// Get all projects across every company the user is an active employee of
+// (the sidebar's cross-company Projects page). Employees see private
+// projects too, same as GET /company/:companyId does for its employees.
+router.get('/my/list', authenticate, async (req, res) => {
+  const client = await getClient();
+
+  try {
+    const result = await client.query(
+      `SELECT p.id, p.title, p.description, p.is_default, p.is_active, p.is_public,
+              p.company_id, p.created_at, p.updated_at,
+              c.name as company_name,
+              (SELECT COUNT(*) FROM ticket_projects tp WHERE tp.project_id = p.id) as ticket_count
+       FROM projects p
+       JOIN companies c ON p.company_id = c.id
+       JOIN employees e ON e.company_id = p.company_id
+       WHERE e.user_id = $1 AND e.status = 'active'
+       ORDER BY p.is_active DESC, c.name, p.is_default DESC, p.title`,
+      [req.user.id]
+    );
+
+    res.json({ projects: result.rows });
+  } catch (err) {
+    console.error('Error fetching user projects:', err);
+    res.status(500).json({ message: 'Failed to fetch projects' });
+  } finally {
+    client.release();
+  }
+});
+
 // Get a single project with its tickets
 router.get('/:id', authenticate, async (req, res) => {
   const { id } = req.params;

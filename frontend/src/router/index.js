@@ -250,6 +250,12 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: '/projects',
+      name: 'projects',
+      component: () => import('../views/ProjectsPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
       path: '/user/:handle',
       name: 'publicProfile',
       component: () => import('../views/PublicProfilePage.vue'),
@@ -521,7 +527,7 @@ const FEATURE_ROUTES = {
   ],
   kanban: ['kanban'],
   tool_shed: ['toolShed'],
-  company_portal: ['aboutCompany', 'employment', 'helpDesk', 'companyPortal', 'companyDetail', 'projectDetail'],
+  company_portal: ['aboutCompany', 'employment', 'helpDesk', 'companyPortal', 'companyDetail', 'projectDetail', 'projects'],
   band_pages: ['bandPageSetup', 'bandDomainSetup'],
 }
 

@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
+import { getProjectHomepageLink as projectHomepageLink } from '../utilities/projectLinks'
 import StatusBadge from '../components/StatusBadge.vue'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
 import RichTextEditor from '../components/RichTextEditor.vue'
@@ -668,12 +669,8 @@ async function toggleProjectStatus(project) {
 }
 
 function getProjectHomepageLink(project) {
-  // Default Help Desk project goes to /help-desk
-  if (project.is_default) {
-    return '/help-desk'
-  }
-  // Other projects go to /project/:id
-  return `/project/${project.id}`
+  // GET /api/projects/company/:id doesn't return company_id per row
+  return projectHomepageLink({ ...project, company_id: Number(route.params.id) })
 }
 
 // Check if a project has an existing shortcut
