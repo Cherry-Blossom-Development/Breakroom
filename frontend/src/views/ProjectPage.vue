@@ -143,11 +143,132 @@ async function fetchProject() {
     const data = await res.json()
     project.value = data.project
     tickets.value = data.tickets
+    dependencies.value = data.dependencies || []
+    isEmployee.value = !!data.is_employee
   } catch (err) {
     error.value = err.message
   } finally {
     loading.value = false
   }
+}
+
+// ---- Ticket dependencies (migration 079) ----
+// Edges touching this project's tickets: { ticket_id, depends_on_ticket_id,
+// ticket_title/status, depends_on_title/status }. Either end may be in
+// another project of the same company.
+const dependencies = ref([])
+const isEmployee = ref(false)
+const newDependencyId = ref('')
+const dependencyError = ref('')
+const savingDependency = ref(false)
+
+// Prefer the board's live status (it changes on drag/transition) over the
+// status captured in the edge when the board loaded.
+const ticketsById = computed(() => new Map(tickets.value.map(t => [t.id, t])))
+function liveStatus(id, fallback) {
+  return ticketsById.value.get(id)?.status ?? fallback
+}
+
+const isDone = (status) => status === 'resolved' || status === 'closed'
+
+// ticket id -> ids of its unfinished dependencies (for the card's Blocked chip)
+const openBlockersByTicket = computed(() => {
+  const map = {}
+  for (const d of dependencies.value) {
+    if (isDone(liveStatus(d.depends_on_ticket_id, d.depends_on_status))) continue
+    ;(map[d.ticket_id] ||= []).push(d.depends_on_ticket_id)
+  }
+  return map
+})
+
+const selectedDependsOn = computed(() => {
+  if (!selectedTicket.value) return []
+  return dependencies.value
+    .filter(d => d.ticket_id === selectedTicket.value.id)
+    .map(d => ({ id: d.depends_on_ticket_id, title: d.depends_on_title, status: liveStatus(d.depends_on_ticket_id, d.depends_on_status) }))
+})
+
+const selectedBlocking = computed(() => {
+  if (!selectedTicket.value) return []
+  return dependencies.value
+    .filter(d => d.depends_on_ticket_id === selectedTicket.value.id)
+    .map(d => ({ id: d.ticket_id, title: d.ticket_title, status: liveStatus(d.ticket_id, d.ticket_status) }))
+})
+
+// Tickets on this board the selected ticket could depend on: not itself,
+// not already a dependency, and not anything that (as far as this board
+// knows) already depends on it -- that would be a loop. The server
+// re-checks loops across the whole company.
+const dependencyCandidates = computed(() => {
+  const sel = selectedTicket.value
+  if (!sel) return []
+  const dependents = new Set([sel.id])
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const d of dependencies.value) {
+      if (dependents.has(d.depends_on_ticket_id) && !dependents.has(d.ticket_id)) {
+        dependents.add(d.ticket_id)
+        grew = true
+      }
+    }
+  }
+  const already = new Set(selectedDependsOn.value.map(d => d.id))
+  return tickets.value
+    .filter(t => !dependents.has(t.id) && !already.has(t.id))
+    .sort((a, b) => a.id - b.id)
+})
+
+// Swap in the server's fresh edge set for one ticket
+function replaceTicketEdges(ticketId, edges) {
+  dependencies.value = [
+    ...dependencies.value.filter(d => d.ticket_id !== ticketId && d.depends_on_ticket_id !== ticketId),
+    ...edges
+  ]
+}
+
+async function addDependency() {
+  const ticketId = selectedTicket.value?.id
+  if (!ticketId || !newDependencyId.value) return
+  savingDependency.value = true
+  dependencyError.value = ''
+  try {
+    const res = await authFetch(`/api/helpdesk/ticket/${ticketId}/dependencies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ depends_on_ticket_id: parseInt(newDependencyId.value) })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Failed to add dependency')
+    replaceTicketEdges(ticketId, data.dependencies)
+    newDependencyId.value = ''
+  } catch (err) {
+    dependencyError.value = err.message
+  } finally {
+    savingDependency.value = false
+  }
+}
+
+async function removeDependency(dependsOnId) {
+  const ticketId = selectedTicket.value?.id
+  if (!ticketId) return
+  dependencyError.value = ''
+  try {
+    const res = await authFetch(`/api/helpdesk/ticket/${ticketId}/dependencies/${dependsOnId}`, {
+      method: 'DELETE'
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Failed to remove dependency')
+    replaceTicketEdges(ticketId, data.dependencies)
+  } catch (err) {
+    dependencyError.value = err.message
+  }
+}
+
+// Jump to a linked ticket if it's on this board (it may be in another project)
+function openLinkedTicket(id) {
+  const ticket = ticketsById.value.get(id)
+  if (ticket) selectTicket(ticket)
 }
 
 async function fetchEmployees() {
@@ -275,11 +396,15 @@ async function onDragChange(event, toStatus) {
 function selectTicket(ticket) {
   selectedTicket.value = { ...ticket }
   editingTicket.value = false
+  newDependencyId.value = ''
+  dependencyError.value = ''
   fetchComments(ticket.id)
 }
 
 function closeDetail() {
   selectedTicket.value = null
+  newDependencyId.value = ''
+  dependencyError.value = ''
   editingTicket.value = false
   ticketComments.value = []
   commentText.value = ''
@@ -588,6 +713,61 @@ onMounted(async () => {
             </div>
           </div>
 
+          <div class="detail-dependencies">
+            <h3>Depends on</h3>
+            <ul v-if="selectedDependsOn.length > 0" class="dependency-list">
+              <li v-for="dep in selectedDependsOn" :key="dep.id" class="dependency-item">
+                <button
+                  class="dependency-link"
+                  :disabled="!ticketsById.has(dep.id)"
+                  :title="ticketsById.has(dep.id) ? 'Open ticket' : 'In another project'"
+                  @click="openLinkedTicket(dep.id)"
+                >
+                  <span class="dependency-id">#{{ dep.id }}</span> {{ dep.title }}
+                </button>
+                <StatusBadge :color="statusColor[dep.status]" soft size="xs">{{ statusLabels[dep.status] || dep.status }}</StatusBadge>
+                <button
+                  v-if="isEmployee"
+                  class="dependency-remove"
+                  :aria-label="`Remove dependency on #${dep.id}`"
+                  title="Remove dependency"
+                  @click="removeDependency(dep.id)"
+                >&times;</button>
+              </li>
+            </ul>
+            <p v-else class="no-dependencies">No dependencies.</p>
+
+            <div v-if="isEmployee" class="dependency-add">
+              <select v-model="newDependencyId" aria-label="Add a dependency">
+                <option value="">Add a ticket this depends on...</option>
+                <option v-for="t in dependencyCandidates" :key="t.id" :value="t.id">
+                  #{{ t.id }} {{ t.title }} ({{ statusLabels[t.status] || t.status }})
+                </option>
+              </select>
+              <button class="btn-primary btn-sm" :disabled="!newDependencyId || savingDependency" @click="addDependency">
+                {{ savingDependency ? 'Adding...' : 'Add' }}
+              </button>
+            </div>
+            <p v-if="dependencyError" class="dependency-error">{{ dependencyError }}</p>
+
+            <template v-if="selectedBlocking.length > 0">
+              <h3 class="blocking-heading">Blocking</h3>
+              <ul class="dependency-list">
+                <li v-for="dep in selectedBlocking" :key="dep.id" class="dependency-item">
+                  <button
+                    class="dependency-link"
+                    :disabled="!ticketsById.has(dep.id)"
+                    :title="ticketsById.has(dep.id) ? 'Open ticket' : 'In another project'"
+                    @click="openLinkedTicket(dep.id)"
+                  >
+                    <span class="dependency-id">#{{ dep.id }}</span> {{ dep.title }}
+                  </button>
+                  <StatusBadge :color="statusColor[dep.status]" soft size="xs">{{ statusLabels[dep.status] || dep.status }}</StatusBadge>
+                </li>
+              </ul>
+            </template>
+          </div>
+
           <div class="detail-comments">
             <h3>Comments ({{ ticketComments.filter(c => !c.is_deleted).length }})</h3>
 
@@ -728,6 +908,13 @@ onMounted(async () => {
                 </StatusBadge>
               </div>
               <h4 class="ticket-title">{{ ticket.title }}</h4>
+              <div
+                v-if="openBlockersByTicket[ticket.id]"
+                class="ticket-blocked"
+                :title="`Waiting on ${openBlockersByTicket[ticket.id].map(id => '#' + id).join(', ')}`"
+              >
+                Blocked by {{ openBlockersByTicket[ticket.id].map(id => '#' + id).join(', ') }}
+              </div>
               <div class="ticket-footer">
                 <span class="ticket-creator">{{ getCreatorName(ticket) }}</span>
                 <span v-if="ticket.assignee_handle" class="ticket-assignee">{{ getAssigneeName(ticket) }}</span>
@@ -1415,5 +1602,121 @@ onMounted(async () => {
 .btn-sm {
   padding: 6px 14px;
   font-size: 0.85rem;
+}
+
+/* Dependencies */
+.ticket-blocked {
+  margin: -4px 0 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--badge-orange);
+}
+
+.detail-dependencies {
+  margin-top: 20px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 16px;
+}
+
+.detail-dependencies h3 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0 0 10px;
+  color: var(--color-text);
+}
+
+.detail-dependencies .blocking-heading {
+  margin-top: 16px;
+}
+
+.dependency-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dependency-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--color-background-soft);
+  border-radius: 6px;
+}
+
+.dependency-link {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  text-align: left;
+  font-size: 0.875rem;
+  color: var(--color-text);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dependency-link:hover:not(:disabled) {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+.dependency-link:disabled {
+  cursor: default;
+}
+
+.dependency-id {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}
+
+.dependency-remove {
+  flex-shrink: 0;
+  padding: 0 4px;
+  background: none;
+  border: none;
+  font-size: 1.1rem;
+  line-height: 1;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.dependency-remove:hover {
+  color: var(--color-error);
+}
+
+.no-dependencies {
+  color: var(--color-text-light);
+  font-style: italic;
+  font-size: 0.875rem;
+  margin: 0 0 12px;
+}
+
+.dependency-add {
+  display: flex;
+  gap: 8px;
+}
+
+.dependency-add select {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background-card);
+  color: var(--color-text);
+  font-size: 0.875rem;
+}
+
+.dependency-error {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  color: var(--color-error);
 }
 </style>

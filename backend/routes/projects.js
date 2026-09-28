@@ -3,6 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
+const { getProjectDependencyEdges } = require('../utilities/ticketDependencies');
 
 require('dotenv').config();
 
@@ -117,15 +118,15 @@ router.get('/:id', authenticate, async (req, res) => {
       return res.status(404).json({ message: 'Project not found' });
     }
 
-    // If project is private, verify user is an employee
-    if (!projectResult.rows[0].is_public) {
-      const empCheck = await client.query(
-        `SELECT 1 FROM employees WHERE user_id = $1 AND company_id = $2 AND status = 'active'`,
-        [req.user.id, projectResult.rows[0].company_id]
-      );
-      if (empCheck.rowCount === 0) {
-        return res.status(403).json({ message: 'Access denied' });
-      }
+    // Private projects are employee-only. is_employee is also returned so the
+    // board knows whether to offer employee-only edits (ticket dependencies).
+    const empCheck = await client.query(
+      `SELECT 1 FROM employees WHERE user_id = $1 AND company_id = $2 AND status = 'active'`,
+      [req.user.id, projectResult.rows[0].company_id]
+    );
+    const isEmployee = empCheck.rowCount > 0;
+    if (!projectResult.rows[0].is_public && !isEmployee) {
+      return res.status(403).json({ message: 'Access denied' });
     }
 
     const ticketsResult = await client.query(
@@ -161,7 +162,9 @@ router.get('/:id', authenticate, async (req, res) => {
 
     res.json({
       project: projectResult.rows[0],
-      tickets: ticketsResult.rows
+      tickets: ticketsResult.rows,
+      dependencies: await getProjectDependencyEdges(client, id),
+      is_employee: isEmployee
     });
   } catch (err) {
     console.error('Error fetching project:', err);

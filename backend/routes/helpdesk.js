@@ -3,6 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
+const { getTicketDependencyEdges, wouldCreateCycle } = require('../utilities/ticketDependencies');
 
 require('dotenv').config();
 
@@ -272,6 +273,98 @@ router.put('/ticket/:id', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Error updating ticket:', err);
     res.status(500).json({ message: 'Failed to update ticket' });
+  } finally {
+    client.release();
+  }
+});
+
+// Ticket dependencies (migration 079) -- only active employees of the
+// ticket's company can change them. Both endpoints respond with every edge
+// touching the ticket (see utilities/ticketDependencies.js) so the client
+// can swap in the fresh set without refetching the whole board.
+async function requireTicketEmployee(client, ticketId, userId) {
+  const result = await client.query(
+    `SELECT t.id, t.company_id FROM tickets t
+     JOIN employees e ON e.company_id = t.company_id AND e.user_id = $2 AND e.status = 'active'
+     WHERE t.id = $1`,
+    [ticketId, userId]
+  );
+  return result.rows[0] || null;
+}
+
+// Add a dependency: :id can't finish until depends_on_ticket_id does
+router.post('/ticket/:id/dependencies', authenticate, async (req, res) => {
+  const ticketId = parseInt(req.params.id, 10);
+  const dependsOnId = parseInt(req.body.depends_on_ticket_id, 10);
+  const client = await getClient();
+
+  try {
+    if (!Number.isInteger(dependsOnId)) {
+      return res.status(400).json({ message: 'depends_on_ticket_id is required' });
+    }
+    if (dependsOnId === ticketId) {
+      return res.status(400).json({ message: 'A ticket cannot depend on itself' });
+    }
+
+    const ticket = await requireTicketEmployee(client, ticketId, req.user.id);
+    if (!ticket) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const depCheck = await client.query('SELECT company_id FROM tickets WHERE id = $1', [dependsOnId]);
+    if (depCheck.rowCount === 0) {
+      return res.status(404).json({ message: 'Dependency ticket not found' });
+    }
+    if (depCheck.rows[0].company_id !== ticket.company_id) {
+      return res.status(400).json({ message: 'Dependencies must be within the same company' });
+    }
+
+    const existing = await client.query(
+      'SELECT 1 FROM ticket_dependencies WHERE ticket_id = $1 AND depends_on_ticket_id = $2',
+      [ticketId, dependsOnId]
+    );
+    if (existing.rowCount === 0) {
+      if (await wouldCreateCycle(client, ticketId, dependsOnId)) {
+        return res.status(400).json({
+          message: `Ticket #${dependsOnId} already depends on #${ticketId} (directly or indirectly), so this would create a loop`
+        });
+      }
+      await client.query(
+        'INSERT INTO ticket_dependencies (ticket_id, depends_on_ticket_id, created_by) VALUES ($1, $2, $3)',
+        [ticketId, dependsOnId, req.user.id]
+      );
+    }
+
+    res.status(201).json({ dependencies: await getTicketDependencyEdges(client, ticketId) });
+  } catch (err) {
+    console.error('Error adding ticket dependency:', err);
+    res.status(500).json({ message: 'Failed to add dependency' });
+  } finally {
+    client.release();
+  }
+});
+
+// Remove a dependency
+router.delete('/ticket/:id/dependencies/:dependsOnId', authenticate, async (req, res) => {
+  const ticketId = parseInt(req.params.id, 10);
+  const dependsOnId = parseInt(req.params.dependsOnId, 10);
+  const client = await getClient();
+
+  try {
+    const ticket = await requireTicketEmployee(client, ticketId, req.user.id);
+    if (!ticket) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    await client.query(
+      'DELETE FROM ticket_dependencies WHERE ticket_id = $1 AND depends_on_ticket_id = $2',
+      [ticketId, dependsOnId]
+    );
+
+    res.json({ dependencies: await getTicketDependencyEdges(client, ticketId) });
+  } catch (err) {
+    console.error('Error removing ticket dependency:', err);
+    res.status(500).json({ message: 'Failed to remove dependency' });
   } finally {
     client.release();
   }
