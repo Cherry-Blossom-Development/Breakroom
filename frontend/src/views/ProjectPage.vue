@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
 import draggable from 'vuedraggable'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -84,7 +84,18 @@ const statusLabels = {
   closed: 'Closed'
 }
 
-const kanbanStatuses = ['backlog', 'on-deck', 'in_progress', 'resolved', 'closed']
+// Closed tickets get no lane -- they're counted in a link above the board
+// that opens ProjectClosedTicketsPage instead.
+const kanbanStatuses = ['backlog', 'on-deck', 'in_progress', 'resolved']
+
+const closedCount = computed(() => tickets.value.filter(t => t.status === 'closed').length)
+
+// Workspace board links to the workspace's closed list; the standalone
+// /project/:id board links to the standalone one.
+const closedTicketsLink = computed(() => ({
+  name: props.embedded ? 'projectWorkspaceClosed' : 'projectClosedTickets',
+  params: { id: route.params.id }
+}))
 
 // Group tickets by status for Kanban columns
 const ticketsByStatus = computed(() => {
@@ -677,8 +688,15 @@ onMounted(async () => {
       <button @click="fetchProject">Retry</button>
     </div>
 
+    <!-- Closed-ticket link, right-aligned over the Resolved lane -->
+    <div v-if="!loading && !error" class="board-toolbar">
+      <RouterLink :to="closedTicketsLink" class="closed-tickets-link">
+        {{ closedCount }} Closed ticket{{ closedCount === 1 ? '' : 's' }}
+      </RouterLink>
+    </div>
+
     <!-- Kanban Board -->
-    <div v-else class="kanban-board">
+    <div v-if="!loading && !error" class="kanban-board">
       <div
         v-for="status in kanbanStatuses"
         :key="status"
@@ -1038,6 +1056,25 @@ onMounted(async () => {
 
 .btn-status:hover {
   opacity: 0.9;
+}
+
+.board-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.closed-tickets-link {
+  padding: 2px 4px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.closed-tickets-link:hover {
+  background: none;
+  text-decoration: underline;
 }
 
 /* Kanban Board */

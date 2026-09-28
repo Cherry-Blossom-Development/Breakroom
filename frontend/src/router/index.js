@@ -270,6 +270,12 @@ const router = createRouter({
           props: { embedded: true },
         },
         {
+          path: 'closed',
+          name: 'projectWorkspaceClosed',
+          component: () => import('../views/ProjectClosedTicketsPage.vue'),
+          props: { embedded: true },
+        },
+        {
           path: 'gantt',
           name: 'projectGantt',
           component: () => import('../views/ProjectChartPlaceholder.vue'),
@@ -323,6 +329,12 @@ const router = createRouter({
       path: '/project/:id',
       name: 'projectDetail',
       component: () => import('../views/ProjectPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/project/:id/closed',
+      name: 'projectClosedTickets',
+      component: () => import('../views/ProjectClosedTicketsPage.vue'),
       meta: { requiresAuth: true },
     },
     {
@@ -555,7 +567,7 @@ const FEATURE_ROUTES = {
   ],
   kanban: ['kanban'],
   tool_shed: ['toolShed'],
-  company_portal: ['aboutCompany', 'employment', 'helpDesk', 'companyPortal', 'companyDetail', 'projectDetail', 'projects', 'projectKanban', 'projectGantt', 'projectBurndown'],
+  company_portal: ['aboutCompany', 'employment', 'helpDesk', 'companyPortal', 'companyDetail', 'projectDetail', 'projects', 'projectKanban', 'projectWorkspaceClosed', 'projectGantt', 'projectBurndown', 'projectClosedTickets'],
   band_pages: ['bandPageSetup', 'bandDomainSetup'],
 }
 

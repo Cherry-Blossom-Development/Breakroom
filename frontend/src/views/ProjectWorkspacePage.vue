@@ -28,7 +28,8 @@ const returnPath = typeof previousPath === 'string' && !previousPath.startsWith(
   : '/projects'
 
 const menuItems = [
-  { name: 'projectKanban', label: 'Kanban Board', icon: 'kanban' },
+  // also highlighted on the board's Closed Tickets list
+  { name: 'projectKanban', label: 'Kanban Board', icon: 'kanban', alsoActiveOn: 'projectWorkspaceClosed' },
   { name: 'projectGantt', label: 'GANTT Chart', icon: 'gantt' },
   { name: 'projectBurndown', label: 'Burndown Chart', icon: 'burndown' },
 ]
@@ -80,6 +81,7 @@ onMounted(fetchProject)
           :key="item.name"
           :to="{ name: item.name, params: { id: projectId } }"
           class="menu-item"
+          :class="{ 'router-link-exact-active': item.alsoActiveOn && route.name === item.alsoActiveOn }"
           @click="menuOpen = false"
         >
           <svg v-if="item.icon === 'kanban'" class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="5" height="18" rx="1"/><rect x="10" y="3" width="5" height="12" rx="1"/><rect x="17" y="3" width="4" height="8" rx="1"/></svg>
