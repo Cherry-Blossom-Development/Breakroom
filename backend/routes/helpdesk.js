@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { getTicketDependencyEdges, wouldCreateCycle } = require('../utilities/ticketDependencies');
-const { CREATOR_STATUSES, isActiveEmployee, getTicketAccess } = require('../utilities/ticketAccess');
+const { CREATOR_STATUSES, getTicketAccess, canBeAssigned } = require('../utilities/ticketAccess');
 const { parseEstimateHours } = require('../utilities/ticketEstimates');
 const { recordStatusChange } = require('../utilities/ticketStatusHistory');
 
@@ -217,14 +217,15 @@ router.put('/ticket/:id', authenticate, async (req, res) => {
   const client = await getClient();
 
   try {
-    // Employees of the ticket's company can change anything; a non-employee
-    // creator can only edit their own ticket's text/priority and mark it
-    // resolved/closed; everyone else is refused (see utilities/ticketAccess.js).
+    // Employees of the ticket's company (and working project members) can
+    // change anything; any other creator can only edit their own ticket's
+    // text/priority and mark it resolved/closed; everyone else is refused
+    // (see utilities/ticketAccess.js).
     const access = await getTicketAccess(client, id, req.user.id);
     if (!access) {
       return res.status(404).json({ message: 'Ticket not found' });
     }
-    if (!access.isEmployee) {
+    if (!access.canWork) {
       if (!access.isCreator) {
         return res.status(403).json({ message: 'Not authorized to update this ticket' });
       }
@@ -236,9 +237,10 @@ router.put('/ticket/:id', authenticate, async (req, res) => {
       }
     }
 
-    // An assignee must be an active employee of the ticket's company
-    if (assigned_to && !(await isActiveEmployee(client, assigned_to, access.ticket.company_id))) {
-      return res.status(400).json({ message: 'Assignee must be an active employee of this company' });
+    // An assignee must be an active employee of the ticket's company or a
+    // working member of one of its projects
+    if (assigned_to && !(await canBeAssigned(client, access.ticket, assigned_to))) {
+      return res.status(400).json({ message: 'Assignee must be an employee of this company or a member of the project' });
     }
 
     // Build update query dynamically
@@ -321,12 +323,12 @@ router.put('/ticket/:id', authenticate, async (req, res) => {
 });
 
 // Ticket dependencies (migration 079) -- only active employees of the
-// ticket's company can change them. Both endpoints respond with every edge
+// ticket's company (and working project members) can change them. Both endpoints respond with every edge
 // touching the ticket (see utilities/ticketDependencies.js) so the client
 // can swap in the fresh set without refetching the whole board.
 async function requireTicketEmployee(client, ticketId, userId) {
   const access = await getTicketAccess(client, ticketId, userId);
-  return access?.isEmployee ? access.ticket : null;
+  return access?.canWork ? access.ticket : null;
 }
 
 // Add a dependency: :id can't finish until depends_on_ticket_id does

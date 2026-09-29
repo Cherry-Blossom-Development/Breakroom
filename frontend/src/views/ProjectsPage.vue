@@ -8,9 +8,14 @@ import LoadingSpinner from '../components/LoadingSpinner.vue'
 
 // Cross-company view of the same projects each company's Projects section
 // (CompanyDetailPage.vue) shows, pulled from every company the user is an
-// active employee of. Management (add/edit/deactivate/delete) stays on the
-// company page -- this is for getting to a project quickly.
+// active employee of, plus projects the user has joined as a member.
+// Management (add/edit/deactivate/delete) stays on the company page -- this
+// is for getting to a project quickly. Pending project invites are answered
+// here too.
 const projects = ref([])
+const invites = ref([])
+const respondingTo = ref(null)
+const inviteError = ref(null)
 const loading = ref(true)
 const error = ref(null)
 const companyFilter = ref('all')
@@ -45,6 +50,36 @@ async function fetchProjects() {
   } finally {
     loading.value = false
   }
+}
+
+async function fetchInvites() {
+  try {
+    const res = await authFetch('/api/projects/my/invites')
+    if (res.ok) invites.value = (await res.json()).invites
+  } catch (err) {
+    console.error('Error fetching project invites:', err)
+  }
+}
+
+async function respondToInvite(invite, response) {
+  respondingTo.value = invite.project_id
+  inviteError.value = null
+  try {
+    const res = await authFetch(`/api/projects/${invite.project_id}/invite/${response}`, { method: 'POST' })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Failed to respond to invite')
+    invites.value = invites.value.filter(i => i.project_id !== invite.project_id)
+    if (response === 'accept') await fetchProjects()
+  } catch (err) {
+    inviteError.value = err.message
+  } finally {
+    respondingTo.value = null
+  }
+}
+
+function inviterName(invite) {
+  const name = [invite.inviter_first_name, invite.inviter_last_name].filter(Boolean).join(' ')
+  return name || (invite.inviter_handle ? `@${invite.inviter_handle}` : 'Someone')
 }
 
 function hasShortcut(project) {
@@ -109,6 +144,7 @@ async function toggleShortcut(project) {
 
 onMounted(() => {
   fetchProjects()
+  fetchInvites()
   fetchProjectShortcuts()
 })
 </script>
@@ -116,6 +152,34 @@ onMounted(() => {
 <template>
   <div class="page-container projects-page">
     <h1>Projects</h1>
+
+    <section v-if="invites.length" class="section-card invites-card">
+      <div class="section-header">
+        <h2>Project Invitations ({{ invites.length }})</h2>
+      </div>
+      <p v-if="inviteError" class="invite-error">{{ inviteError }}</p>
+      <div class="invites-list">
+        <div v-for="invite in invites" :key="invite.project_id" class="invite-row">
+          <div class="invite-text">
+            <span class="project-company">{{ invite.company_name }}</span>
+            <strong>{{ invite.project_title }}</strong>
+            <span class="invite-meta">{{ inviterName(invite) }} invited you as a {{ invite.role }}</span>
+          </div>
+          <div class="invite-actions">
+            <button
+              class="btn-small btn-homepage"
+              :disabled="respondingTo === invite.project_id"
+              @click="respondToInvite(invite, 'accept')"
+            >Accept</button>
+            <button
+              class="btn-small"
+              :disabled="respondingTo === invite.project_id"
+              @click="respondToInvite(invite, 'decline')"
+            >Decline</button>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <div v-if="loading" class="loading"><LoadingSpinner size="small" /> Loading projects...</div>
 
@@ -175,6 +239,55 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.invites-card {
+  margin-bottom: 20px;
+}
+
+.invites-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.invite-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--card-radius-sm);
+  background: var(--color-background-soft);
+}
+
+.invite-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  color: var(--color-text);
+}
+
+.invite-text .project-company {
+  margin-bottom: 0;
+}
+
+.invite-meta {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.invite-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.invite-error {
+  margin: 0 0 12px;
+  color: var(--color-error);
+}
+
 .projects-page h1 {
   color: var(--color-text);
   margin-bottom: 20px;

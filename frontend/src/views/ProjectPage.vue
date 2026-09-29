@@ -19,7 +19,8 @@ const router = useRouter()
 
 const project = ref(null)
 const tickets = ref([])
-const employees = ref([])
+// Who tickets can be assigned to: employees + working project members
+const assignees = ref([])
 const loading = ref(true)
 const error = ref(null)
 
@@ -145,7 +146,9 @@ async function fetchProject() {
     project.value = data.project
     tickets.value = data.tickets
     dependencies.value = data.dependencies || []
-    isEmployee.value = !!data.is_employee
+    // Full edit rights: company employees and working project members
+    canWork.value = !!data.can_work
+    assignees.value = data.assignees || []
   } catch (err) {
     error.value = err.message
   } finally {
@@ -158,7 +161,7 @@ async function fetchProject() {
 // ticket_title/status, depends_on_title/status }. Either end may be in
 // another project of the same company.
 const dependencies = ref([])
-const isEmployee = ref(false)
+const canWork = ref(false)
 const newDependencyId = ref('')
 const dependencyError = ref('')
 const savingDependency = ref(false)
@@ -303,11 +306,12 @@ async function saveEstimate() {
   }
 }
 
-// Status changes: employees can make any move; a non-employee who created
+// Status changes: employees (and working project members) can make any
+// move; anyone else who created
 // the ticket may only resolve or close it (mirrors PUT /api/helpdesk/ticket).
 function allowedTransitions(ticket) {
   const transitions = getAvailableTransitions(ticket.status)
-  if (isEmployee.value) return transitions
+  if (canWork.value) return transitions
   if (ticket.creator_handle === user.username) return transitions.filter(s => s === 'resolved' || s === 'closed')
   return []
 }
@@ -316,20 +320,6 @@ function allowedTransitions(ticket) {
 function openLinkedTicket(id) {
   const ticket = ticketsById.value.get(id)
   if (ticket) selectTicket(ticket)
-}
-
-async function fetchEmployees() {
-  if (!project.value?.company_id) return
-
-  try {
-    const res = await authFetch(`/api/company/${project.value.company_id}/employees`)
-    if (res.ok) {
-      const data = await res.json()
-      employees.value = data.employees.filter(e => e.status === 'active')
-    }
-  } catch (err) {
-    console.error('Error fetching employees:', err)
-  }
 }
 
 async function assignTicket(ticketId, userId) {
@@ -370,7 +360,7 @@ async function createTicket() {
         title: newTicket.value.title,
         description: newTicket.value.description,
         priority: newTicket.value.priority,
-        ...(isEmployee.value && newTicket.value.estimate_hours !== ''
+        ...(canWork.value && newTicket.value.estimate_hours !== ''
           ? { estimate_hours: newTicket.value.estimate_hours }
           : {})
       })
@@ -633,7 +623,6 @@ watch(() => route.params.id, () => {
 
 onMounted(async () => {
   await fetchProject()
-  await fetchEmployees()
 })
 </script>
 
@@ -645,7 +634,7 @@ onMounted(async () => {
         <p v-if="project" class="company-name">{{ project.company_name }}</p>
       </div>
       <div class="header-actions">
-        <button class="new-ticket-btn" @click="showNewTicketForm = true" :disabled="loading || error">
+        <button v-if="canWork || project?.is_public || project?.is_default" class="new-ticket-btn" @click="showNewTicketForm = true" :disabled="loading || error">
           + New Ticket
         </button>
         <button v-if="!props.embedded" @click="goBack" class="btn-secondary">Back</button>
@@ -688,7 +677,7 @@ onMounted(async () => {
             </select>
           </div>
 
-          <div v-if="isEmployee" class="form-group">
+          <div v-if="canWork" class="form-group">
             <label for="estimate">Estimate (hours, optional)</label>
             <input
               id="estimate"
@@ -741,10 +730,10 @@ onMounted(async () => {
             <p><strong>Created:</strong> {{ formatDate(selectedTicket.created_at) }}</p>
             <p v-if="selectedTicket.resolved_at"><strong>Resolved:</strong> {{ formatDate(selectedTicket.resolved_at) }}</p>
             <p><strong>Assigned to:</strong> {{ getAssigneeName(selectedTicket) }}</p>
-            <p v-if="!isEmployee"><strong>Estimate:</strong> {{ formatEstimate(selectedTicket.estimate_hours) || 'Not estimated' }}</p>
+            <p v-if="!canWork"><strong>Estimate:</strong> {{ formatEstimate(selectedTicket.estimate_hours) || 'Not estimated' }}</p>
           </div>
 
-          <div v-if="isEmployee" class="detail-estimate">
+          <div v-if="canWork" class="detail-estimate">
             <label for="estimate-input"><strong>Estimate:</strong></label>
             <input
               id="estimate-input"
@@ -763,7 +752,7 @@ onMounted(async () => {
           </div>
           <p v-if="estimateError" class="dependency-error">{{ estimateError }}</p>
 
-          <div v-if="isEmployee" class="detail-assign">
+          <div v-if="canWork" class="detail-assign">
             <label for="assign-select"><strong>Assign to:</strong></label>
             <select
               id="assign-select"
@@ -771,7 +760,7 @@ onMounted(async () => {
               @change="(e) => assignTicket(selectedTicket.id, e.target.value ? parseInt(e.target.value) : null)"
             >
               <option value="">Unassigned</option>
-              <option v-for="emp in employees" :key="emp.user_id" :value="emp.user_id">
+              <option v-for="emp in assignees" :key="emp.user_id" :value="emp.user_id">
                 {{ emp.first_name }} {{ emp.last_name }} ({{ emp.handle }})
               </option>
             </select>
@@ -812,7 +801,7 @@ onMounted(async () => {
                 </button>
                 <StatusBadge :color="statusColor[dep.status]" soft size="xs">{{ statusLabels[dep.status] || dep.status }}</StatusBadge>
                 <button
-                  v-if="isEmployee"
+                  v-if="canWork"
                   class="dependency-remove"
                   :aria-label="`Remove dependency on #${dep.id}`"
                   title="Remove dependency"
@@ -822,7 +811,7 @@ onMounted(async () => {
             </ul>
             <p v-else class="no-dependencies">No dependencies.</p>
 
-            <div v-if="isEmployee" class="dependency-add">
+            <div v-if="canWork" class="dependency-add">
               <select v-model="newDependencyId" aria-label="Add a dependency">
                 <option value="">Add a ticket this depends on...</option>
                 <option v-for="t in dependencyCandidates" :key="t.id" :value="t.id">
@@ -977,7 +966,7 @@ onMounted(async () => {
           group="tickets"
           item-key="id"
           class="ticket-list"
-          :disabled="!isEmployee"
+          :disabled="!canWork"
           :data-status="status"
           @change="(e) => onDragChange(e, status)"
         >

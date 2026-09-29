@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
 
@@ -34,6 +34,20 @@ const menuItems = [
   { name: 'projectBurndown', label: 'Burndown Chart', icon: 'burndown' },
 ]
 
+// The desktop menu stays in view (sticky below the top bar) so Settings,
+// pinned to its bottom, is always reachable; the top bar's height varies
+// (title wraps on narrow screens), so it's measured.
+const topbar = ref(null)
+const topbarHeight = ref(0)
+let topbarObserver = null
+onMounted(() => {
+  topbarObserver = new ResizeObserver(() => {
+    topbarHeight.value = topbar.value?.offsetHeight || 0
+  })
+  if (topbar.value) topbarObserver.observe(topbar.value)
+})
+onBeforeUnmount(() => topbarObserver?.disconnect())
+
 async function fetchProject() {
   try {
     const res = await authFetch(`/api/projects/${projectId}`)
@@ -57,8 +71,8 @@ onMounted(fetchProject)
 </script>
 
 <template>
-  <div class="project-workspace">
-    <header class="workspace-topbar">
+  <div class="project-workspace" :style="{ '--topbar-height': `${topbarHeight}px` }">
+    <header ref="topbar" class="workspace-topbar">
       <button class="menu-toggle" @click="menuOpen = !menuOpen" :aria-expanded="menuOpen" aria-label="Project menu">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="22" height="22"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
       </button>
@@ -88,6 +102,15 @@ onMounted(fetchProject)
           <svg v-else-if="item.icon === 'gantt'" class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="3" x2="3" y2="21"/><rect x="5" y="5" width="8" height="3" rx="1"/><rect x="9" y="10.5" width="9" height="3" rx="1"/><rect x="13" y="16" width="7" height="3" rx="1"/></svg>
           <svg v-else class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="3" x2="3" y2="21"/><line x1="3" y1="21" x2="21" y2="21"/><polyline points="5 6 10 10 14 12 20 18"/></svg>
           <span>{{ item.label }}</span>
+        </RouterLink>
+
+        <RouterLink
+          :to="{ name: 'projectSettings', params: { id: projectId } }"
+          class="menu-item menu-item-settings"
+          @click="menuOpen = false"
+        >
+          <svg class="menu-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          <span>Settings</span>
         </RouterLink>
       </nav>
 
@@ -179,11 +202,24 @@ onMounted(fetchProject)
 }
 
 .workspace-menu {
+  position: sticky;
+  top: var(--topbar-height);
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
   width: 220px;
+  height: calc(100vh - var(--topbar-height));
+  overflow-y: auto;
   flex-shrink: 0;
   padding: 8px 0;
   background: var(--color-header-bg);
   color: var(--color-header-text);
+}
+
+/* Settings sits at the bottom of the menu */
+.menu-item-settings {
+  margin-top: auto;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .menu-label {
@@ -282,6 +318,7 @@ onMounted(fetchProject)
     top: 0;
     left: 0;
     bottom: 0;
+    height: auto;
     z-index: 1000;
     padding-top: 16px;
     transform: translateX(-100%);

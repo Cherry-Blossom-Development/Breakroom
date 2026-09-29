@@ -286,6 +286,11 @@ const router = createRouter({
           component: () => import('../views/ProjectChartPlaceholder.vue'),
           meta: { title: 'Burndown Chart' },
         },
+        {
+          path: 'settings',
+          name: 'projectSettings',
+          component: () => import('../views/ProjectSettingsPage.vue'),
+        },
       ],
     },
     {
@@ -566,7 +571,7 @@ const FEATURE_ROUTES = {
   ],
   kanban: ['kanban'],
   tool_shed: ['toolShed'],
-  company_portal: ['aboutCompany', 'employment', 'helpDesk', 'companyPortal', 'companyDetail', 'projectDetail', 'projects', 'projectKanban', 'projectWorkspaceClosed', 'projectGantt', 'projectBurndown', 'projectClosedTickets'],
+  company_portal: ['aboutCompany', 'employment', 'helpDesk', 'companyPortal', 'companyDetail', 'projectDetail', 'projects', 'projectKanban', 'projectWorkspaceClosed', 'projectGantt', 'projectBurndown', 'projectSettings', 'projectClosedTickets'],
   band_pages: ['bandPageSetup', 'bandDomainSetup'],
 }
 
