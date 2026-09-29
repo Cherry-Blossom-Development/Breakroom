@@ -242,7 +242,9 @@ function replaceTicketEdges(ticketId, edges) {
   ]
 }
 
-// Dependency edits are staged in the draft until Save Changes
+// Dependency edits are staged in the draft until Save Changes. Picking a
+// ticket in the dropdown stages it immediately -- there's no separate Add
+// step to forget.
 function addDependency() {
   const id = parseInt(newDependencyId.value)
   if (!draft.value || !id) return
@@ -318,6 +320,16 @@ function changedTicketFields() {
   return body
 }
 
+// A comment being written, or an edit to one, that hasn't been posted
+const commentEditChanged = computed(() => {
+  if (editingCommentId.value === null) return false
+  const comment = ticketComments.value.find(c => c.id === editingCommentId.value)
+  return !!comment && editCommentText.value.trim() !== comment.content.trim()
+})
+const hasUnpostedComment = computed(() => !!commentText.value.trim() || commentEditChanged.value)
+
+// Every change made in the panel must land here, or the save bar won't
+// appear and the leave prompt won't warn about it
 const isDirty = computed(() => {
   if (!draft.value || !original.value) return false
   return Object.keys(changedTicketFields()).length > 0
@@ -325,6 +337,7 @@ const isDirty = computed(() => {
     || draft.value.removeDeps.length > 0
     || draft.value.addFiles.length > 0
     || draft.value.removeAttachments.length > 0
+    || hasUnpostedComment.value
 })
 
 // Merge a saved ticket (PUT response) into the panel and the board
@@ -391,6 +404,16 @@ async function saveChanges() {
       draft.value.addFiles = []
     }
 
+    // The comment helpers clear their text only on success
+    if (commentEditChanged.value) {
+      await saveEditComment(editingCommentId.value)
+      if (commentEditChanged.value) throw new Error('Failed to save your comment edit')
+    }
+    if (commentText.value.trim()) {
+      await addComment()
+      if (commentText.value.trim()) throw new Error('Failed to post your comment')
+    }
+
     editingTicket.value = false
     return true
   } catch (err) {
@@ -434,6 +457,8 @@ function discardChanges() {
   resetDraft(selectedTicket.value)
   editingTicket.value = false
   newDependencyId.value = ''
+  commentText.value = ''
+  cancelEditComment()
 }
 
 // Status buttons pick the draft's status; picking the chosen one again
@@ -962,13 +987,12 @@ onMounted(async () => {
             <p v-else class="no-dependencies">No dependencies.</p>
 
             <div v-if="canWork" class="dependency-add">
-              <select v-model="newDependencyId" aria-label="Add a dependency">
+              <select v-model="newDependencyId" aria-label="Add a dependency" @change="addDependency">
                 <option value="">Add a ticket this depends on...</option>
                 <option v-for="t in dependencyCandidates" :key="t.id" :value="t.id">
                   #{{ t.id }} {{ t.title }} ({{ statusLabels[t.status] || t.status }})
                 </option>
               </select>
-              <button class="btn-primary btn-sm" :disabled="!newDependencyId" @click="addDependency">Add</button>
             </div>
 
             <template v-if="selectedBlocking.length > 0">
