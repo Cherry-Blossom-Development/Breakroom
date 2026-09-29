@@ -8,7 +8,7 @@ const { isActiveEmployee, getTicketAccess } = require('../utilities/ticketAccess
 const { PROJECT_ROLES, WORKER_ROLES, getProjectAccess } = require('../utilities/projectAccess');
 const { sendMailToUser } = require('../utilities/aws-ses-email');
 const { parseEstimate } = require('../utilities/ticketEstimates');
-const { recordStatusChange, getProjectTicketTimeline } = require('../utilities/ticketStatusHistory');
+const { recordStatusChange, getProjectTicketTimeline, getProjectStatusHistory } = require('../utilities/ticketStatusHistory');
 
 require('dotenv').config();
 
@@ -647,6 +647,48 @@ router.post('/:id/tickets', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Error creating project ticket:', err);
     res.status(500).json({ message: 'Failed to create ticket' });
+  } finally {
+    client.release();
+  }
+});
+
+// Burndown chart data: every ticket in the project (any status) with its
+// estimate, plus the full status history to replay. Same view rule as the
+// project board.
+router.get('/:id/burndown', authenticate, async (req, res) => {
+  const client = await getClient();
+
+  try {
+    const access = await getProjectAccess(client, req.params.id, req.user.id);
+    if (!access) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+    if (!access.canView) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const project = await client.query(
+      'SELECT id, title, sprint_duration_days, created_at FROM projects WHERE id = $1',
+      [req.params.id]
+    );
+    const tickets = await client.query(
+      `SELECT t.id, t.title, t.status, t.estimate_amount, t.estimate_unit,
+              t.created_at, t.updated_at, t.resolved_at
+       FROM tickets t
+       JOIN ticket_projects tp ON tp.ticket_id = t.id
+       WHERE tp.project_id = $1
+       ORDER BY t.id`,
+      [req.params.id]
+    );
+
+    res.json({
+      project: project.rows[0],
+      tickets: tickets.rows,
+      history: await getProjectStatusHistory(client, req.params.id)
+    });
+  } catch (err) {
+    console.error('Error fetching burndown data:', err);
+    res.status(500).json({ message: 'Failed to fetch burndown data' });
   } finally {
     client.release();
   }

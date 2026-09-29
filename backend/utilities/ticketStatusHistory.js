@@ -27,4 +27,17 @@ async function getProjectTicketTimeline(client, projectId) {
   return result.rows;
 }
 
-module.exports = { recordStatusChange, getProjectTicketTimeline };
+// Every recorded status change for a project's tickets, oldest first (the
+// Burndown chart replays these to know each ticket's status on any day).
+async function getProjectStatusHistory(client, projectId) {
+  const result = await client.query(
+    `SELECT h.ticket_id, h.from_status, h.to_status, h.changed_at
+     FROM ticket_status_history h
+     WHERE h.ticket_id IN (SELECT ticket_id FROM ticket_projects WHERE project_id = $1)
+     ORDER BY h.changed_at, h.id`,
+    [projectId]
+  );
+  return result.rows;
+}
+
+module.exports = { recordStatusChange, getProjectTicketTimeline, getProjectStatusHistory };

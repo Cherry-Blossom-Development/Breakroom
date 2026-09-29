@@ -283,8 +283,7 @@ const router = createRouter({
         {
           path: 'burndown',
           name: 'projectBurndown',
-          component: () => import('../views/ProjectChartPlaceholder.vue'),
-          meta: { title: 'Burndown Chart' },
+          component: () => import('../views/ProjectBurndownPage.vue'),
         },
         {
           path: 'settings',
