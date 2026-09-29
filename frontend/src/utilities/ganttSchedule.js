@@ -2,8 +2,11 @@
 // fetch) so it can be unit-tested; ProjectGanttPage.vue renders the result.
 //
 // Rules (agreed 2026-09-28):
-//   - Estimates are working hours: 8h per working day, Mon-Fri, weekends
-//     skipped. An unestimated ticket is treated as 1 working day and flagged.
+//   - Scheduling runs in working hours: 8h per working day, Mon-Fri, weekends
+//     skipped. Estimates are stored as entered (amount + unit, migration 083)
+//     and converted here only: a day is one working day, a week five, a
+//     month 52/12 weeks (~21.7 working days). An unestimated ticket is
+//     treated as 1 working day and flagged.
 //   - Unfinished work is scheduled forward from today. A ticket can't start
 //     until the tickets it depends on (migration 079) finish.
 //   - One person works one ticket at a time: tickets with the same assignee
@@ -17,6 +20,24 @@
 
 export const HOURS_PER_DAY = 8
 export const DEFAULT_UNESTIMATED_HOURS = HOURS_PER_DAY
+const WORKING_DAYS_PER_WEEK = 5
+const WEEKS_PER_MONTH = 52 / 12
+
+// Scheduler working hours for one estimate unit
+const UNIT_HOURS = {
+  hours: 1,
+  days: HOURS_PER_DAY,
+  weeks: WORKING_DAYS_PER_WEEK * HOURS_PER_DAY,
+  months: WEEKS_PER_MONTH * WORKING_DAYS_PER_WEEK * HOURS_PER_DAY
+}
+
+// A ticket's estimate (estimate_amount + estimate_unit) in working hours, or
+// null if it has none
+export function estimateWorkingHours(ticket) {
+  const perUnit = UNIT_HOURS[ticket.estimate_unit]
+  const amount = ticket.estimate_amount === null || ticket.estimate_amount === undefined ? NaN : Number(ticket.estimate_amount)
+  return perUnit && amount > 0 ? amount * perUnit : null
+}
 const DAY_MS = 24 * 60 * 60 * 1000
 
 const DONE_STATUSES = ['resolved', 'closed']
@@ -130,8 +151,8 @@ export function buildGanttSchedule({ tickets, dependencies = [], timeline = [], 
   const byId = new Map(tickets.map(t => [t.id, t]))
 
   const durationOf = (t) => {
-    const hours = t.estimate_hours === null || t.estimate_hours === undefined ? null : Number(t.estimate_hours)
-    return hours && hours > 0
+    const hours = estimateWorkingHours(t)
+    return hours
       ? { hours, unestimated: false }
       : { hours: DEFAULT_UNESTIMATED_HOURS, unestimated: true }
   }

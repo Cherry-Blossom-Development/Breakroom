@@ -5,7 +5,7 @@ const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { getTicketDependencyEdges, wouldCreateCycle } = require('../utilities/ticketDependencies');
 const { CREATOR_STATUSES, getTicketAccess, canBeAssigned } = require('../utilities/ticketAccess');
-const { parseEstimateHours } = require('../utilities/ticketEstimates');
+const { parseEstimate } = require('../utilities/ticketEstimates');
 const { recordStatusChange } = require('../utilities/ticketStatusHistory');
 
 require('dotenv').config();
@@ -130,7 +130,7 @@ router.get('/ticket/:id', authenticate, async (req, res) => {
     }
 
     const result = await client.query(
-      `SELECT t.id, t.title, t.description, t.status, t.priority, t.estimate_hours,
+      `SELECT t.id, t.title, t.description, t.status, t.priority, t.estimate_amount, t.estimate_unit,
               t.created_at, t.updated_at, t.resolved_at, t.company_id,
               c.name as company_name,
               creator.id as creator_id, creator.handle as creator_handle,
@@ -213,7 +213,7 @@ router.post('/tickets', authenticate, async (req, res) => {
 // Update a ticket
 router.put('/ticket/:id', authenticate, async (req, res) => {
   const { id } = req.params;
-  const { title, description, status, priority, assigned_to, estimate_hours } = req.body;
+  const { title, description, status, priority, assigned_to, estimate_amount, estimate_unit } = req.body;
   const client = await getClient();
 
   try {
@@ -229,7 +229,7 @@ router.put('/ticket/:id', authenticate, async (req, res) => {
       if (!access.isCreator) {
         return res.status(403).json({ message: 'Not authorized to update this ticket' });
       }
-      if (assigned_to !== undefined || estimate_hours !== undefined) {
+      if (assigned_to !== undefined || estimate_amount !== undefined) {
         return res.status(403).json({ message: 'Only company employees can assign or estimate tickets' });
       }
       if (status !== undefined && !CREATOR_STATUSES.includes(status)) {
@@ -275,13 +275,15 @@ router.put('/ticket/:id', authenticate, async (req, res) => {
       updates.push(`assigned_to = $${paramCount++}`);
       values.push(assigned_to || null);
     }
-    if (estimate_hours !== undefined) {
-      const estimate = parseEstimateHours(estimate_hours);
+    if (estimate_amount !== undefined) {
+      const estimate = parseEstimate(estimate_amount, estimate_unit);
       if (estimate.error) {
         return res.status(400).json({ message: estimate.error });
       }
-      updates.push(`estimate_hours = $${paramCount++}`);
-      values.push(estimate.value);
+      updates.push(`estimate_amount = $${paramCount++}`);
+      values.push(estimate.value.amount);
+      updates.push(`estimate_unit = $${paramCount++}`);
+      values.push(estimate.value.unit);
     }
 
     if (updates.length === 0) {
@@ -301,7 +303,7 @@ router.put('/ticket/:id', authenticate, async (req, res) => {
     // Get updated ticket with all fields needed by mobile
     const result = await client.query(
       `SELECT t.id, t.company_id, t.creator_id, t.assigned_to, t.title, t.description, t.status, t.priority,
-              t.estimate_hours, t.created_at, t.updated_at, t.resolved_at,
+              t.estimate_amount, t.estimate_unit, t.created_at, t.updated_at, t.resolved_at,
               creator.handle as creator_handle, creator.first_name as creator_first_name,
               creator.last_name as creator_last_name,
               assignee.handle as assignee_handle, assignee.first_name as assignee_first_name,

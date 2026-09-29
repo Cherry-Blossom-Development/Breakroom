@@ -1,15 +1,23 @@
-// Ticket time estimates (migration 080), in hours.
-const MAX_ESTIMATE_HOURS = 9999.99;
+// Ticket time estimates (migration 083): an amount plus the unit it was
+// entered in ('3 days' is stored as 3 + 'days', never converted to hours).
+const ESTIMATE_UNITS = ['hours', 'days', 'weeks', 'months'];
+const MAX_ESTIMATE_AMOUNT = 9999.99;
 
-// Parses a request value into { value } (a number rounded to 2 decimals, or
-// null to clear) or { error }. '' / null clear the estimate.
-function parseEstimateHours(raw) {
-  if (raw === null || raw === '') return { value: null };
-  const hours = Number(raw);
-  if (!Number.isFinite(hours) || hours <= 0 || hours > MAX_ESTIMATE_HOURS) {
-    return { error: `Estimate must be a number of hours greater than 0 and at most ${MAX_ESTIMATE_HOURS}` };
+// Parses request values into { value: { amount, unit } } (amount rounded to
+// 2 decimals; both null to clear) or { error }. An empty/null amount clears
+// the estimate.
+function parseEstimate(rawAmount, rawUnit) {
+  if (rawAmount === null || rawAmount === undefined || rawAmount === '') {
+    return { value: { amount: null, unit: null } };
   }
-  return { value: Math.round(hours * 100) / 100 };
+  const amount = Number(rawAmount);
+  if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_ESTIMATE_AMOUNT) {
+    return { error: `Estimate must be a number greater than 0 and at most ${MAX_ESTIMATE_AMOUNT}` };
+  }
+  if (!ESTIMATE_UNITS.includes(rawUnit)) {
+    return { error: `Estimate unit must be one of: ${ESTIMATE_UNITS.join(', ')}` };
+  }
+  return { value: { amount: Math.round(amount * 100) / 100, unit: rawUnit } };
 }
 
-module.exports = { parseEstimateHours };
+module.exports = { ESTIMATE_UNITS, parseEstimate };

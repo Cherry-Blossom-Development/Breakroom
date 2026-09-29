@@ -7,6 +7,7 @@ import StatusBadge from '../components/StatusBadge.vue'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
 import RichTextEditor from '../components/RichTextEditor.vue'
 import { user } from '../stores/user'
+import { ESTIMATE_UNITS, hasEstimate, formatEstimate, formatEstimateShort } from '../utilities/ticketEstimates'
 
 // embedded: rendered as the Kanban tab inside ProjectWorkspacePage, which
 // already shows the project title and its own Back button.
@@ -30,7 +31,8 @@ const newTicket = ref({
   title: '',
   description: '',
   priority: 'medium',
-  estimate_hours: ''
+  estimate_amount: '',
+  estimate_unit: 'hours'
 })
 const submitting = ref(false)
 
@@ -269,22 +271,25 @@ async function removeDependency(dependsOnId) {
   }
 }
 
-// ---- Time estimates (migration 080), in hours; employees set them ----
-// DECIMAL comes back from MySQL as a string ("4.00")
-function formatEstimate(hours) {
-  if (hours === null || hours === undefined || hours === '') return ''
-  return `${Number(hours)}h`
-}
-
+// ---- Time estimates (migration 083): an amount + unit (hours/days/weeks/
+// months), stored as entered; employees and working members set them ----
 const estimateInput = ref('')
+const estimateUnitInput = ref('hours')
 const estimateError = ref('')
 const savingEstimate = ref(false)
+
+function resetEstimateInputs(ticket) {
+  estimateInput.value = hasEstimate(ticket) ? String(Number(ticket.estimate_amount)) : ''
+  estimateUnitInput.value = hasEstimate(ticket) ? ticket.estimate_unit : 'hours'
+}
 
 async function saveEstimate() {
   const ticket = selectedTicket.value
   if (!ticket) return
-  const current = ticket.estimate_hours === null ? '' : String(Number(ticket.estimate_hours))
-  if (String(estimateInput.value) === current) return
+  const amount = String(estimateInput.value)
+  if (hasEstimate(ticket)
+    ? amount === String(Number(ticket.estimate_amount)) && estimateUnitInput.value === ticket.estimate_unit
+    : amount === '') return
 
   savingEstimate.value = true
   estimateError.value = ''
@@ -292,13 +297,18 @@ async function saveEstimate() {
     const res = await authFetch(`/api/helpdesk/ticket/${ticket.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ estimate_hours: estimateInput.value === '' ? null : estimateInput.value })
+      body: JSON.stringify({
+        estimate_amount: amount === '' ? null : amount,
+        estimate_unit: estimateUnitInput.value
+      })
     })
     const data = await res.json()
     if (!res.ok) throw new Error(data.message || 'Failed to save estimate')
-    ticket.estimate_hours = data.ticket.estimate_hours
+    const { estimate_amount, estimate_unit } = data.ticket
+    Object.assign(ticket, { estimate_amount, estimate_unit })
     const boardTicket = ticketsById.value.get(ticket.id)
-    if (boardTicket) boardTicket.estimate_hours = data.ticket.estimate_hours
+    if (boardTicket) Object.assign(boardTicket, { estimate_amount, estimate_unit })
+    resetEstimateInputs(ticket)
   } catch (err) {
     estimateError.value = err.message
   } finally {
@@ -360,18 +370,19 @@ async function createTicket() {
         title: newTicket.value.title,
         description: newTicket.value.description,
         priority: newTicket.value.priority,
-        ...(canWork.value && newTicket.value.estimate_hours !== ''
-          ? { estimate_hours: newTicket.value.estimate_hours }
+        ...(canWork.value && newTicket.value.estimate_amount !== ''
+          ? { estimate_amount: newTicket.value.estimate_amount, estimate_unit: newTicket.value.estimate_unit }
           : {})
       })
     })
 
     if (!res.ok) {
-      throw new Error('Failed to create ticket')
+      const data = await res.json().catch(() => ({}))
+      throw new Error(data.message || 'Failed to create ticket')
     }
 
     // Reset form and refresh project data
-    newTicket.value = { title: '', description: '', priority: 'medium', estimate_hours: '' }
+    newTicket.value = { title: '', description: '', priority: 'medium', estimate_amount: '', estimate_unit: 'hours' }
     showNewTicketForm.value = false
     await fetchProject()
   } catch (err) {
@@ -438,7 +449,7 @@ function selectTicket(ticket) {
   editingTicket.value = false
   newDependencyId.value = ''
   dependencyError.value = ''
-  estimateInput.value = ticket.estimate_hours === null || ticket.estimate_hours === undefined ? '' : String(Number(ticket.estimate_hours))
+  resetEstimateInputs(ticket)
   estimateError.value = ''
   fetchComments(ticket.id)
 }
@@ -678,16 +689,21 @@ onMounted(async () => {
           </div>
 
           <div v-if="canWork" class="form-group">
-            <label for="estimate">Estimate (hours, optional)</label>
-            <input
-              id="estimate"
-              v-model="newTicket.estimate_hours"
-              type="number"
-              min="0.25"
-              max="9999"
-              step="0.25"
-              placeholder="e.g. 4"
-            />
+            <label for="estimate">Estimate</label>
+            <div class="estimate-fields">
+              <input
+                id="estimate"
+                v-model="newTicket.estimate_amount"
+                type="number"
+                min="0.25"
+                max="9999"
+                step="0.25"
+                placeholder="e.g. 4"
+              />
+              <select v-model="newTicket.estimate_unit" aria-label="Estimate unit">
+                <option v-for="unit in ESTIMATE_UNITS" :key="unit" :value="unit">{{ unit }}</option>
+              </select>
+            </div>
           </div>
 
           <div class="modal-actions">
@@ -730,7 +746,7 @@ onMounted(async () => {
             <p><strong>Created:</strong> {{ formatDate(selectedTicket.created_at) }}</p>
             <p v-if="selectedTicket.resolved_at"><strong>Resolved:</strong> {{ formatDate(selectedTicket.resolved_at) }}</p>
             <p><strong>Assigned to:</strong> {{ getAssigneeName(selectedTicket) }}</p>
-            <p v-if="!canWork"><strong>Estimate:</strong> {{ formatEstimate(selectedTicket.estimate_hours) || 'Not estimated' }}</p>
+            <p v-if="!canWork"><strong>Estimate:</strong> {{ formatEstimate(selectedTicket) || 'Not estimated' }}</p>
           </div>
 
           <div v-if="canWork" class="detail-estimate">
@@ -747,7 +763,14 @@ onMounted(async () => {
               @change="saveEstimate"
               @keydown.enter.prevent="saveEstimate"
             />
-            <span class="estimate-unit">hours</span>
+            <select
+              v-model="estimateUnitInput"
+              aria-label="Estimate unit"
+              :disabled="savingEstimate"
+              @change="saveEstimate"
+            >
+              <option v-for="unit in ESTIMATE_UNITS" :key="unit" :value="unit">{{ unit }}</option>
+            </select>
             <span v-if="savingEstimate" class="estimate-status">Saving...</span>
           </div>
           <p v-if="estimateError" class="dependency-error">{{ estimateError }}</p>
@@ -980,10 +1003,10 @@ onMounted(async () => {
                 <span class="ticket-id">#{{ ticket.id }}</span>
                 <span class="ticket-header-right">
                   <span
-                    v-if="ticket.estimate_hours !== null && ticket.estimate_hours !== undefined"
+                    v-if="hasEstimate(ticket)"
                     class="ticket-estimate"
-                    :title="`Estimate: ${formatEstimate(ticket.estimate_hours)}`"
-                  >{{ formatEstimate(ticket.estimate_hours) }}</span>
+                    :title="`Estimate: ${formatEstimate(ticket)}`"
+                  >{{ formatEstimateShort(ticket) }}</span>
                   <StatusBadge :color="priorityColor[ticket.priority]" size="xs">
                     {{ ticket.priority }}
                   </StatusBadge>
@@ -1710,7 +1733,22 @@ onMounted(async () => {
   margin-bottom: 12px;
 }
 
-.detail-estimate input {
+.estimate-fields {
+  display: flex;
+  gap: 8px;
+}
+
+.estimate-fields input {
+  flex: 1;
+  min-width: 0;
+}
+
+.estimate-fields select {
+  width: auto;
+}
+
+.detail-estimate input,
+.detail-estimate select {
   width: 90px;
   padding: 6px 8px;
   border: 1px solid var(--color-border);
@@ -1720,7 +1758,6 @@ onMounted(async () => {
   font-size: 0.875rem;
 }
 
-.estimate-unit,
 .estimate-status {
   font-size: 0.85rem;
   color: var(--color-text-muted);

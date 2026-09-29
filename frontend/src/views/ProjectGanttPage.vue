@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
 import { buildGanttSchedule, startOfDay, HOURS_PER_DAY } from '../utilities/ganttSchedule'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
+import { formatEstimate } from '../utilities/ticketEstimates'
 
 // GANTT tab of the project workspace. Scheduling rules live in
 // utilities/ganttSchedule.js; this page only fetches and draws.
@@ -153,8 +154,11 @@ const todayX = computed(() => xOf(now))
 const bodyHeight = computed(() => Math.max(rows.value.length, 1) * ROW_H)
 
 // ---- Formatting ----
+// Scheduled working time: hours under a day, else working days
 function formatHours(hours) {
-  return `${Math.round(hours * 100) / 100}h`
+  if (hours < HOURS_PER_DAY) return `${Math.round(hours * 100) / 100}h`
+  const days = Math.round((hours / HOURS_PER_DAY) * 10) / 10
+  return `${days} working day${days === 1 ? '' : 's'}`
 }
 
 function formatDate(date) {
@@ -178,7 +182,7 @@ function barLabel(row) {
     `#${t.id} ${t.title}`,
     STAGE_LABELS[row.stage],
     assigneeName(t),
-    row.unestimated ? 'no estimate (1 day assumed)' : `${formatHours(row.hours)} estimate`,
+    row.unestimated ? 'no estimate (1 day assumed)' : `${formatEstimate(row.ticket)} estimate`,
     `${formatDate(row.start)} to ${formatEnd(row.end)}`
   ]
   if (row.overdue) parts.push('overdue')
@@ -421,7 +425,7 @@ onUnmounted(() => resizeObserver?.disconnect())
                 <template v-else>{{ STAGE_LABELS[r.stage] }}</template>
               </td>
               <td>{{ assigneeName(r.ticket) }}</td>
-              <td class="num">{{ r.unestimated ? '— (1d)' : formatHours(r.hours) }}</td>
+              <td class="num">{{ r.unestimated ? '— (1d)' : formatEstimate(r.ticket) }}</td>
               <td>{{ formatDate(r.start) }}<span v-if="!r.startKnown" class="approx" title="Start time wasn't recorded; estimated from the estimate"> (est.)</span></td>
               <td>{{ formatEnd(r.end) }}</td>
               <td>
@@ -452,7 +456,7 @@ onUnmounted(() => resizeObserver?.disconnect())
         <dd>{{ assigneeName(tooltip.row.ticket) }}</dd>
         <dt>Estimate</dt>
         <dd>
-          {{ tooltip.row.unestimated ? 'None — 1 day assumed' : formatHours(tooltip.row.hours) }}
+          {{ tooltip.row.unestimated ? 'None — 1 day assumed' : formatEstimate(tooltip.row.ticket) }}
           <template v-if="tooltip.row.stage === 'in_progress' && !tooltip.row.overdue"> · {{ formatHours(tooltip.row.remainingHours) }} left</template>
         </dd>
         <dt>{{ tooltip.row.stage === 'done' ? 'Worked' : 'Scheduled' }}</dt>

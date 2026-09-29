@@ -7,7 +7,7 @@ const { getProjectDependencyEdges } = require('../utilities/ticketDependencies')
 const { isActiveEmployee, getTicketAccess } = require('../utilities/ticketAccess');
 const { PROJECT_ROLES, WORKER_ROLES, getProjectAccess } = require('../utilities/projectAccess');
 const { sendMailToUser } = require('../utilities/aws-ses-email');
-const { parseEstimateHours } = require('../utilities/ticketEstimates');
+const { parseEstimate } = require('../utilities/ticketEstimates');
 const { recordStatusChange, getProjectTicketTimeline } = require('../utilities/ticketStatusHistory');
 
 require('dotenv').config();
@@ -189,7 +189,7 @@ router.get('/:id', authenticate, async (req, res) => {
 
     const ticketsResult = await client.query(
       `SELECT t.id, t.company_id, t.creator_id, t.assigned_to, t.title, t.description, t.status, t.priority,
-              t.estimate_hours, t.created_at, t.updated_at, t.resolved_at,
+              t.estimate_amount, t.estimate_unit, t.created_at, t.updated_at, t.resolved_at,
               creator.handle as creator_handle, creator.first_name as creator_first_name,
               creator.last_name as creator_last_name,
               assignee.handle as assignee_handle, assignee.first_name as assignee_first_name,
@@ -572,7 +572,7 @@ router.get('/ticket/:ticketId', authenticate, async (req, res) => {
 // Create a ticket for a specific project
 router.post('/:id/tickets', authenticate, async (req, res) => {
   const { id } = req.params;
-  const { title, description, priority, estimate_hours } = req.body;
+  const { title, description, priority, estimate_amount, estimate_unit } = req.body;
   const client = await getClient();
 
   try {
@@ -604,26 +604,26 @@ router.post('/:id/tickets', authenticate, async (req, res) => {
       return res.status(403).json({ message: 'Not authorized to create tickets in this project' });
     }
 
-    let estimateHours = null;
-    if (access.canWork && estimate_hours !== undefined) {
-      const estimate = parseEstimateHours(estimate_hours);
-      if (estimate.error) {
-        return res.status(400).json({ message: estimate.error });
+    let estimate = { amount: null, unit: null };
+    if (access.canWork && estimate_amount !== undefined) {
+      const parsed = parseEstimate(estimate_amount, estimate_unit);
+      if (parsed.error) {
+        return res.status(400).json({ message: parsed.error });
       }
-      estimateHours = estimate.value;
+      estimate = parsed.value;
     }
 
     // Insert the ticket with 'backlog' status for project tickets
     await client.query(
-      `INSERT INTO tickets (company_id, creator_id, title, description, priority, estimate_hours, status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'backlog')`,
-      [project.company_id, req.user.id, title.trim(), description || '', priority || 'medium', estimateHours]
+      `INSERT INTO tickets (company_id, creator_id, title, description, priority, estimate_amount, estimate_unit, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'backlog')`,
+      [project.company_id, req.user.id, title.trim(), description || '', priority || 'medium', estimate.amount, estimate.unit]
     );
 
     // Get the inserted ticket with all fields needed by mobile
     const result = await client.query(
       `SELECT t.id, t.company_id, t.creator_id, t.assigned_to, t.title, t.description, t.status, t.priority,
-              t.estimate_hours, t.created_at, t.updated_at, t.resolved_at,
+              t.estimate_amount, t.estimate_unit, t.created_at, t.updated_at, t.resolved_at,
               creator.handle as creator_handle,
               creator.first_name as creator_first_name,
               creator.last_name as creator_last_name
