@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter, onBeforeRouteLeave } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
 import draggable from 'vuedraggable'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -47,14 +47,9 @@ const postingComment = ref(false)
 const editingCommentId = ref(null)
 const editCommentText = ref('')
 
-// Edit ticket state
+// Edit mode: shows the title/description/priority form (ticket creator
+// only). Its changes are staged in `draft` like every other change.
 const editingTicket = ref(false)
-const editForm = ref({
-  title: '',
-  description: '',
-  priority: 'medium'
-})
-const savingTicket = ref(false)
 
 const priorityColor = {
   low: 'gray',
@@ -165,8 +160,6 @@ async function fetchProject() {
 const dependencies = ref([])
 const canWork = ref(false)
 const newDependencyId = ref('')
-const dependencyError = ref('')
-const savingDependency = ref(false)
 
 // Prefer the board's live status (it changes on drag/transition) over the
 // status captured in the edge when the board loaded.
@@ -187,11 +180,24 @@ const openBlockersByTicket = computed(() => {
   return map
 })
 
+// Saved dependencies plus the draft's pending ones. pending: 'remove' (still
+// listed, struck through, until saved) or 'add' (not saved yet).
 const selectedDependsOn = computed(() => {
   if (!selectedTicket.value) return []
-  return dependencies.value
+  const removing = new Set(draft.value?.removeDeps || [])
+  const saved = dependencies.value
     .filter(d => d.ticket_id === selectedTicket.value.id)
-    .map(d => ({ id: d.depends_on_ticket_id, title: d.depends_on_title, status: liveStatus(d.depends_on_ticket_id, d.depends_on_status) }))
+    .map(d => ({
+      id: d.depends_on_ticket_id,
+      title: d.depends_on_title,
+      status: liveStatus(d.depends_on_ticket_id, d.depends_on_status),
+      pending: removing.has(d.depends_on_ticket_id) ? 'remove' : null
+    }))
+  const adding = (draft.value?.addDeps || [])
+    .map(id => ticketsById.value.get(id))
+    .filter(Boolean)
+    .map(t => ({ id: t.id, title: t.title, status: t.status, pending: 'add' }))
+  return [...saved, ...adding]
 })
 
 const selectedBlocking = computed(() => {
@@ -233,88 +239,196 @@ function replaceTicketEdges(ticketId, edges) {
   ]
 }
 
-async function addDependency() {
-  const ticketId = selectedTicket.value?.id
-  if (!ticketId || !newDependencyId.value) return
-  savingDependency.value = true
-  dependencyError.value = ''
-  try {
-    const res = await authFetch(`/api/helpdesk/ticket/${ticketId}/dependencies`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ depends_on_ticket_id: parseInt(newDependencyId.value) })
-    })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.message || 'Failed to add dependency')
-    replaceTicketEdges(ticketId, data.dependencies)
-    newDependencyId.value = ''
-  } catch (err) {
-    dependencyError.value = err.message
-  } finally {
-    savingDependency.value = false
+// Dependency edits are staged in the draft until Save Changes
+function addDependency() {
+  const id = parseInt(newDependencyId.value)
+  if (!draft.value || !id) return
+  if (draft.value.removeDeps.includes(id)) {
+    draft.value.removeDeps = draft.value.removeDeps.filter(x => x !== id)
+  } else if (!draft.value.addDeps.includes(id)) {
+    draft.value.addDeps.push(id)
+  }
+  newDependencyId.value = ''
+}
+
+// x on a saved dependency marks it for removal; on a pending one, drops it;
+// on one already marked for removal, undoes that
+function toggleDependency(dep) {
+  const d = draft.value
+  if (dep.pending === 'add') d.addDeps = d.addDeps.filter(x => x !== dep.id)
+  else if (dep.pending === 'remove') d.removeDeps = d.removeDeps.filter(x => x !== dep.id)
+  else d.removeDeps.push(dep.id)
+}
+
+// ---- Unsaved ticket changes ----
+// The detail panel stages every change -- title/description/priority,
+// status, assignee, estimate (amount + unit, migration 083) and
+// dependencies -- in `draft`. Nothing reaches the backend until Save
+// Changes, which sends one ticket update plus one call per dependency
+// change. Leaving with unsaved changes asks first.
+const draft = ref(null)
+const original = ref(null) // draft of the saved ticket, for dirty checks
+const savingChanges = ref(false)
+const saveError = ref('')
+
+const TICKET_FIELDS = ['title', 'description', 'priority', 'status', 'assigned_to']
+
+function draftFrom(ticket) {
+  return {
+    title: ticket.title,
+    description: ticket.description || '',
+    priority: ticket.priority,
+    status: ticket.status,
+    assigned_to: ticket.assigned_to ?? null,
+    estimate_amount: hasEstimate(ticket) ? Number(ticket.estimate_amount) : '',
+    estimate_unit: hasEstimate(ticket) ? ticket.estimate_unit : 'hours',
+    addDeps: [],
+    removeDeps: []
   }
 }
 
-async function removeDependency(dependsOnId) {
-  const ticketId = selectedTicket.value?.id
-  if (!ticketId) return
-  dependencyError.value = ''
-  try {
-    const res = await authFetch(`/api/helpdesk/ticket/${ticketId}/dependencies/${dependsOnId}`, {
-      method: 'DELETE'
-    })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.message || 'Failed to remove dependency')
-    replaceTicketEdges(ticketId, data.dependencies)
-  } catch (err) {
-    dependencyError.value = err.message
+function resetDraft(ticket) {
+  draft.value = draftFrom(ticket)
+  original.value = draftFrom(ticket)
+  saveError.value = ''
+}
+
+// '' when not estimated (the unit alone doesn't count as a change)
+function estimateKey(d) {
+  return d.estimate_amount === '' || d.estimate_amount === null ? '' : `${Number(d.estimate_amount)} ${d.estimate_unit}`
+}
+
+// Changed ticket fields, as a PUT /api/helpdesk/ticket body
+function changedTicketFields() {
+  const d = draft.value
+  const o = original.value
+  const body = {}
+  for (const key of TICKET_FIELDS) {
+    if (d[key] !== o[key]) body[key] = key === 'title' ? d.title.trim() : d[key]
   }
+  if (estimateKey(d) !== estimateKey(o)) {
+    body.estimate_amount = d.estimate_amount === '' ? null : d.estimate_amount
+    body.estimate_unit = d.estimate_unit
+  }
+  return body
 }
 
-// ---- Time estimates (migration 083): an amount + unit (hours/days/weeks/
-// months), stored as entered; employees and working members set them ----
-const estimateInput = ref('')
-const estimateUnitInput = ref('hours')
-const estimateError = ref('')
-const savingEstimate = ref(false)
+const isDirty = computed(() => {
+  if (!draft.value || !original.value) return false
+  return Object.keys(changedTicketFields()).length > 0
+    || draft.value.addDeps.length > 0
+    || draft.value.removeDeps.length > 0
+})
 
-function resetEstimateInputs(ticket) {
-  estimateInput.value = hasEstimate(ticket) ? String(Number(ticket.estimate_amount)) : ''
-  estimateUnitInput.value = hasEstimate(ticket) ? ticket.estimate_unit : 'hours'
+// Merge a saved ticket (PUT response) into the panel and the board
+function applyTicketUpdate(saved) {
+  selectedTicket.value = { ...selectedTicket.value, ...saved }
+  const boardTicket = ticketsById.value.get(saved.id)
+  if (boardTicket) Object.assign(boardTicket, saved)
 }
 
-async function saveEstimate() {
-  const ticket = selectedTicket.value
-  if (!ticket) return
-  const amount = String(estimateInput.value)
-  if (hasEstimate(ticket)
-    ? amount === String(Number(ticket.estimate_amount)) && estimateUnitInput.value === ticket.estimate_unit
-    : amount === '') return
-
-  savingEstimate.value = true
-  estimateError.value = ''
+// Returns true when everything saved. On failure the unsaved part stays in
+// the draft and the error shows in the save bar.
+async function saveChanges() {
+  if (!isDirty.value) return true
+  if (savingChanges.value) return false
+  const ticketId = selectedTicket.value.id
+  savingChanges.value = true
+  saveError.value = ''
   try {
-    const res = await authFetch(`/api/helpdesk/ticket/${ticket.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        estimate_amount: amount === '' ? null : amount,
-        estimate_unit: estimateUnitInput.value
+    const body = changedTicketFields()
+    if ('title' in body && !body.title) throw new Error('Title is required')
+    if (Object.keys(body).length > 0) {
+      const res = await authFetch(`/api/helpdesk/ticket/${ticketId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
       })
-    })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.message || 'Failed to save estimate')
-    const { estimate_amount, estimate_unit } = data.ticket
-    Object.assign(ticket, { estimate_amount, estimate_unit })
-    const boardTicket = ticketsById.value.get(ticket.id)
-    if (boardTicket) Object.assign(boardTicket, { estimate_amount, estimate_unit })
-    resetEstimateInputs(ticket)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Failed to save changes')
+      applyTicketUpdate(data.ticket)
+      // Fields are saved; keep any pending dependency changes
+      const { addDeps, removeDeps } = draft.value
+      resetDraft(selectedTicket.value)
+      Object.assign(draft.value, { addDeps, removeDeps })
+    }
+
+    for (const id of [...draft.value.removeDeps]) {
+      const res = await authFetch(`/api/helpdesk/ticket/${ticketId}/dependencies/${id}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || `Failed to remove dependency on #${id}`)
+      replaceTicketEdges(ticketId, data.dependencies)
+      draft.value.removeDeps = draft.value.removeDeps.filter(x => x !== id)
+    }
+    for (const id of [...draft.value.addDeps]) {
+      const res = await authFetch(`/api/helpdesk/ticket/${ticketId}/dependencies`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ depends_on_ticket_id: id })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || `Failed to add dependency on #${id}`)
+      replaceTicketEdges(ticketId, data.dependencies)
+      draft.value.addDeps = draft.value.addDeps.filter(x => x !== id)
+    }
+
+    editingTicket.value = false
+    return true
   } catch (err) {
-    estimateError.value = err.message
+    saveError.value = err.message
+    return false
   } finally {
-    savingEstimate.value = false
+    savingChanges.value = false
   }
 }
+
+function discardChanges() {
+  resetDraft(selectedTicket.value)
+  editingTicket.value = false
+  newDependencyId.value = ''
+}
+
+// Status buttons pick the draft's status; picking the chosen one again
+// puts back the saved status
+function chooseStatus(status) {
+  draft.value.status = draft.value.status === status ? original.value.status : status
+}
+
+// ---- Leave-with-unsaved-changes prompt ----
+// confirmLeave() resolves true when it's fine to leave: nothing unsaved, or
+// the user saved (successfully) or discarded. False: keep editing.
+const leavePrompt = ref(null) // { resolve }
+const leaveSaveBtn = ref(null)
+
+function confirmLeave() {
+  if (!isDirty.value) return Promise.resolve(true)
+  return new Promise(resolve => {
+    leavePrompt.value = { resolve }
+    nextTick(() => leaveSaveBtn.value?.focus())
+  })
+}
+
+async function resolveLeave(choice) {
+  const { resolve } = leavePrompt.value
+  leavePrompt.value = null
+  if (choice === 'save') resolve(await saveChanges())
+  else resolve(choice === 'discard')
+}
+
+async function requestClose() {
+  if (await confirmLeave()) closeDetail()
+}
+
+onBeforeRouteLeave(() => confirmLeave())
+
+// Closing or reloading the browser tab: only the browser's own prompt is
+// possible there
+function handleBeforeUnload(e) {
+  if (!isDirty.value) return
+  e.preventDefault()
+  e.returnValue = ''
+}
+window.addEventListener('beforeunload', handleBeforeUnload)
 
 // Status changes: employees (and working project members) can make any
 // move; anyone else who created
@@ -327,32 +441,9 @@ function allowedTransitions(ticket) {
 }
 
 // Jump to a linked ticket if it's on this board (it may be in another project)
-function openLinkedTicket(id) {
+async function openLinkedTicket(id) {
   const ticket = ticketsById.value.get(id)
-  if (ticket) selectTicket(ticket)
-}
-
-async function assignTicket(ticketId, userId) {
-  try {
-    const res = await authFetch(`/api/helpdesk/ticket/${ticketId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ assigned_to: userId || null })
-    })
-
-    if (res.ok) {
-      await fetchProject()
-      // Update selected ticket if open
-      if (selectedTicket.value?.id === ticketId) {
-        const updated = tickets.value.find(t => t.id === ticketId)
-        if (updated) {
-          selectedTicket.value = { ...updated }
-        }
-      }
-    }
-  } catch (err) {
-    console.error('Error assigning ticket:', err)
-  }
+  if (ticket && await confirmLeave()) selectTicket(ticket)
 }
 
 async function createTicket() {
@@ -392,29 +483,6 @@ async function createTicket() {
   }
 }
 
-async function updateTicketStatus(ticketId, newStatus) {
-  try {
-    const res = await authFetch(`/api/helpdesk/ticket/${ticketId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus })
-    })
-
-    if (res.ok) {
-      // Update local state
-      const ticket = tickets.value.find(t => t.id === ticketId)
-      if (ticket) {
-        ticket.status = newStatus
-      }
-      if (selectedTicket.value?.id === ticketId) {
-        selectedTicket.value.status = newStatus
-      }
-    }
-  } catch (err) {
-    console.error('Error updating ticket:', err)
-  }
-}
-
 // Handle drag change - update ticket status when dropped in new column
 async function onDragChange(event, toStatus) {
   // Only handle when an item is added to this column
@@ -448,16 +516,16 @@ function selectTicket(ticket) {
   selectedTicket.value = { ...ticket }
   editingTicket.value = false
   newDependencyId.value = ''
-  dependencyError.value = ''
-  resetEstimateInputs(ticket)
-  estimateError.value = ''
+  resetDraft(ticket)
   fetchComments(ticket.id)
 }
 
 function closeDetail() {
   selectedTicket.value = null
+  draft.value = null
+  original.value = null
+  saveError.value = ''
   newDependencyId.value = ''
-  dependencyError.value = ''
   editingTicket.value = false
   ticketComments.value = []
   commentText.value = ''
@@ -466,7 +534,9 @@ function closeDetail() {
 }
 
 function handleTicketDetailKeydown(e) {
-  if (e.key === 'Escape') closeDetail()
+  if (e.key !== 'Escape') return
+  if (leavePrompt.value) resolveLeave('keep')
+  else requestClose()
 }
 
 watch(selectedTicket, (isOpen) => {
@@ -480,6 +550,7 @@ watch(selectedTicket, (isOpen) => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleTicketDetailKeydown)
+  window.removeEventListener('beforeunload', handleBeforeUnload)
 })
 
 async function fetchComments(ticketId) {
@@ -553,55 +624,6 @@ async function deleteComment(commentId) {
     }
   } catch (err) {
     console.error('Error deleting comment:', err)
-  }
-}
-
-function startEditTicket() {
-  editForm.value = {
-    title: selectedTicket.value.title,
-    description: selectedTicket.value.description || '',
-    priority: selectedTicket.value.priority
-  }
-  editingTicket.value = true
-}
-
-function cancelEdit() {
-  editingTicket.value = false
-}
-
-async function saveTicket() {
-  if (!editForm.value.title.trim()) {
-    return
-  }
-
-  savingTicket.value = true
-
-  try {
-    const res = await authFetch(`/api/helpdesk/ticket/${selectedTicket.value.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: editForm.value.title,
-        description: editForm.value.description,
-        priority: editForm.value.priority
-      })
-    })
-
-    if (res.ok) {
-      const data = await res.json()
-      // Update selected ticket with new data
-      selectedTicket.value = { ...selectedTicket.value, ...data.ticket }
-      // Update in tickets list
-      const index = tickets.value.findIndex(t => t.id === selectedTicket.value.id)
-      if (index !== -1) {
-        tickets.value[index] = { ...tickets.value[index], ...data.ticket }
-      }
-      editingTicket.value = false
-    }
-  } catch (err) {
-    console.error('Error saving ticket:', err)
-  } finally {
-    savingTicket.value = false
   }
 }
 
@@ -719,25 +741,25 @@ onMounted(async () => {
     </div>
 
     <!-- Ticket Detail Modal -->
-    <div v-if="selectedTicket" class="modal-overlay" @click.self="!editingTicket && closeDetail()">
+    <div v-if="selectedTicket && draft" class="modal-overlay" @click.self="requestClose">
       <div class="modal ticket-detail" role="dialog" aria-modal="true" aria-labelledby="ticket-detail-title">
         <div class="detail-header">
-          <h2 v-if="!editingTicket" id="ticket-detail-title">{{ selectedTicket.title }}</h2>
+          <h2 v-if="!editingTicket" id="ticket-detail-title">{{ draft.title }}</h2>
           <h2 v-else id="ticket-detail-title">Edit Ticket</h2>
           <div class="header-buttons">
-            <button v-if="!editingTicket && selectedTicket.creator_handle === user.username" class="btn-edit" @click="startEditTicket">Edit</button>
-            <button ref="ticketCloseBtn" class="close-btn" @click="closeDetail" aria-label="Close">&times;</button>
+            <button v-if="!editingTicket && selectedTicket.creator_handle === user.username" class="btn-edit" @click="editingTicket = true">Edit</button>
+            <button ref="ticketCloseBtn" class="close-btn" @click="requestClose" aria-label="Close">&times;</button>
           </div>
         </div>
 
         <!-- View Mode -->
         <template v-if="!editingTicket">
           <div class="detail-meta">
-            <StatusBadge :color="statusColor[selectedTicket.status]">
-              {{ statusLabels[selectedTicket.status] || selectedTicket.status }}
+            <StatusBadge :color="statusColor[draft.status]">
+              {{ statusLabels[draft.status] || draft.status }}
             </StatusBadge>
-            <StatusBadge :color="priorityColor[selectedTicket.priority]">
-              {{ selectedTicket.priority }}
+            <StatusBadge :color="priorityColor[draft.priority]">
+              {{ draft.priority }}
             </StatusBadge>
           </div>
 
@@ -753,36 +775,22 @@ onMounted(async () => {
             <label for="estimate-input"><strong>Estimate:</strong></label>
             <input
               id="estimate-input"
-              v-model="estimateInput"
+              v-model="draft.estimate_amount"
               type="number"
               min="0.25"
               max="9999"
               step="0.25"
               placeholder="Not estimated"
-              :disabled="savingEstimate"
-              @change="saveEstimate"
-              @keydown.enter.prevent="saveEstimate"
             />
-            <select
-              v-model="estimateUnitInput"
-              aria-label="Estimate unit"
-              :disabled="savingEstimate"
-              @change="saveEstimate"
-            >
+            <select v-model="draft.estimate_unit" aria-label="Estimate unit">
               <option v-for="unit in ESTIMATE_UNITS" :key="unit" :value="unit">{{ unit }}</option>
             </select>
-            <span v-if="savingEstimate" class="estimate-status">Saving...</span>
           </div>
-          <p v-if="estimateError" class="dependency-error">{{ estimateError }}</p>
 
           <div v-if="canWork" class="detail-assign">
             <label for="assign-select"><strong>Assign to:</strong></label>
-            <select
-              id="assign-select"
-              :value="selectedTicket.assignee_id || ''"
-              @change="(e) => assignTicket(selectedTicket.id, e.target.value ? parseInt(e.target.value) : null)"
-            >
-              <option value="">Unassigned</option>
+            <select id="assign-select" v-model="draft.assigned_to">
+              <option :value="null">Unassigned</option>
               <option v-for="emp in assignees" :key="emp.user_id" :value="emp.user_id">
                 {{ emp.first_name }} {{ emp.last_name }} ({{ emp.handle }})
               </option>
@@ -791,7 +799,7 @@ onMounted(async () => {
 
           <div class="detail-description">
             <h3>Description</h3>
-            <div v-if="selectedTicket.description" class="rich-content" v-html="selectedTicket.description"></div>
+            <div v-if="draft.description" class="rich-content" v-html="draft.description"></div>
             <p v-else class="no-description">No description provided.</p>
           </div>
 
@@ -801,8 +809,10 @@ onMounted(async () => {
               <button
                 v-for="nextStatus in allowedTransitions(selectedTicket)"
                 :key="nextStatus"
-                @click="updateTicketStatus(selectedTicket.id, nextStatus)"
+                @click="chooseStatus(nextStatus)"
                 class="btn-status"
+                :class="{ chosen: draft.status === nextStatus }"
+                :aria-pressed="draft.status === nextStatus"
                 :style="{ background: statusHex[nextStatus] }"
               >
                 {{ statusLabels[nextStatus] }}
@@ -813,7 +823,7 @@ onMounted(async () => {
           <div class="detail-dependencies">
             <h3>Depends on</h3>
             <ul v-if="selectedDependsOn.length > 0" class="dependency-list">
-              <li v-for="dep in selectedDependsOn" :key="dep.id" class="dependency-item">
+              <li v-for="dep in selectedDependsOn" :key="dep.id" class="dependency-item" :class="dep.pending && `pending-${dep.pending}`">
                 <button
                   class="dependency-link"
                   :disabled="!ticketsById.has(dep.id)"
@@ -823,12 +833,19 @@ onMounted(async () => {
                   <span class="dependency-id">#{{ dep.id }}</span> {{ dep.title }}
                 </button>
                 <StatusBadge :color="statusColor[dep.status]" soft size="xs">{{ statusLabels[dep.status] || dep.status }}</StatusBadge>
+                <span v-if="dep.pending === 'add'" class="dependency-pending">unsaved</span>
                 <button
-                  v-if="canWork"
+                  v-if="canWork && dep.pending === 'remove'"
+                  class="dependency-undo"
+                  :aria-label="`Keep dependency on #${dep.id}`"
+                  @click="toggleDependency(dep)"
+                >Undo</button>
+                <button
+                  v-else-if="canWork"
                   class="dependency-remove"
                   :aria-label="`Remove dependency on #${dep.id}`"
                   title="Remove dependency"
-                  @click="removeDependency(dep.id)"
+                  @click="toggleDependency(dep)"
                 >&times;</button>
               </li>
             </ul>
@@ -841,11 +858,8 @@ onMounted(async () => {
                   #{{ t.id }} {{ t.title }} ({{ statusLabels[t.status] || t.status }})
                 </option>
               </select>
-              <button class="btn-primary btn-sm" :disabled="!newDependencyId || savingDependency" @click="addDependency">
-                {{ savingDependency ? 'Adding...' : 'Add' }}
-              </button>
+              <button class="btn-primary btn-sm" :disabled="!newDependencyId" @click="addDependency">Add</button>
             </div>
-            <p v-if="dependencyError" class="dependency-error">{{ dependencyError }}</p>
 
             <template v-if="selectedBlocking.length > 0">
               <h3 class="blocking-heading">Blocking</h3>
@@ -917,12 +931,12 @@ onMounted(async () => {
         </template>
 
         <!-- Edit Mode -->
-        <form v-else @submit.prevent="saveTicket" class="edit-form">
+        <form v-else @submit.prevent="saveChanges" class="edit-form">
           <div class="form-group">
             <label for="edit-title">Title</label>
             <input
               id="edit-title"
-              v-model="editForm.title"
+              v-model="draft.title"
               type="text"
               placeholder="Ticket title"
               required
@@ -931,12 +945,12 @@ onMounted(async () => {
 
           <div class="form-group">
             <label>Description</label>
-            <RichTextEditor v-model="editForm.description" />
+            <RichTextEditor v-model="draft.description" />
           </div>
 
           <div class="form-group">
             <label for="edit-priority">Priority</label>
-            <select id="edit-priority" v-model="editForm.priority">
+            <select id="edit-priority" v-model="draft.priority">
               <option value="low">Low</option>
               <option value="medium">Medium</option>
               <option value="high">High</option>
@@ -945,14 +959,40 @@ onMounted(async () => {
           </div>
 
           <div class="modal-actions">
-            <button type="submit" class="btn-primary" :disabled="savingTicket">
-              {{ savingTicket ? 'Saving...' : 'Save Changes' }}
-            </button>
-            <button type="button" class="btn-secondary" @click="cancelEdit">
-              Cancel
+            <button type="button" class="btn-secondary" @click="editingTicket = false">
+              Back to ticket
             </button>
           </div>
         </form>
+
+        <!-- Appears once anything is changed; nothing is saved until clicked -->
+        <div v-if="isDirty || saveError" class="save-bar" role="region" aria-label="Unsaved changes">
+          <p v-if="saveError" class="save-error" role="alert">{{ saveError }}</p>
+          <div class="save-bar-row">
+            <span class="save-bar-note">{{ isDirty ? 'You have unsaved changes' : '' }}</span>
+            <div class="save-bar-buttons">
+              <button type="button" class="btn-secondary" :disabled="savingChanges || !isDirty" @click="discardChanges">
+                Discard Changes
+              </button>
+              <button type="button" class="btn-primary" :disabled="savingChanges || !isDirty" @click="saveChanges">
+                {{ savingChanges ? 'Saving...' : 'Save Changes' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Leaving the ticket (close, Escape, another ticket, another page) with unsaved changes -->
+    <div v-if="leavePrompt" class="modal-overlay leave-overlay" @click.self="resolveLeave('keep')">
+      <div class="modal leave-dialog" role="alertdialog" aria-modal="true" aria-labelledby="leave-title" aria-describedby="leave-desc">
+        <h2 id="leave-title">Unsaved changes</h2>
+        <p id="leave-desc">You have unsaved changes to this ticket. Save them before leaving?</p>
+        <div class="leave-actions">
+          <button type="button" class="btn-secondary" @click="resolveLeave('keep')">Keep Editing</button>
+          <button type="button" class="btn-secondary btn-discard" @click="resolveLeave('discard')">Discard Changes</button>
+          <button ref="leaveSaveBtn" type="button" class="btn-primary" @click="resolveLeave('save')">Save Changes</button>
+        </div>
       </div>
     </div>
 
@@ -1761,6 +1801,97 @@ onMounted(async () => {
 .estimate-status {
   font-size: 0.85rem;
   color: var(--color-text-muted);
+}
+
+/* Unsaved changes */
+.save-bar {
+  position: sticky;
+  bottom: 0;
+  margin: 20px -25px -25px;
+  padding: 12px 25px;
+  background: var(--color-background-card);
+  border-top: 1px solid var(--color-border);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.save-bar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.save-bar-note {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.save-bar-buttons {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.save-error {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: var(--color-error);
+}
+
+.btn-status.chosen {
+  outline: 3px solid var(--color-text);
+  outline-offset: 2px;
+}
+
+.dependency-item.pending-remove .dependency-link {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.dependency-pending {
+  font-size: 0.75rem;
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+.dependency-undo {
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--color-accent);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.leave-overlay {
+  z-index: 1100;
+}
+
+.leave-dialog {
+  width: 420px;
+}
+
+.leave-dialog h2 {
+  margin: 0 0 10px;
+}
+
+.leave-dialog p {
+  margin: 0 0 20px;
+  color: var(--color-text-secondary);
+}
+
+.leave-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn-discard:hover {
+  border-color: var(--color-error);
+  color: var(--color-error);
 }
 
 /* Dependencies */
