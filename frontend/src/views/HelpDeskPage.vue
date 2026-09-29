@@ -4,6 +4,7 @@ import { authFetch } from '../utilities/authFetch'
 import StatusBadge from '../components/StatusBadge.vue'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
 import RichTextEditor from '../components/RichTextEditor.vue'
+import TicketAttachments from '../components/TicketAttachments.vue'
 import { user } from '../stores/user'
 
 // Default to Cherry Blossom Development (company_id = 1)
@@ -19,9 +20,70 @@ const showNewTicketForm = ref(false)
 const newTicket = ref({
   title: '',
   description: '',
-  priority: 'medium'
+  priority: 'medium',
+  files: []
 })
 const submitting = ref(false)
+const createError = ref('')
+
+// ---- Attachments (migration 085) ----
+// Here attaching and removing happen right away (explicit actions, like the
+// status buttons); on the Kanban panel they wait for Save Changes.
+const ticketAttachments = ref([])
+const attachmentsBusy = ref(false)
+const attachmentError = ref('')
+
+async function fetchAttachments(ticketId) {
+  try {
+    const res = await authFetch(`/api/helpdesk/ticket/${ticketId}/attachments`)
+    if (res.ok) ticketAttachments.value = (await res.json()).attachments
+  } catch (err) {
+    console.error('Error fetching attachments:', err)
+  }
+}
+
+async function uploadAttachments(ticketId, files) {
+  const form = new FormData()
+  for (const file of files) form.append('files', file)
+  const res = await authFetch(`/api/helpdesk/ticket/${ticketId}/attachments`, { method: 'POST', body: form })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.message || 'Failed to upload attachments')
+  return data.attachments
+}
+
+async function attachFiles(files) {
+  attachmentsBusy.value = true
+  attachmentError.value = ''
+  try {
+    ticketAttachments.value = await uploadAttachments(selectedTicket.value.id, files)
+  } catch (err) {
+    attachmentError.value = err.message
+  } finally {
+    attachmentsBusy.value = false
+  }
+}
+
+async function removeAttachment(attachment) {
+  if (!confirm(`Remove ${attachment.file_name}?`)) return
+  attachmentsBusy.value = true
+  attachmentError.value = ''
+  try {
+    const res = await authFetch(`/api/helpdesk/attachment/${attachment.id}`, { method: 'DELETE' })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.message || 'Failed to remove attachment')
+    ticketAttachments.value = data.attachments
+  } catch (err) {
+    attachmentError.value = err.message
+  } finally {
+    attachmentsBusy.value = false
+  }
+}
+
+// Mirrors routes/helpdesk.js: employees or the ticket's creator attach;
+// employees or the uploader remove
+const canAttach = computed(() => !!selectedTicket.value
+  && (isEmployee.value || selectedTicket.value.creator_handle === user.username))
+const canRemoveAttachment = (a) => isEmployee.value || a.uploader_handle === user.username
 
 // Selected ticket for detail view
 const selectedTicket = ref(null)
@@ -120,6 +182,18 @@ async function createTicket() {
     return
   }
 
+  createError.value = ''
+  const files = newTicket.value.files
+  if (files.length > 10) {
+    createError.value = 'Attach at most 10 files at a time'
+    return
+  }
+  const tooBig = files.filter(f => f.size > 25 * 1024 * 1024)
+  if (tooBig.length) {
+    createError.value = `${tooBig.map(f => f.name).join(', ')} ${tooBig.length === 1 ? 'is' : 'are'} over 25 MB`
+    return
+  }
+
   submitting.value = true
 
   try {
@@ -134,16 +208,36 @@ async function createTicket() {
       })
     })
 
+    const data = await res.json().catch(() => ({}))
     if (!res.ok) {
-      throw new Error('Failed to create ticket')
+      throw new Error(data.message || 'Failed to create ticket')
+    }
+
+    // The ticket exists now; attach any picked files to it
+    let uploadError = ''
+    if (files.length > 0) {
+      try {
+        await uploadAttachments(data.ticket.id, files)
+      } catch (err) {
+        uploadError = err.message
+      }
     }
 
     // Reset form and refresh tickets
-    newTicket.value = { title: '', description: '', priority: 'medium' }
+    newTicket.value = { title: '', description: '', priority: 'medium', files: [] }
     showNewTicketForm.value = false
     await fetchTickets()
+
+    // Upload failed: open the new ticket so the files can be attached again
+    if (uploadError) {
+      const created = tickets.value.find(t => t.id === data.ticket.id)
+      if (created) {
+        selectTicket(created)
+        attachmentError.value = `The ticket was created, but its attachments didn't upload: ${uploadError}`
+      }
+    }
   } catch (err) {
-    error.value = err.message
+    createError.value = err.message
   } finally {
     submitting.value = false
   }
@@ -171,13 +265,18 @@ async function updateTicketStatus(ticketId, newStatus) {
 function selectTicket(ticket) {
   selectedTicket.value = { ...ticket }
   editingTicket.value = false
+  ticketAttachments.value = []
+  attachmentError.value = ''
   fetchComments(ticket.id)
+  fetchAttachments(ticket.id)
 }
 
 function closeDetail() {
   selectedTicket.value = null
   editingTicket.value = false
   ticketComments.value = []
+  ticketAttachments.value = []
+  attachmentError.value = ''
   commentText.value = ''
   editingCommentId.value = null
   editCommentText.value = ''
@@ -372,6 +471,19 @@ onMounted(() => {
             </select>
           </div>
 
+          <div class="form-group">
+            <label for="new-ticket-files">Attachments</label>
+            <input
+              id="new-ticket-files"
+              type="file"
+              multiple
+              @change="e => newTicket.files = [...e.target.files]"
+            />
+            <p class="form-hint">Screenshots, spreadsheets, documents — up to 25 MB each, 10 files.</p>
+          </div>
+
+          <p v-if="createError" class="form-error" role="alert">{{ createError }}</p>
+
           <div class="modal-actions">
             <button type="submit" class="btn-primary" :disabled="submitting">
               {{ submitting ? 'Creating...' : 'Create Ticket' }}
@@ -418,6 +530,16 @@ onMounted(() => {
             <div v-if="selectedTicket.description" class="rich-content" v-html="selectedTicket.description"></div>
             <p v-else class="no-description">No description provided.</p>
           </div>
+
+          <TicketAttachments
+            :attachments="ticketAttachments"
+            :can-attach="canAttach"
+            :can-remove="canRemoveAttachment"
+            :busy="attachmentsBusy"
+            :error="attachmentError"
+            @add="attachFiles"
+            @remove="removeAttachment"
+          />
 
           <!-- Employees can move tickets freely; a customer can only resolve/close their own -->
           <div class="detail-actions" v-if="selectedTicket.status !== 'closed' && (isEmployee || selectedTicket.creator_handle === user.username)">
@@ -614,6 +736,18 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.form-hint {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.form-error {
+  margin: 0 0 12px;
+  font-size: 0.85rem;
+  color: var(--color-error);
+}
+
 .helpdesk-page {
   max-width: 1000px;
 }

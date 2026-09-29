@@ -6,6 +6,7 @@ import draggable from 'vuedraggable'
 import StatusBadge from '../components/StatusBadge.vue'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
 import RichTextEditor from '../components/RichTextEditor.vue'
+import TicketAttachments from '../components/TicketAttachments.vue'
 import { user } from '../stores/user'
 import { ESTIMATE_UNITS, hasEstimate, formatEstimate, formatEstimateShort } from '../utilities/ticketEstimates'
 
@@ -32,8 +33,10 @@ const newTicket = ref({
   description: '',
   priority: 'medium',
   estimate_amount: '',
-  estimate_unit: 'hours'
+  estimate_unit: 'hours',
+  files: []
 })
+const createError = ref('')
 const submitting = ref(false)
 
 // Selected ticket for detail view
@@ -283,7 +286,9 @@ function draftFrom(ticket) {
     estimate_amount: hasEstimate(ticket) ? Number(ticket.estimate_amount) : '',
     estimate_unit: hasEstimate(ticket) ? ticket.estimate_unit : 'hours',
     addDeps: [],
-    removeDeps: []
+    removeDeps: [],
+    addFiles: [], // File objects to upload (migration 085)
+    removeAttachments: [] // saved attachment ids to delete
   }
 }
 
@@ -318,6 +323,8 @@ const isDirty = computed(() => {
   return Object.keys(changedTicketFields()).length > 0
     || draft.value.addDeps.length > 0
     || draft.value.removeDeps.length > 0
+    || draft.value.addFiles.length > 0
+    || draft.value.removeAttachments.length > 0
 })
 
 // Merge a saved ticket (PUT response) into the panel and the board
@@ -347,10 +354,10 @@ async function saveChanges() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.message || 'Failed to save changes')
       applyTicketUpdate(data.ticket)
-      // Fields are saved; keep any pending dependency changes
-      const { addDeps, removeDeps } = draft.value
+      // Fields are saved; keep any pending dependency/attachment changes
+      const { addDeps, removeDeps, addFiles, removeAttachments } = draft.value
       resetDraft(selectedTicket.value)
-      Object.assign(draft.value, { addDeps, removeDeps })
+      Object.assign(draft.value, { addDeps, removeDeps, addFiles, removeAttachments })
     }
 
     for (const id of [...draft.value.removeDeps]) {
@@ -372,6 +379,18 @@ async function saveChanges() {
       draft.value.addDeps = draft.value.addDeps.filter(x => x !== id)
     }
 
+    for (const id of [...draft.value.removeAttachments]) {
+      const res = await authFetch(`/api/helpdesk/attachment/${id}`, { method: 'DELETE' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message || 'Failed to remove attachment')
+      ticketAttachments.value = data.attachments
+      draft.value.removeAttachments = draft.value.removeAttachments.filter(x => x !== id)
+    }
+    if (draft.value.addFiles.length > 0) {
+      ticketAttachments.value = await uploadAttachments(ticketId, draft.value.addFiles)
+      draft.value.addFiles = []
+    }
+
     editingTicket.value = false
     return true
   } catch (err) {
@@ -381,6 +400,35 @@ async function saveChanges() {
     savingChanges.value = false
   }
 }
+
+// ---- Attachments (migration 085) ----
+// Picked files and removals are staged in the draft like every other edit.
+const ticketAttachments = ref([])
+
+async function fetchAttachments(ticketId) {
+  try {
+    const res = await authFetch(`/api/helpdesk/ticket/${ticketId}/attachments`)
+    if (res.ok) ticketAttachments.value = (await res.json()).attachments
+  } catch (err) {
+    console.error('Error fetching attachments:', err)
+  }
+}
+
+// Uploads files in one request; returns the ticket's full attachment list
+async function uploadAttachments(ticketId, files) {
+  const form = new FormData()
+  for (const file of files) form.append('files', file)
+  const res = await authFetch(`/api/helpdesk/ticket/${ticketId}/attachments`, { method: 'POST', body: form })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.message || 'Failed to upload attachments')
+  return data.attachments
+}
+
+// Creator or anyone who can work the ticket may attach; the uploader or
+// anyone who can work it may remove (mirrors routes/helpdesk.js)
+const canAttach = computed(() => !!selectedTicket.value
+  && (canWork.value || selectedTicket.value.creator_handle === user.username))
+const canRemoveAttachment = (a) => canWork.value || a.uploader_handle === user.username
 
 function discardChanges() {
   resetDraft(selectedTicket.value)
@@ -451,6 +499,18 @@ async function createTicket() {
     return
   }
 
+  createError.value = ''
+  const files = newTicket.value.files
+  if (files.length > 10) {
+    createError.value = 'Attach at most 10 files at a time'
+    return
+  }
+  const tooBig = files.filter(f => f.size > 25 * 1024 * 1024)
+  if (tooBig.length) {
+    createError.value = `${tooBig.map(f => f.name).join(', ')} ${tooBig.length === 1 ? 'is' : 'are'} over 25 MB`
+    return
+  }
+
   submitting.value = true
 
   try {
@@ -467,17 +527,38 @@ async function createTicket() {
       })
     })
 
+    const data = await res.json().catch(() => ({}))
     if (!res.ok) {
-      const data = await res.json().catch(() => ({}))
       throw new Error(data.message || 'Failed to create ticket')
     }
 
+    // The ticket exists now; attach any picked files to it
+    let uploadError = ''
+    if (files.length > 0) {
+      try {
+        await uploadAttachments(data.ticket.id, files)
+      } catch (err) {
+        uploadError = err.message
+      }
+    }
+
     // Reset form and refresh project data
-    newTicket.value = { title: '', description: '', priority: 'medium', estimate_amount: '', estimate_unit: 'hours' }
+    newTicket.value = { title: '', description: '', priority: 'medium', estimate_amount: '', estimate_unit: 'hours', files: [] }
     showNewTicketForm.value = false
     await fetchProject()
+
+    // Upload failed: open the new ticket with the files still pending so
+    // Save Changes can retry
+    if (uploadError) {
+      const created = ticketsById.value.get(data.ticket.id)
+      if (created) {
+        selectTicket(created)
+        draft.value.addFiles = files
+        saveError.value = `The ticket was created, but its attachments didn't upload: ${uploadError}`
+      }
+    }
   } catch (err) {
-    error.value = err.message
+    createError.value = err.message
   } finally {
     submitting.value = false
   }
@@ -517,7 +598,9 @@ function selectTicket(ticket) {
   editingTicket.value = false
   newDependencyId.value = ''
   resetDraft(ticket)
+  ticketAttachments.value = []
   fetchComments(ticket.id)
+  fetchAttachments(ticket.id)
 }
 
 function closeDetail() {
@@ -528,6 +611,7 @@ function closeDetail() {
   newDependencyId.value = ''
   editingTicket.value = false
   ticketComments.value = []
+  ticketAttachments.value = []
   commentText.value = ''
   editingCommentId.value = null
   editCommentText.value = ''
@@ -728,6 +812,19 @@ onMounted(async () => {
             </div>
           </div>
 
+          <div class="form-group">
+            <label for="new-ticket-files">Attachments</label>
+            <input
+              id="new-ticket-files"
+              type="file"
+              multiple
+              @change="e => newTicket.files = [...e.target.files]"
+            />
+            <p class="form-hint">Images, spreadsheets, documents — up to 25 MB each, 10 files.</p>
+          </div>
+
+          <p v-if="createError" class="dependency-error" role="alert">{{ createError }}</p>
+
           <div class="modal-actions">
             <button type="submit" class="btn-primary" :disabled="submitting">
               {{ submitting ? 'Creating...' : 'Create Ticket' }}
@@ -802,6 +899,19 @@ onMounted(async () => {
             <div v-if="draft.description" class="rich-content" v-html="draft.description"></div>
             <p v-else class="no-description">No description provided.</p>
           </div>
+
+          <TicketAttachments
+            :attachments="ticketAttachments"
+            :pending-files="draft.addFiles"
+            :pending-removals="draft.removeAttachments"
+            :can-attach="canAttach"
+            :can-remove="canRemoveAttachment"
+            :busy="savingChanges"
+            @add="files => draft.addFiles.push(...files)"
+            @remove="a => draft.removeAttachments.push(a.id)"
+            @undo-remove="a => draft.removeAttachments = draft.removeAttachments.filter(id => id !== a.id)"
+            @drop-pending="i => draft.addFiles.splice(i, 1)"
+          />
 
           <div class="detail-actions" v-if="allowedTransitions(selectedTicket).length > 0">
             <h3>Move to</h3>
@@ -1168,6 +1278,12 @@ onMounted(async () => {
   margin-bottom: 6px;
   font-weight: 500;
   color: var(--color-text-secondary);
+}
+
+.form-hint {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
 }
 
 .form-group input,

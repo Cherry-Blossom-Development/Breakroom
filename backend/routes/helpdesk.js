@@ -7,6 +7,12 @@ const { getTicketDependencyEdges, wouldCreateCycle } = require('../utilities/tic
 const { CREATOR_STATUSES, getTicketAccess, canBeAssigned } = require('../utilities/ticketAccess');
 const { parseEstimate } = require('../utilities/ticketEstimates');
 const { recordStatusChange } = require('../utilities/ticketStatusHistory');
+const { v4: uuidv4 } = require('uuid');
+const path = require('path');
+const { uploadToS3, deleteFromS3, streamFromS3 } = require('../utilities/aws-s3');
+const {
+  uploadFiles, cleanFileName, isInlineType, contentDisposition, getTicketAttachments
+} = require('../utilities/ticketAttachments');
 
 require('dotenv').config();
 
@@ -558,6 +564,129 @@ router.delete('/comment/:id', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Error deleting ticket comment:', err);
     res.status(500).json({ message: 'Failed to delete comment' });
+  } finally {
+    client.release();
+  }
+});
+
+// ---- Ticket attachments (migration 085) ----
+// Anyone who can view a ticket can list and open its attachments; people
+// who can work it (employees, working project members) and its creator can
+// attach files; the uploader or anyone who can work the ticket can remove
+// one. Files stream through here, never straight from S3.
+
+router.get('/ticket/:id/attachments', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const access = await getTicketAccess(client, req.params.id, req.user.id);
+    if (!access) return res.status(404).json({ message: 'Ticket not found' });
+    if (!access.canView) return res.status(403).json({ message: 'Access denied' });
+
+    res.json({ attachments: await getTicketAttachments(client, req.params.id) });
+  } catch (err) {
+    console.error('Error fetching attachments:', err);
+    res.status(500).json({ message: 'Failed to fetch attachments' });
+  } finally {
+    client.release();
+  }
+});
+
+// Upload one or more files (multipart field "files")
+router.post('/ticket/:id/attachments', authenticate, uploadFiles, async (req, res) => {
+  const client = await getClient();
+  const uploadedKeys = [];
+  try {
+    const access = await getTicketAccess(client, req.params.id, req.user.id);
+    if (!access) return res.status(404).json({ message: 'Ticket not found' });
+    if (!access.canWork && !access.isCreator) {
+      return res.status(403).json({ message: 'Not authorized to attach files to this ticket' });
+    }
+    if (!req.files?.length) return res.status(400).json({ message: 'No files uploaded' });
+
+    // Everything goes to S3 first; rows are written only once all uploads
+    // succeed, and a failure removes the ones that made it
+    const rows = [];
+    for (const file of req.files) {
+      const fileName = cleanFileName(file.originalname);
+      const ext = path.extname(fileName).toLowerCase().replace(/[^.a-z0-9]/g, '').slice(0, 16);
+      const key = `tickets/${access.ticket.id}/${uuidv4()}${ext}`;
+      const contentType = file.mimetype || 'application/octet-stream';
+      const result = await uploadToS3(file.buffer, key, contentType);
+      if (!result.success) throw new Error(`Upload of ${fileName} failed`);
+      uploadedKeys.push(key);
+      rows.push([access.ticket.id, req.user.id, key, fileName, contentType, file.size]);
+    }
+
+    for (const row of rows) {
+      await client.query(
+        `INSERT INTO ticket_attachments (ticket_id, uploaded_by, s3_key, file_name, content_type, size_bytes)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        row
+      );
+    }
+
+    res.status(201).json({ attachments: await getTicketAttachments(client, access.ticket.id) });
+  } catch (err) {
+    console.error('Error uploading attachments:', err);
+    for (const key of uploadedKeys) await deleteFromS3(key);
+    res.status(500).json({ message: 'Failed to upload attachments' });
+  } finally {
+    client.release();
+  }
+});
+
+// Open / download one attachment. Raster images are served inline (for
+// previews); everything else downloads.
+router.get('/attachment/:id', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      'SELECT ticket_id, s3_key, file_name, content_type FROM ticket_attachments WHERE id = $1',
+      [req.params.id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Attachment not found' });
+    const attachment = result.rows[0];
+
+    const access = await getTicketAccess(client, attachment.ticket_id, req.user.id);
+    if (!access?.canView) return res.status(403).json({ message: 'Access denied' });
+
+    const inline = isInlineType(attachment.content_type) && req.query.download === undefined;
+    await streamFromS3(attachment.s3_key, req, res, {
+      'Content-Disposition': contentDisposition(attachment.file_name, inline),
+      'X-Content-Type-Options': 'nosniff',
+      'Cache-Control': 'private, max-age=3600'
+    });
+  } catch (err) {
+    console.error('Error streaming attachment:', err);
+    if (!res.headersSent) res.status(500).json({ message: 'Failed to open attachment' });
+  } finally {
+    client.release();
+  }
+});
+
+router.delete('/attachment/:id', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      'SELECT ticket_id, uploaded_by, s3_key FROM ticket_attachments WHERE id = $1',
+      [req.params.id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ message: 'Attachment not found' });
+    const attachment = result.rows[0];
+
+    const access = await getTicketAccess(client, attachment.ticket_id, req.user.id);
+    const isUploader = attachment.uploaded_by === req.user.id;
+    if (!access?.canWork && !(isUploader && access?.canView)) {
+      return res.status(403).json({ message: 'Not authorized to remove this attachment' });
+    }
+
+    await client.query('DELETE FROM ticket_attachments WHERE id = $1', [req.params.id]);
+    await deleteFromS3(attachment.s3_key);
+
+    res.json({ attachments: await getTicketAttachments(client, attachment.ticket_id) });
+  } catch (err) {
+    console.error('Error deleting attachment:', err);
+    res.status(500).json({ message: 'Failed to remove attachment' });
   } finally {
     client.release();
   }

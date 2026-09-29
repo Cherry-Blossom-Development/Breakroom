@@ -78,8 +78,9 @@ const getS3Url = (key) => {
  * @param {string} key - S3 object key
  * @param {object} req - Express request (reads req.headers.range)
  * @param {object} res - Express response
+ * @param {object} [extraHeaders] - added to the response (e.g. Content-Disposition)
  */
-const streamFromS3 = async (key, req, res) => {
+const streamFromS3 = async (key, req, res, extraHeaders = {}) => {
   const rangeHeader = req.headers.range;
 
   if (rangeHeader) {
@@ -101,6 +102,7 @@ const streamFromS3 = async (key, req, res) => {
       'Accept-Ranges': 'bytes',
       'Content-Length': chunkSize,
       'Content-Type': contentType,
+      ...extraHeaders,
     });
     s3Res.Body.pipe(res);
   } else {
@@ -111,6 +113,7 @@ const streamFromS3 = async (key, req, res) => {
       'Accept-Ranges': 'bytes',
       'Content-Length': s3Res.ContentLength,
       'Content-Type': s3Res.ContentType || 'application/octet-stream',
+      ...extraHeaders,
     });
     s3Res.Body.pipe(res);
   }
