@@ -290,3 +290,86 @@ export function buildGanttSchedule({ tickets, dependencies = [], timeline = [], 
 
   return { rows, summary, anchor }
 }
+
+// ---- Split tickets (migration 086) ----
+// A ticket split into subtasks is left off the schedule (its subtasks carry
+// the work), so dependency edges that touch it are re-pointed at its
+// subtasks: a split ticket's predecessors become each subtask's
+// predecessors, and anything that depended on it waits for all of them.
+export function expandSplitDependencies(dependencies, tickets, splitParents) {
+  const parentIds = new Set(splitParents.map(p => p.id))
+  if (parentIds.size === 0) return dependencies
+  const children = new Map()
+  for (const t of tickets) {
+    if (!parentIds.has(t.parent_ticket_id)) continue
+    if (!children.has(t.parent_ticket_id)) children.set(t.parent_ticket_id, [])
+    children.get(t.parent_ticket_id).push(t)
+  }
+  const expand = (id) => (parentIds.has(id) ? (children.get(id) || []).map(t => t.id) : [id])
+  const statusOf = new Map(tickets.map(t => [t.id, t.status]))
+
+  const out = new Map()
+  for (const d of dependencies) {
+    for (const from of expand(d.ticket_id)) {
+      for (const to of expand(d.depends_on_ticket_id)) {
+        if (from === to) continue
+        out.set(`${from}>${to}`, {
+          ...d,
+          ticket_id: from,
+          depends_on_ticket_id: to,
+          depends_on_status: statusOf.get(to) ?? d.depends_on_status
+        })
+      }
+    }
+  }
+  return [...out.values()]
+}
+
+// Inserts a summary row for each 'category' split ticket right above its
+// subtasks (which move up to sit together under it). The category spans
+// its visible subtasks; it has no work of its own. Subtask rows are marked
+// inCategory for indenting.
+export function withCategoryRows(rows, splitParents, tickets) {
+  const categories = new Map(splitParents.filter(p => p.split_mode === 'category').map(p => [p.id, p]))
+  if (categories.size === 0) return rows
+
+  const byCategory = new Map()
+  for (const r of rows) {
+    const parentId = r.ticket.parent_ticket_id
+    if (!categories.has(parentId)) continue
+    if (!byCategory.has(parentId)) byCategory.set(parentId, [])
+    byCategory.get(parentId).push(r)
+  }
+
+  const out = []
+  const emitted = new Set()
+  for (const r of rows) {
+    const parentId = r.ticket.parent_ticket_id
+    if (!byCategory.has(parentId)) {
+      out.push(r)
+      continue
+    }
+    if (emitted.has(parentId)) continue
+    emitted.add(parentId)
+    const kids = byCategory.get(parentId)
+    const allKids = tickets.filter(t => t.parent_ticket_id === parentId)
+    out.push({
+      ticket: categories.get(parentId),
+      stage: 'category',
+      isCategory: true,
+      start: new Date(Math.min(...kids.map(k => k.start))),
+      end: new Date(Math.max(...kids.map(k => k.end))),
+      hours: 0,
+      remainingHours: 0,
+      unestimated: false,
+      overdue: false,
+      startKnown: true,
+      dependsOn: [],
+      externalBlockers: [],
+      subtaskCount: allKids.length,
+      doneCount: allKids.filter(t => DONE_STATUSES.includes(t.status)).length
+    })
+    for (const k of kids) out.push({ ...k, inCategory: true })
+  }
+  return out
+}

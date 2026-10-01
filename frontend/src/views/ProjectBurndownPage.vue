@@ -17,6 +17,10 @@ const loading = ref(true)
 const error = ref(null)
 
 const measure = ref('work') // 'work' (working days) | 'tickets'
+// Category filter: a ticket split into subtasks as a 'category' (migration
+// 086) can be charted on its own
+const categoryId = ref(null)
+const categories = computed(() => tickets.value.filter(t => t.split_mode === 'category'))
 const view = ref('chart') // 'chart' | 'table'
 const now = new Date()
 
@@ -33,7 +37,8 @@ const burndown = computed(() => buildBurndown({
   start: sprint.value.start,
   end: sprint.value.end,
   now,
-  measure: measure.value
+  measure: measure.value,
+  categoryId: categoryId.value
 }))
 const days = computed(() => burndown.value.days)
 
@@ -189,7 +194,7 @@ const tooltip = computed(() => {
   }
 })
 
-watch([sprintIndex, measure], () => { activeIndex.value = null })
+watch([sprintIndex, measure, categoryId], () => { activeIndex.value = null })
 watch(view, async (v) => {
   if (v === 'chart') {
     await nextTick()
@@ -224,6 +229,10 @@ onUnmounted(() => resizeObserver?.disconnect())
         </div>
 
         <div class="burndown-controls">
+          <select v-if="categories.length" v-model="categoryId" class="category-filter" aria-label="Category">
+            <option :value="null">All work</option>
+            <option v-for="c in categories" :key="c.id" :value="c.id">#{{ c.id }} {{ c.title }}</option>
+          </select>
           <div class="segmented" role="group" aria-label="Measure">
             <button :class="{ active: measure === 'work' }" :aria-pressed="measure === 'work'" @click="measure = 'work'">Work</button>
             <button :class="{ active: measure === 'tickets' }" :aria-pressed="measure === 'tickets'" @click="measure = 'tickets'">Tickets</button>
@@ -482,6 +491,16 @@ onUnmounted(() => resizeObserver?.disconnect())
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+}
+
+.category-filter {
+  max-width: 260px;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background-card);
+  color: var(--color-text);
+  font-size: 0.85rem;
 }
 
 .segmented {

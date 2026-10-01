@@ -2,7 +2,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
-import { buildGanttSchedule, startOfDay, HOURS_PER_DAY } from '../utilities/ganttSchedule'
+import { buildGanttSchedule, startOfDay, HOURS_PER_DAY, expandSplitDependencies, withCategoryRows } from '../utilities/ganttSchedule'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
 import { formatEstimate } from '../utilities/ticketEstimates'
 
@@ -11,6 +11,9 @@ import { formatEstimate } from '../utilities/ticketEstimates'
 const route = useRoute()
 
 const tickets = ref([])
+// Tickets split into subtasks (migration 086): not scheduled themselves;
+// 'category' ones get a summary row over their subtasks
+const splitParents = ref([])
 const dependencies = ref([])
 const timeline = ref([])
 const loading = ref(true)
@@ -30,19 +33,21 @@ const STAGE_LABELS = {
   backlog: 'Backlog',
   'on-deck': 'On Deck',
   in_progress: 'In Progress',
-  done: 'Done'
+  done: 'Done',
+  category: 'Category'
 }
 
 const now = new Date()
 
 const schedule = computed(() => buildGanttSchedule({
   tickets: tickets.value,
-  dependencies: dependencies.value,
+  dependencies: expandSplitDependencies(dependencies.value, tickets.value, splitParents.value),
   timeline: timeline.value,
   now,
   includeDone: includeDone.value
 }))
-const rows = computed(() => schedule.value.rows)
+const rows = computed(() => withCategoryRows(schedule.value.rows, splitParents.value, tickets.value))
+const hasCategories = computed(() => rows.value.some(r => r.isCategory))
 const summary = computed(() => schedule.value.summary)
 const today = computed(() => schedule.value.anchor)
 
@@ -176,7 +181,14 @@ function assigneeName(t) {
   return t.assignee_handle || 'Unassigned'
 }
 
+function categoryProgress(row) {
+  return `${row.doneCount} of ${row.subtaskCount} subtask${row.subtaskCount === 1 ? '' : 's'} done`
+}
+
 function barLabel(row) {
+  if (row.isCategory) {
+    return `Category #${row.ticket.id} ${row.ticket.title}, ${categoryProgress(row)}, ${formatDate(row.start)} to ${formatEnd(row.end)}`
+  }
   const t = row.ticket
   const parts = [
     `#${t.id} ${t.title}`,
@@ -225,6 +237,7 @@ async function fetchData() {
     if (!res.ok) throw new Error(res.status === 404 ? 'Project not found' : 'Failed to load project')
     const data = await res.json()
     tickets.value = data.tickets
+    splitParents.value = data.split_parents || []
     dependencies.value = data.dependencies || []
     timeline.value = data.timeline || []
   } catch (err) {
@@ -308,6 +321,7 @@ onUnmounted(() => resizeObserver?.disconnect())
         <li v-if="includeDone"><span class="swatch stage-done"></span>Done</li>
         <li><span class="swatch swatch-unestimated"></span>No estimate (1 day assumed)</li>
         <li><span class="swatch swatch-overdue"></span>Overdue</li>
+        <li v-if="hasCategories"><span class="swatch swatch-category"></span>Category (spans its subtasks)</li>
         <li><span class="swatch-line"></span>Depends on</li>
         <li class="legend-note">{{ HOURS_PER_DAY }}h = 1 working day · weekends skipped</li>
       </ul>
@@ -348,11 +362,18 @@ onUnmounted(() => resizeObserver?.disconnect())
 
           <div class="gantt-body">
             <div class="body-labels" :style="{ width: `${LABEL_W}px` }">
-              <div v-for="bar in bars" :key="bar.row.ticket.id" class="label-row" :style="{ height: `${ROW_H}px` }">
+              <div
+                v-for="bar in bars"
+                :key="bar.row.ticket.id"
+                class="label-row"
+                :class="{ 'label-category': bar.row.isCategory, 'label-subtask': bar.row.inCategory }"
+                :style="{ height: `${ROW_H}px` }"
+              >
                 <span class="label-id">#{{ bar.row.ticket.id }}</span>
                 <span class="label-title" :title="bar.row.ticket.title">{{ bar.row.ticket.title }}</span>
                 <span class="label-meta">
-                  <span v-if="bar.row.overdue" class="label-overdue" title="Overdue">! Overdue</span>
+                  <span v-if="bar.row.isCategory">{{ bar.row.doneCount }}/{{ bar.row.subtaskCount }} done</span>
+                  <span v-else-if="bar.row.overdue" class="label-overdue" title="Overdue">! Overdue</span>
                   <span v-else-if="bar.row.stage === 'done'">✓ Done</span>
                   <span v-else>{{ STAGE_LABELS[bar.row.stage] }}</span>
                 </span>
@@ -418,14 +439,15 @@ onUnmounted(() => resizeObserver?.disconnect())
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in rows" :key="r.ticket.id">
+            <tr v-for="r in rows" :key="r.ticket.id" :class="{ 'row-category': r.isCategory, 'row-subtask': r.inCategory }">
               <td><span class="label-id">#{{ r.ticket.id }}</span> {{ r.ticket.title }}</td>
               <td>
-                <span v-if="r.overdue" class="label-overdue">! Overdue</span>
+                <template v-if="r.isCategory">Category · {{ categoryProgress(r) }}</template>
+                <span v-else-if="r.overdue" class="label-overdue">! Overdue</span>
                 <template v-else>{{ STAGE_LABELS[r.stage] }}</template>
               </td>
-              <td>{{ assigneeName(r.ticket) }}</td>
-              <td class="num">{{ r.unestimated ? '— (1d)' : formatEstimate(r.ticket) }}</td>
+              <td>{{ r.isCategory ? '—' : assigneeName(r.ticket) }}</td>
+              <td class="num">{{ r.isCategory ? '—' : r.unestimated ? '— (1d)' : formatEstimate(r.ticket) }}</td>
               <td>{{ formatDate(r.start) }}<span v-if="!r.startKnown" class="approx" title="Start time wasn't recorded; estimated from the estimate"> (est.)</span></td>
               <td>{{ formatEnd(r.end) }}</td>
               <td>
@@ -452,13 +474,19 @@ onUnmounted(() => resizeObserver?.disconnect())
           <span class="swatch" :class="`stage-${tooltip.row.stage}`"></span>{{ STAGE_LABELS[tooltip.row.stage] }}
           <span v-if="tooltip.row.overdue" class="label-overdue"> · overdue</span>
         </dd>
-        <dt>Assignee</dt>
-        <dd>{{ assigneeName(tooltip.row.ticket) }}</dd>
-        <dt>Estimate</dt>
-        <dd>
-          {{ tooltip.row.unestimated ? 'None — 1 day assumed' : formatEstimate(tooltip.row.ticket) }}
-          <template v-if="tooltip.row.stage === 'in_progress' && !tooltip.row.overdue"> · {{ formatHours(tooltip.row.remainingHours) }} left</template>
-        </dd>
+        <template v-if="tooltip.row.isCategory">
+          <dt>Subtasks</dt>
+          <dd>{{ categoryProgress(tooltip.row) }}</dd>
+        </template>
+        <template v-else>
+          <dt>Assignee</dt>
+          <dd>{{ assigneeName(tooltip.row.ticket) }}</dd>
+          <dt>Estimate</dt>
+          <dd>
+            {{ tooltip.row.unestimated ? 'None — 1 day assumed' : formatEstimate(tooltip.row.ticket) }}
+            <template v-if="tooltip.row.stage === 'in_progress' && !tooltip.row.overdue"> · {{ formatHours(tooltip.row.remainingHours) }} left</template>
+          </dd>
+        </template>
         <dt>{{ tooltip.row.stage === 'done' ? 'Worked' : 'Scheduled' }}</dt>
         <dd>{{ formatDate(tooltip.row.start) }}<span v-if="!tooltip.row.startKnown"> (est.)</span> → {{ formatEnd(tooltip.row.end) }}</dd>
         <template v-if="tooltip.row.dependsOn.length">
@@ -655,6 +683,59 @@ onUnmounted(() => resizeObserver?.disconnect())
 .stage-on-deck { background: var(--gantt-on-deck); }
 .stage-in_progress { background: var(--gantt-in-progress); }
 .stage-done { background: var(--gantt-done); }
+
+/* Category (split ticket): a thin bracket spanning its subtasks -- shape,
+   not just color, sets it apart */
+.bar.stage-category {
+  position: relative;
+  height: 6px !important;
+  margin-top: 0;
+  border-radius: 0;
+  background: var(--color-text-secondary);
+}
+
+/* end caps hang below the bar, like a bracket over the subtasks */
+.bar.stage-category::before,
+.bar.stage-category::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  width: 0;
+  height: 0;
+  border-top: 6px solid var(--color-text-secondary);
+}
+
+.bar.stage-category::before {
+  left: 0;
+  border-right: 6px solid transparent;
+}
+
+.bar.stage-category::after {
+  right: 0;
+  border-left: 6px solid transparent;
+}
+
+.swatch-category {
+  height: 4px;
+  border-radius: 0;
+  background: var(--color-text-secondary);
+}
+
+.label-category .label-title {
+  font-weight: 700;
+}
+
+.label-subtask {
+  padding-left: 22px !important;
+}
+
+.row-category td {
+  font-weight: 600;
+}
+
+.row-subtask td:first-child {
+  padding-left: 24px;
+}
 
 .empty-state {
   padding: 40px 20px;

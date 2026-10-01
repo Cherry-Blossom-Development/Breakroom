@@ -136,7 +136,7 @@ router.get('/ticket/:id', authenticate, async (req, res) => {
     }
 
     const result = await client.query(
-      `SELECT t.id, t.title, t.description, t.status, t.priority, t.estimate_amount, t.estimate_unit,
+      `SELECT t.id, t.parent_ticket_id, t.split_mode, t.title, t.description, t.status, t.priority, t.estimate_amount, t.estimate_unit,
               t.created_at, t.updated_at, t.resolved_at, t.company_id,
               c.name as company_name,
               creator.id as creator_id, creator.handle as creator_handle,
@@ -308,7 +308,7 @@ router.put('/ticket/:id', authenticate, async (req, res) => {
 
     // Get updated ticket with all fields needed by mobile
     const result = await client.query(
-      `SELECT t.id, t.company_id, t.creator_id, t.assigned_to, t.title, t.description, t.status, t.priority,
+      `SELECT t.id, t.company_id, t.parent_ticket_id, t.split_mode, t.creator_id, t.assigned_to, t.title, t.description, t.status, t.priority,
               t.estimate_amount, t.estimate_unit, t.created_at, t.updated_at, t.resolved_at,
               creator.handle as creator_handle, creator.first_name as creator_first_name,
               creator.last_name as creator_last_name,
@@ -564,6 +564,94 @@ router.delete('/comment/:id', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Error deleting ticket comment:', err);
     res.status(500).json({ message: 'Failed to delete comment' });
+  } finally {
+    client.release();
+  }
+});
+
+// ---- Split a ticket into subtasks (migration 086) ----
+// Creates the subtasks as ordinary tickets (same company, projects,
+// priority and assignee as the parent; parent_ticket_id set) and records on
+// the parent what became of it: 'hidden' or 'category'. A parent that was
+// already split can be split again to add more subtasks; it keeps its
+// original mode. Subtasks can't be split themselves (one level only).
+const SPLIT_MODES = ['hidden', 'category'];
+const MAX_SUBTASKS = 20;
+
+router.post('/ticket/:id/split', authenticate, async (req, res) => {
+  const { mode, subtasks } = req.body;
+  const client = await getClient();
+
+  try {
+    const access = await getTicketAccess(client, req.params.id, req.user.id);
+    if (!access) return res.status(404).json({ message: 'Ticket not found' });
+    if (!access.canWork) return res.status(403).json({ message: 'Not authorized to split this ticket' });
+
+    const parentResult = await client.query(
+      'SELECT id, company_id, parent_ticket_id, split_mode, status, priority, assigned_to FROM tickets WHERE id = $1',
+      [req.params.id]
+    );
+    const parent = parentResult.rows[0];
+    if (parent.parent_ticket_id) {
+      return res.status(400).json({ message: 'A subtask can’t be split further' });
+    }
+    if (['resolved', 'closed'].includes(parent.status)) {
+      return res.status(400).json({ message: 'A finished ticket can’t be split' });
+    }
+    const splitMode = parent.split_mode || mode;
+    if (!SPLIT_MODES.includes(splitMode)) {
+      return res.status(400).json({ message: 'Choose whether to hide the parent or make it a category' });
+    }
+    if (!Array.isArray(subtasks) || subtasks.length === 0 || subtasks.length > MAX_SUBTASKS) {
+      return res.status(400).json({ message: `Add between 1 and ${MAX_SUBTASKS} subtasks` });
+    }
+
+    // Validate everything before writing anything
+    const rows = [];
+    for (const [i, sub] of subtasks.entries()) {
+      const title = (sub?.title || '').trim();
+      if (!title) return res.status(400).json({ message: `Subtask ${i + 1} needs a title` });
+      if (title.length > 255) return res.status(400).json({ message: `Subtask ${i + 1}'s title is too long` });
+      const estimate = parseEstimate(sub.estimate_amount, sub.estimate_unit);
+      if (estimate.error) return res.status(400).json({ message: `Subtask ${i + 1}: ${estimate.error}` });
+      rows.push({ title, estimate: estimate.value });
+    }
+
+    // Subtasks start where the parent is on the board, if it hasn't been
+    // started; otherwise in the backlog
+    const status = ['backlog', 'on-deck'].includes(parent.status) ? parent.status : 'backlog';
+
+    await client.beginTransaction();
+    try {
+      const createdIds = [];
+      for (const row of rows) {
+        const result = await client.query(
+          `INSERT INTO tickets (company_id, parent_ticket_id, creator_id, assigned_to, title, description,
+                                priority, estimate_amount, estimate_unit, status)
+           VALUES ($1, $2, $3, $4, $5, '', $6, $7, $8, $9)`,
+          [parent.company_id, parent.id, req.user.id, parent.assigned_to, row.title,
+           parent.priority, row.estimate.amount, row.estimate.unit, status]
+        );
+        const childId = result.insertId;
+        createdIds.push(childId);
+        await client.query(
+          `INSERT INTO ticket_projects (ticket_id, project_id)
+           SELECT $1, project_id FROM ticket_projects WHERE ticket_id = $2`,
+          [childId, parent.id]
+        );
+        await recordStatusChange(client, childId, null, status, req.user.id);
+      }
+      await client.query('UPDATE tickets SET split_mode = $1 WHERE id = $2', [splitMode, parent.id]);
+      await client.commit();
+
+      res.status(201).json({ split_mode: splitMode, subtask_ids: createdIds });
+    } catch (err) {
+      await client.rollback();
+      throw err;
+    }
+  } catch (err) {
+    console.error('Error splitting ticket:', err);
+    res.status(500).json({ message: 'Failed to split ticket' });
   } finally {
     client.release();
   }

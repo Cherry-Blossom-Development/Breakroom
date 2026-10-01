@@ -7,6 +7,7 @@ import StatusBadge from '../components/StatusBadge.vue'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
 import RichTextEditor from '../components/RichTextEditor.vue'
 import TicketAttachments from '../components/TicketAttachments.vue'
+import SplitTicketDialog from '../components/SplitTicketDialog.vue'
 import { user } from '../stores/user'
 import { ESTIMATE_UNITS, hasEstimate, formatEstimate, formatEstimateShort } from '../utilities/ticketEstimates'
 
@@ -146,6 +147,7 @@ async function fetchProject() {
     project.value = data.project
     tickets.value = data.tickets
     dependencies.value = data.dependencies || []
+    splitParents.value = data.split_parents || []
     // Full edit rights: company employees and working project members
     canWork.value = !!data.can_work
     assignees.value = data.assignees || []
@@ -167,9 +169,56 @@ const newDependencyId = ref('')
 // Prefer the board's live status (it changes on drag/transition) over the
 // status captured in the edge when the board loaded.
 const ticketsById = computed(() => new Map(tickets.value.map(t => [t.id, t])))
-function liveStatus(id, fallback) {
-  return ticketsById.value.get(id)?.status ?? fallback
+
+// ---- Subtasks (migration 086) ----
+// Split tickets are off the board (the API returns them separately) but
+// open from their subtasks' "Subtask of" link.
+const splitParents = ref([])
+const splitParentsById = computed(() => new Map(splitParents.value.map(t => [t.id, t])))
+const subtasksOf = (id) => tickets.value.filter(t => t.parent_ticket_id === id)
+const parentOf = (ticket) => (ticket?.parent_ticket_id ? splitParentsById.value.get(ticket.parent_ticket_id) : null)
+
+const showSplitDialog = ref(false)
+// Split: subtasks can't be split further, and finished work isn't split
+const canSplit = computed(() => {
+  const t = selectedTicket.value
+  return !!t && canWork.value && !t.parent_ticket_id && !isDone(t.status)
+})
+
+async function openSplitDialog() {
+  // Settle unsaved edits first so the split works from the saved ticket
+  if (isDirty.value) {
+    if (!(await confirmLeave())) return
+    if (isDirty.value) discardChanges()
+  }
+  showSplitDialog.value = true
 }
+
+async function onSplit() {
+  showSplitDialog.value = false
+  const parentId = selectedTicket.value.id
+  await fetchProject()
+  // The parent is off the board now; reopen it to show its subtasks
+  const parent = splitParentsById.value.get(parentId)
+  if (parent) selectTicket(parent)
+}
+function liveStatus(id, fallback) {
+  const ticket = ticketsById.value.get(id)
+  if (ticket) return ticket.status
+  // A split ticket's own status goes stale -- its subtasks carry the work --
+  // so anything depending on it follows them: done once they all are
+  if (splitParentsById.value.has(id)) {
+    const subs = subtasksOf(id)
+    if (subs.length) {
+      if (subs.every(t => isDone(t.status))) return 'resolved'
+      return subs.some(t => t.status !== 'backlog' && t.status !== 'open') ? 'in_progress' : 'backlog'
+    }
+  }
+  return fallback
+}
+
+// Tickets the panel can open: the board's, plus split parents
+const canOpen = (id) => ticketsById.value.has(id) || splitParentsById.value.has(id)
 
 const isDone = (status) => status === 'resolved' || status === 'closed'
 
@@ -343,7 +392,7 @@ const isDirty = computed(() => {
 // Merge a saved ticket (PUT response) into the panel and the board
 function applyTicketUpdate(saved) {
   selectedTicket.value = { ...selectedTicket.value, ...saved }
-  const boardTicket = ticketsById.value.get(saved.id)
+  const boardTicket = ticketsById.value.get(saved.id) || splitParentsById.value.get(saved.id)
   if (boardTicket) Object.assign(boardTicket, saved)
 }
 
@@ -514,8 +563,9 @@ function allowedTransitions(ticket) {
 }
 
 // Jump to a linked ticket if it's on this board (it may be in another project)
+// Jumps to a ticket on this board, or to a split parent (off the board)
 async function openLinkedTicket(id) {
-  const ticket = ticketsById.value.get(id)
+  const ticket = ticketsById.value.get(id) || splitParentsById.value.get(id)
   if (ticket && await confirmLeave()) selectTicket(ticket)
 }
 
@@ -869,6 +919,9 @@ onMounted(async () => {
           <h2 v-if="!editingTicket" id="ticket-detail-title">{{ draft.title }}</h2>
           <h2 v-else id="ticket-detail-title">Edit Ticket</h2>
           <div class="header-buttons">
+            <button v-if="!editingTicket && canSplit" class="btn-edit" @click="openSplitDialog">
+              {{ selectedTicket.split_mode ? 'Add subtasks' : 'Split into subtasks' }}
+            </button>
             <button v-if="!editingTicket && selectedTicket.creator_handle === user.username" class="btn-edit" @click="editingTicket = true">Edit</button>
             <button ref="ticketCloseBtn" class="close-btn" @click="requestClose" aria-label="Close">&times;</button>
           </div>
@@ -883,6 +936,31 @@ onMounted(async () => {
             <StatusBadge :color="priorityColor[draft.priority]">
               {{ draft.priority }}
             </StatusBadge>
+          </div>
+
+          <p v-if="parentOf(selectedTicket)" class="subtask-of">
+            Subtask of
+            <button class="dependency-link" @click="openLinkedTicket(selectedTicket.parent_ticket_id)">
+              <span class="dependency-id">#{{ selectedTicket.parent_ticket_id }}</span> {{ parentOf(selectedTicket).title }}
+            </button>
+          </p>
+
+          <div v-if="selectedTicket.split_mode" class="split-summary">
+            <p class="split-note">
+              Split into subtasks ·
+              {{ selectedTicket.split_mode === 'category'
+                ? 'shown as a category on the GANTT and Burndown charts, off the Kanban board'
+                : 'hidden from the boards and charts' }}
+            </p>
+            <ul class="dependency-list">
+              <li v-for="sub in subtasksOf(selectedTicket.id)" :key="sub.id" class="dependency-item">
+                <button class="dependency-link" @click="openLinkedTicket(sub.id)">
+                  <span class="dependency-id">#{{ sub.id }}</span> {{ sub.title }}
+                </button>
+                <span v-if="formatEstimateShort(sub)" class="ticket-estimate">{{ formatEstimateShort(sub) }}</span>
+                <StatusBadge :color="statusColor[sub.status]" soft size="xs">{{ statusLabels[sub.status] || sub.status }}</StatusBadge>
+              </li>
+            </ul>
           </div>
 
           <div class="detail-info">
@@ -961,8 +1039,8 @@ onMounted(async () => {
               <li v-for="dep in selectedDependsOn" :key="dep.id" class="dependency-item" :class="dep.pending && `pending-${dep.pending}`">
                 <button
                   class="dependency-link"
-                  :disabled="!ticketsById.has(dep.id)"
-                  :title="ticketsById.has(dep.id) ? 'Open ticket' : 'In another project'"
+                  :disabled="!canOpen(dep.id)"
+                  :title="canOpen(dep.id) ? 'Open ticket' : 'In another project'"
                   @click="openLinkedTicket(dep.id)"
                 >
                   <span class="dependency-id">#{{ dep.id }}</span> {{ dep.title }}
@@ -1001,8 +1079,8 @@ onMounted(async () => {
                 <li v-for="dep in selectedBlocking" :key="dep.id" class="dependency-item">
                   <button
                     class="dependency-link"
-                    :disabled="!ticketsById.has(dep.id)"
-                    :title="ticketsById.has(dep.id) ? 'Open ticket' : 'In another project'"
+                    :disabled="!canOpen(dep.id)"
+                    :title="canOpen(dep.id) ? 'Open ticket' : 'In another project'"
                     @click="openLinkedTicket(dep.id)"
                   >
                     <span class="dependency-id">#{{ dep.id }}</span> {{ dep.title }}
@@ -1117,6 +1195,13 @@ onMounted(async () => {
       </div>
     </div>
 
+    <SplitTicketDialog
+      v-if="showSplitDialog && selectedTicket"
+      :ticket="selectedTicket"
+      @close="showSplitDialog = false"
+      @split="onSplit"
+    />
+
     <!-- Leaving the ticket (close, Escape, another ticket, another page) with unsaved changes -->
     <div v-if="leavePrompt" class="modal-overlay leave-overlay" @click.self="resolveLeave('keep')">
       <div class="modal leave-dialog" role="alertdialog" aria-modal="true" aria-labelledby="leave-title" aria-describedby="leave-desc">
@@ -1187,6 +1272,11 @@ onMounted(async () => {
                 </span>
               </div>
               <h4 class="ticket-title">{{ ticket.title }}</h4>
+              <div
+                v-if="parentOf(ticket)"
+                class="ticket-parent"
+                :title="`Subtask of #${ticket.parent_ticket_id} ${parentOf(ticket).title}`"
+              >↳ #{{ ticket.parent_ticket_id }} {{ parentOf(ticket).title }}</div>
               <div
                 v-if="openBlockersByTicket[ticket.id]"
                 class="ticket-blocked"
@@ -1941,6 +2031,40 @@ onMounted(async () => {
 .estimate-status {
   font-size: 0.85rem;
   color: var(--color-text-muted);
+}
+
+/* Subtasks */
+.subtask-of {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 12px;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.split-summary {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-background-soft);
+}
+
+.split-note {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: var(--color-text-secondary);
+}
+
+.ticket-parent {
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Unsaved changes */

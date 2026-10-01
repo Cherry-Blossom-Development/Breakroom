@@ -18,6 +18,11 @@
 //     the ticket's current estimate.
 //   - The ideal line runs from the sprint's starting remaining work to zero
 //     at the sprint's end, dropping only on working days (Mon-Fri).
+//   - A ticket split into subtasks (migration 086) counts until the moment
+//     it was split (its first subtask's creation), then its subtasks take
+//     over -- never both, so work isn't double counted, and only the
+//     difference shows up as "added". With categoryId set, only that split
+//     ticket and its subtasks are counted.
 
 import { estimateWorkingHours, workingHoursBetween, startOfDay, HOURS_PER_DAY } from './ganttSchedule'
 
@@ -81,19 +86,34 @@ export function statusAt(ticket, changes, t) {
  * @param {Date}   input.end       sprint end (exclusive midnight)
  * @param {Date}   input.now
  * @param {'work'|'tickets'} input.measure
+ * @param {number|null} input.categoryId  only this split ticket and its subtasks
  */
-export function buildBurndown({ tickets, history, start, end, now = new Date(), measure = 'work' }) {
+export function buildBurndown({ tickets, history, start, end, now = new Date(), measure = 'work', categoryId = null }) {
   const changesByTicket = new Map()
   for (const c of history) {
     if (!changesByTicket.has(c.ticket_id)) changesByTicket.set(c.ticket_id, [])
     changesByTicket.get(c.ticket_id).push(c)
   }
 
-  const sized = tickets.map(t => {
+  // When each split ticket was split: its earliest subtask's creation
+  const splitAt = new Map()
+  for (const t of tickets) {
+    if (!t.parent_ticket_id) continue
+    const created = new Date(t.created_at)
+    const prev = splitAt.get(t.parent_ticket_id)
+    if (!prev || created < prev) splitAt.set(t.parent_ticket_id, created)
+  }
+
+  const counted = categoryId === null
+    ? tickets
+    : tickets.filter(t => t.id === categoryId || t.parent_ticket_id === categoryId)
+  const sized = counted.map(t => {
     const hours = estimateWorkingHours(t)
     return {
       ticket: t,
       createdAt: new Date(t.created_at),
+      // A split ticket stops counting once its subtasks exist
+      replacedAt: t.split_mode ? splitAt.get(t.id) || null : null,
       changes: changesByTicket.get(t.id) || [],
       unestimated: hours === null,
       // Size in the chart's unit: working days, or 1 per ticket
@@ -101,7 +121,7 @@ export function buildBurndown({ tickets, history, start, end, now = new Date(), 
     }
   })
 
-  const exists = (s, t) => s.createdAt <= t
+  const exists = (s, t) => s.createdAt <= t && !(s.replacedAt && s.replacedAt <= t)
   const openAt = (s, t) => exists(s, t) && !isDone(statusAt(s.ticket, s.changes, t))
   const remainingAt = (t) => sized.reduce((sum, s) => sum + (openAt(s, t) ? s.size : 0), 0)
 
@@ -123,7 +143,12 @@ export function buildBurndown({ tickets, history, start, end, now = new Date(), 
         const wasOpen = openAt(s, dayStart)
         const isOpen = openAt(s, at)
         const createdToday = !exists(s, dayStart) && exists(s, at)
-        if (createdToday) {
+        const replacedToday = !!s.replacedAt && s.replacedAt > dayStart && s.replacedAt <= at
+        if (replacedToday) {
+          // Split today: its work moved to the subtasks (counted as they
+          // appear), so it leaves the scope rather than being completed
+          if (wasOpen) added -= s.size
+        } else if (createdToday) {
           added += s.size
           if (!isOpen) completed += s.size // created and finished the same day
         } else if (wasOpen && !isOpen) {

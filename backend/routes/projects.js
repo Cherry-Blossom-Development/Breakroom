@@ -188,7 +188,8 @@ router.get('/:id', authenticate, async (req, res) => {
     }
 
     const ticketsResult = await client.query(
-      `SELECT t.id, t.company_id, t.creator_id, t.assigned_to, t.title, t.description, t.status, t.priority,
+      `SELECT t.id, t.company_id, t.parent_ticket_id, t.split_mode, t.creator_id, t.assigned_to,
+              t.title, t.description, t.status, t.priority,
               t.estimate_amount, t.estimate_unit, t.created_at, t.updated_at, t.resolved_at,
               creator.handle as creator_handle, creator.first_name as creator_first_name,
               creator.last_name as creator_last_name,
@@ -218,9 +219,14 @@ router.get('/:id', authenticate, async (req, res) => {
       [id]
     );
 
+    // Tickets that were split into subtasks (migration 086) are off the
+    // board -- the board, the closed list and the mobile apps all use
+    // `tickets` -- but are returned separately so the GANTT chart can draw
+    // categories and the ticket panel can link subtasks to their parent.
     res.json({
       project: projectResult.rows[0],
-      tickets: ticketsResult.rows,
+      tickets: ticketsResult.rows.filter(t => !t.split_mode),
+      split_parents: ticketsResult.rows.filter(t => t.split_mode),
       dependencies: await getProjectDependencyEdges(client, id),
       // [{ ticket_id, started_at, done_at }] from status history (GANTT/Burndown)
       timeline: await getProjectTicketTimeline(client, id),
@@ -672,7 +678,7 @@ router.get('/:id/burndown', authenticate, async (req, res) => {
       [req.params.id]
     );
     const tickets = await client.query(
-      `SELECT t.id, t.title, t.status, t.estimate_amount, t.estimate_unit,
+      `SELECT t.id, t.parent_ticket_id, t.split_mode, t.title, t.status, t.estimate_amount, t.estimate_unit,
               t.created_at, t.updated_at, t.resolved_at
        FROM tickets t
        JOIN ticket_projects tp ON tp.ticket_id = t.id
