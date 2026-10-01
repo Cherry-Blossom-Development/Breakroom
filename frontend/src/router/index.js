@@ -270,6 +270,12 @@ const router = createRouter({
           props: { embedded: true },
         },
         {
+          path: 'backlog',
+          name: 'projectWorkspaceBacklog',
+          component: () => import('../views/ProjectPage.vue'),
+          props: { embedded: true, view: 'backlog' },
+        },
+        {
           path: 'closed',
           name: 'projectWorkspaceClosed',
           component: () => import('../views/ProjectClosedTicketsPage.vue'),
@@ -332,6 +338,13 @@ const router = createRouter({
       path: '/project/:id',
       name: 'projectDetail',
       component: () => import('../views/ProjectPage.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/project/:id/backlog',
+      name: 'projectBacklog',
+      component: () => import('../views/ProjectPage.vue'),
+      props: { view: 'backlog' },
       meta: { requiresAuth: true },
     },
     {
@@ -570,7 +583,7 @@ const FEATURE_ROUTES = {
   ],
   kanban: ['kanban'],
   tool_shed: ['toolShed'],
-  company_portal: ['aboutCompany', 'employment', 'helpDesk', 'companyPortal', 'companyDetail', 'projectDetail', 'projects', 'projectKanban', 'projectWorkspaceClosed', 'projectGantt', 'projectBurndown', 'projectSettings', 'projectClosedTickets'],
+  company_portal: ['aboutCompany', 'employment', 'helpDesk', 'companyPortal', 'companyDetail', 'projectDetail', 'projects', 'projectKanban', 'projectWorkspaceBacklog', 'projectBacklog', 'projectWorkspaceClosed', 'projectGantt', 'projectBurndown', 'projectSettings', 'projectClosedTickets'],
   band_pages: ['bandPageSetup', 'bandDomainSetup'],
 }
 

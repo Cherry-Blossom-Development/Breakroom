@@ -13,8 +13,12 @@ import { ESTIMATE_UNITS, hasEstimate, formatEstimate, formatEstimateShort } from
 
 // embedded: rendered as the Kanban tab inside ProjectWorkspacePage, which
 // already shows the project title and its own Back button.
+// view: 'board' (the lanes) or 'backlog' (the backlog as a list). The
+// backlog has no lane -- it outgrew one -- so the board links to the list,
+// which is this same page so tickets open in the same panel.
 const props = defineProps({
-  embedded: { type: Boolean, default: false }
+  embedded: { type: Boolean, default: false },
+  view: { type: String, default: 'board' }
 })
 
 const route = useRoute()
@@ -87,11 +91,32 @@ const statusLabels = {
   closed: 'Closed'
 }
 
-// Closed tickets get no lane -- they're counted in a link above the board
-// that opens ProjectClosedTicketsPage instead.
-const kanbanStatuses = ['backlog', 'on-deck', 'in_progress', 'resolved']
+// Backlog and Closed tickets get no lane -- they're counted in links above
+// the board that open the backlog list (this page, view 'backlog') and
+// ProjectClosedTicketsPage.
+const kanbanStatuses = ['on-deck', 'in_progress', 'resolved']
 
 const closedCount = computed(() => tickets.value.filter(t => t.status === 'closed').length)
+
+// Backlog, including Help Desk tickets still in the legacy 'open' status
+// (the API already orders tickets by priority, then newest first)
+const isBacklog = (t) => t.status === 'backlog' || t.status === 'open'
+const backlogTickets = computed(() => tickets.value.filter(isBacklog))
+const backlogLink = computed(() => ({
+  name: props.embedded ? 'projectWorkspaceBacklog' : 'projectBacklog',
+  params: { id: route.params.id }
+}))
+const boardLink = computed(() => (props.embedded
+  ? { name: 'projectKanban', params: { id: route.params.id } }
+  : `/project/${route.params.id}`))
+
+// Backlog list search: #id or words in the title
+const backlogSearch = ref('')
+const filteredBacklog = computed(() => {
+  const q = backlogSearch.value.trim().toLowerCase().replace(/^#/, '')
+  if (!q) return backlogTickets.value
+  return backlogTickets.value.filter(t => String(t.id) === q || t.title.toLowerCase().includes(q))
+})
 
 // Workspace board links to the workspace's closed list; the standalone
 // /project/:id board links to the standalone one.
@@ -541,7 +566,14 @@ async function requestClose() {
   if (await confirmLeave()) closeDetail()
 }
 
-onBeforeRouteLeave(() => confirmLeave())
+// Leaving the route closes the panel too: the board and the backlog list
+// are this same component, so Vue reuses it between them and an open (or
+// just-discarded) panel would otherwise follow you to the other view.
+onBeforeRouteLeave(async () => {
+  const ok = await confirmLeave()
+  if (ok) closeDetail()
+  return ok
+})
 
 // Closing or reloading the browser tab: only the browser's own prompt is
 // possible there
@@ -798,6 +830,8 @@ function goBack() {
 function getAvailableTransitions(currentStatus) {
   const transitions = {
     backlog: ['on-deck', 'in_progress'],
+    // Help Desk tickets start 'open'; on a board they're backlog
+    open: ['on-deck', 'in_progress'],
     'on-deck': ['backlog', 'in_progress'],
     in_progress: ['on-deck', 'resolved'],
     resolved: ['in_progress', 'closed'],
@@ -1224,15 +1258,59 @@ onMounted(async () => {
       <button @click="fetchProject">Retry</button>
     </div>
 
-    <!-- Closed-ticket link, right-aligned over the Resolved lane -->
-    <div v-if="!loading && !error" class="board-toolbar">
+    <!-- Backlog link on the left, closed-ticket link over the Resolved lane -->
+    <div v-if="!loading && !error && props.view === 'board'" class="board-toolbar">
+      <RouterLink :to="backlogLink" class="closed-tickets-link">
+        {{ backlogTickets.length }} Backlog ticket{{ backlogTickets.length === 1 ? '' : 's' }}
+      </RouterLink>
       <RouterLink :to="closedTicketsLink" class="closed-tickets-link">
         {{ closedCount }} Closed ticket{{ closedCount === 1 ? '' : 's' }}
       </RouterLink>
     </div>
 
+    <!-- Backlog list -->
+    <section v-if="!loading && !error && props.view === 'backlog'" class="backlog-view">
+      <RouterLink :to="boardLink" class="closed-tickets-link backlog-back">&larr; Back to Kanban Board</RouterLink>
+      <div class="backlog-head">
+        <h2>Backlog ({{ backlogTickets.length }})</h2>
+        <input
+          v-if="backlogTickets.length"
+          v-model="backlogSearch"
+          type="search"
+          class="backlog-search"
+          placeholder="Search #id or title"
+          aria-label="Search the backlog"
+        />
+      </div>
+
+      <p v-if="!backlogTickets.length" class="backlog-empty">The backlog is empty.</p>
+      <p v-else-if="!filteredBacklog.length" class="backlog-empty">No backlog tickets match "{{ backlogSearch }}".</p>
+      <ul v-else class="backlog-list">
+        <li v-for="ticket in filteredBacklog" :key="ticket.id">
+          <button class="backlog-item" :data-ticket-id="ticket.id" @click="selectTicket(ticket)">
+            <span class="ticket-id">#{{ ticket.id }}</span>
+            <span class="backlog-main">
+              <span class="backlog-title">{{ ticket.title }}</span>
+              <span class="backlog-meta">
+                <span v-if="parentOf(ticket)">↳ #{{ ticket.parent_ticket_id }} {{ parentOf(ticket).title }}</span>
+                <span v-if="openBlockersByTicket[ticket.id]" class="backlog-blocked">
+                  Blocked by {{ openBlockersByTicket[ticket.id].map(id => '#' + id).join(', ') }}
+                </span>
+                <span v-if="ticket.assignee_handle">{{ getAssigneeName(ticket) }}</span>
+                <span>Opened {{ formatDate(ticket.created_at) }}</span>
+              </span>
+            </span>
+            <span class="backlog-badges">
+              <span v-if="hasEstimate(ticket)" class="ticket-estimate" :title="`Estimate: ${formatEstimate(ticket)}`">{{ formatEstimateShort(ticket) }}</span>
+              <StatusBadge :color="priorityColor[ticket.priority]" size="xs">{{ ticket.priority }}</StatusBadge>
+            </span>
+          </button>
+        </li>
+      </ul>
+    </section>
+
     <!-- Kanban Board -->
-    <div v-if="!loading && !error" class="kanban-board">
+    <div v-if="!loading && !error && props.view === 'board'" class="kanban-board">
       <div
         v-for="status in kanbanStatuses"
         :key="status"
@@ -1622,8 +1700,113 @@ onMounted(async () => {
 
 .board-toolbar {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   margin-bottom: 8px;
+}
+
+/* Backlog list (view 'backlog') */
+.backlog-view {
+  max-width: 900px;
+}
+
+.backlog-back {
+  display: inline-block;
+  margin-bottom: 12px;
+}
+
+.backlog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.backlog-head h2 {
+  margin: 0;
+  font-size: 1.2rem;
+  color: var(--color-text);
+}
+
+.backlog-search {
+  width: 240px;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-background-card);
+  color: var(--color-text);
+  font-size: 0.9rem;
+}
+
+.backlog-empty {
+  padding: 30px;
+  text-align: center;
+  color: var(--color-text-light);
+}
+
+.backlog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.backlog-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--card-radius-sm);
+  background: var(--color-background-card);
+  box-shadow: var(--shadow-sm);
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+}
+
+.backlog-item:hover,
+.backlog-item:focus-visible {
+  box-shadow: var(--shadow-md);
+}
+
+.backlog-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.backlog-title {
+  font-weight: 500;
+}
+
+.backlog-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.backlog-blocked {
+  color: var(--color-warning, #c77700);
+}
+
+.backlog-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .closed-tickets-link {
