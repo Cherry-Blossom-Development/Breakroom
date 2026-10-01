@@ -40,12 +40,13 @@
       <RouterLink to="/explore" class="explore-link">See everything Prosaurus can do →</RouterLink>
     </div>
 
-    <p class="version-label">v1.13.0</p>
+    <p class="version-label">v{{ version }}</p>
   </section>
 </template>
 
 <script setup>
-// No logic needed yet
+// The label reads package.json, so a version bump can't leave it stale
+import { version } from '../../package.json'
 </script>
 
 <style scoped>
