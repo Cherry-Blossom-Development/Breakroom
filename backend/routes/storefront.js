@@ -1,4 +1,5 @@
 const express = require('express');
+const { sanitizeHtml } = require('../utilities/sanitizeHtml');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
@@ -297,7 +298,7 @@ router.put('/', authenticate, async (req, res) => {
       `INSERT INTO user_storefront (user_id, store_url, page_title, is_public, content, settings, external_url)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON DUPLICATE KEY UPDATE store_url = $2, page_title = $3, is_public = $4, content = $5, settings = $6, external_url = $7`,
-      [req.user.id, store_url || null, page_title || '', !!is_public, content || '', JSON.stringify(settings || {}), externalUrlValue]
+      [req.user.id, store_url || null, page_title || '', !!is_public, sanitizeHtml(content || ''), JSON.stringify(settings || {}), externalUrlValue]
     );
     await recalcStorefrontDiscoverActivity(client, req.user.id);
     res.json({ message: 'Saved' });

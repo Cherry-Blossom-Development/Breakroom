@@ -3,11 +3,16 @@ const router = express.Router();
 const { getClient } = require('../utilities/db');
 const { sendMail } = require('../utilities/aws-ses-email');
 const { recordStatusChange } = require('../utilities/ticketStatusHistory');
+const { sanitizeHtml } = require('../utilities/sanitizeHtml');
 
 // IDs for filing anonymous support tickets
 const SUPPORT_COMPANY_ID = 1;   // Cherry Blossom Development LLC
 const SUPPORT_CREATOR_ID = 11;  // admin user
 const SUPPORT_PROJECT_ID = 1;   // default project for company 1
+
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+));
 
 const ADMIN_EMAIL = 'dallascaley@gmail.com';
 const FROM_EMAIL  = 'noreply@prosaurus.com';
@@ -21,7 +26,13 @@ router.post('/', async (req, res) => {
   if (!subject || !subject.trim()) return res.status(400).json({ message: 'Subject is required' });
   if (!message || !message.trim()) return res.status(400).json({ message: 'Message is required' });
 
-  const description = `Support request from: ${name.trim()} <${email.trim()}>\n\n${message.trim()}`;
+  // Built as HTML from escaped input: this form is public, and the
+  // description is shown as rich text in the Help Desk
+  const lines = message.trim().split(/\r?\n/).filter(line => line.trim());
+  const description = sanitizeHtml(
+    `<p>Support request from: ${escapeHtml(name.trim())} &lt;${escapeHtml(email.trim())}&gt;</p>` +
+    lines.map(line => `<p>${escapeHtml(line)}</p>`).join('')
+  );
 
   let client;
   try {
@@ -42,10 +53,10 @@ router.post('/', async (req, res) => {
     // Email notification to admin
     const html = `
       <h2>New Support Request</h2>
-      <p><strong>From:</strong> ${name.trim()} &lt;${email.trim()}&gt;</p>
-      <p><strong>Subject:</strong> ${subject.trim()}</p>
+      <p><strong>From:</strong> ${escapeHtml(name.trim())} &lt;${escapeHtml(email.trim())}&gt;</p>
+      <p><strong>Subject:</strong> ${escapeHtml(subject.trim())}</p>
       <hr/>
-      <p>${message.trim().replace(/\n/g, '<br>')}</p>
+      <p>${escapeHtml(message.trim()).replace(/\n/g, '<br>')}</p>
       <hr/>
       <p style="color:#888;font-size:12px">Ticket #${insert.insertId} filed in HelpDesk</p>
     `;

@@ -158,7 +158,7 @@ onMounted(async () => {
         <div class="post-meta">
           <span class="post-date">{{ formattedDate }}</span>
         </div>
-        <div class="post-content" v-html="post.content"></div>
+        <div class="post-content" v-safe-html="post.content"></div>
       </article>
 
       <!-- Comments section -->

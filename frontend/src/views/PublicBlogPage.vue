@@ -132,7 +132,7 @@ function goToAuthorProfile() {
         <div class="author-info">
           <h1 class="blog-title">{{ blog.blog_name }}</h1>
           <p class="author-name">by {{ authorName }}</p>
-          <div v-if="blog.author?.bio" class="author-bio" v-html="blog.author.bio"></div>
+          <div v-if="blog.author?.bio" class="author-bio" v-safe-html="blog.author.bio"></div>
         </div>
       </header>
 
@@ -162,7 +162,7 @@ function goToAuthorProfile() {
           <p class="post-meta">
             {{ formatDate(currentPost.updated_at) }}
           </p>
-          <div class="post-body" v-html="currentPost.content"></div>
+          <div class="post-body" v-safe-html="currentPost.content"></div>
 
           <!-- Comments section -->
           <BlogComments :postId="currentPost.id" />

@@ -817,7 +817,7 @@ onMounted(() => {
             <template v-if="!editingCompanyInfo">
               <div v-if="company.description" class="info-row">
                 <label>Description</label>
-                <div class="rich-content" v-html="company.description"></div>
+                <div class="rich-content" v-safe-html="company.description"></div>
               </div>
 
               <div v-if="getLocationString()" class="info-row">
@@ -978,7 +978,7 @@ onMounted(() => {
                     <span v-if="pos.city || pos.state" class="meta-item">{{ [pos.city, pos.state].filter(Boolean).join(', ') }}</span>
                     <span class="meta-item pay">{{ formatPay(pos) }}</span>
                   </div>
-                  <div v-if="pos.description" class="position-description rich-content" v-html="pos.description"></div>
+                  <div v-if="pos.description" class="position-description rich-content" v-safe-html="pos.description"></div>
                 </div>
                 <div v-if="canManagePositions" class="position-actions">
                   <button @click="openPositionModal(pos)" class="btn-small">Edit</button>

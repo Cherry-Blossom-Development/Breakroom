@@ -168,13 +168,13 @@ async function unblockUser() {
       <div class="profile-card">
         <div class="bio-section">
           <h2>About</h2>
-          <div v-if="profile.bio" class="bio-text" v-html="profile.bio"></div>
+          <div v-if="profile.bio" class="bio-text" v-safe-html="profile.bio"></div>
           <p v-else class="bio-empty">This user hasn't added a bio yet.</p>
         </div>
 
         <div class="work-bio-section">
           <h2>Work Biography</h2>
-          <div v-if="profile.workBio" class="bio-text" v-html="profile.workBio"></div>
+          <div v-if="profile.workBio" class="bio-text" v-safe-html="profile.workBio"></div>
           <p v-else class="empty-state-text">No work biography added yet.</p>
         </div>
 

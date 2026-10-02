@@ -1,4 +1,5 @@
 const express = require('express');
+const { sanitizeHtml } = require('../utilities/sanitizeHtml');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
@@ -176,10 +177,10 @@ router.post('/company/:companyId', authenticate, async (req, res) => {
        (company_id, title, description, department, location_type, city, state, country,
         employment_type, pay_rate_min, pay_rate_max, pay_type, requirements, benefits, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-      [companyId, title.trim(), description || null, department || null,
+      [companyId, title.trim(), sanitizeHtml(description) || null, department || null,
        location_type || 'onsite', city || null, state || null, country || null,
        employment_type || 'full-time', pay_rate_min || null, pay_rate_max || null,
-       pay_type || 'salary', requirements || null, benefits || null, req.user.id]
+       pay_type || 'salary', sanitizeHtml(requirements) || null, sanitizeHtml(benefits) || null, req.user.id]
     );
 
     // Get the created position
@@ -249,10 +250,10 @@ router.put('/:id', authenticate, async (req, res) => {
         benefits = COALESCE($13, benefits),
         status = COALESCE($14, status)
        WHERE id = $15`,
-      [title ?? null, description ?? null, department ?? null, location_type ?? null,
+      [title ?? null, sanitizeHtml(description) ?? null, department ?? null, location_type ?? null,
        city ?? null, state ?? null, country ?? null, employment_type ?? null,
        pay_rate_min ?? null, pay_rate_max ?? null, pay_type ?? null,
-       requirements ?? null, benefits ?? null, status ?? null, id]
+       sanitizeHtml(requirements) ?? null, sanitizeHtml(benefits) ?? null, status ?? null, id]
     );
 
     const updatedResult = await client.query('SELECT * FROM open_positions WHERE id = $1', [id]);

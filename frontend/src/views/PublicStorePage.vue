@@ -18,7 +18,7 @@
           <div
             v-if="section.type === 'content' && storefront.content"
             class="store-body"
-            v-html="storefront.content"
+            v-safe-html="storefront.content"
           />
 
           <!-- Collections section -->

@@ -305,17 +305,17 @@ onMounted(() => {
 
         <div v-if="selectedPosition.description" class="detail-section">
           <h3>Description</h3>
-          <div class="rich-content" v-html="selectedPosition.description"></div>
+          <div class="rich-content" v-safe-html="selectedPosition.description"></div>
         </div>
 
         <div v-if="selectedPosition.requirements" class="detail-section">
           <h3>Requirements</h3>
-          <div class="rich-content" v-html="selectedPosition.requirements"></div>
+          <div class="rich-content" v-safe-html="selectedPosition.requirements"></div>
         </div>
 
         <div v-if="selectedPosition.benefits" class="detail-section">
           <h3>Benefits</h3>
-          <div class="rich-content" v-html="selectedPosition.benefits"></div>
+          <div class="rich-content" v-safe-html="selectedPosition.benefits"></div>
         </div>
 
         <div class="detail-footer">

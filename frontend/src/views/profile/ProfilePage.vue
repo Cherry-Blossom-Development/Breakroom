@@ -580,13 +580,13 @@ onMounted(() => {
         <template v-if="!isEditing">
           <div class="bio-section">
             <h2>About</h2>
-            <div v-if="profile.bio" class="bio-text rich-content" v-html="profile.bio"></div>
+            <div v-if="profile.bio" class="bio-text rich-content" v-safe-html="profile.bio"></div>
             <p v-else class="bio-empty">No bio yet. Click edit to add one!</p>
           </div>
 
           <div class="work-bio-section">
             <h2>Work Biography</h2>
-            <div v-if="profile.workBio" class="bio-text rich-content" v-html="profile.workBio"></div>
+            <div v-if="profile.workBio" class="bio-text rich-content" v-safe-html="profile.workBio"></div>
             <p v-else class="bio-empty">No work biography yet. Click edit to add one!</p>
           </div>
 

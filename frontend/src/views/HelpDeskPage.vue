@@ -528,7 +528,7 @@ onMounted(() => {
 
           <div class="detail-description">
             <h3>Description</h3>
-            <div v-if="selectedTicket.description" class="rich-content" v-html="toRichHtml(selectedTicket.description)"></div>
+            <div v-if="selectedTicket.description" class="rich-content" v-safe-html="toRichHtml(selectedTicket.description)"></div>
             <p v-else class="no-description">No description provided.</p>
           </div>
 

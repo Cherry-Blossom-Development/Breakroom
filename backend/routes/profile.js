@@ -1,4 +1,5 @@
 const express = require('express');
+const { sanitizeHtml } = require('../utilities/sanitizeHtml');
 const router = express.Router();
 const multer = require('multer');
 const path = require('path');
@@ -173,7 +174,7 @@ router.put('/', authenticate, async (req, res) => {
   try {
     await client.query(
       'UPDATE users SET bio = $1, work_bio = $2, first_name = $3, last_name = $4 WHERE id = $5',
-      [bio, workBio, firstName, lastName, req.user.id]
+      [sanitizeHtml(bio), sanitizeHtml(workBio), firstName, lastName, req.user.id]
     );
 
     res.json({ message: 'Profile updated successfully' });

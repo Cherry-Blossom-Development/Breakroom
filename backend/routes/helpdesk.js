@@ -7,6 +7,7 @@ const { getTicketDependencyEdges, wouldCreateCycle } = require('../utilities/tic
 const { CREATOR_STATUSES, getTicketAccess, canBeAssigned } = require('../utilities/ticketAccess');
 const { parseEstimate } = require('../utilities/ticketEstimates');
 const { recordStatusChange } = require('../utilities/ticketStatusHistory');
+const { sanitizeHtml } = require('../utilities/sanitizeHtml');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const { uploadToS3, deleteFromS3, streamFromS3 } = require('../utilities/aws-s3');
@@ -181,7 +182,7 @@ router.post('/tickets', authenticate, async (req, res) => {
     await client.query(
       `INSERT INTO tickets (company_id, creator_id, title, description, priority)
        VALUES ($1, $2, $3, $4, $5)`,
-      [company_id, req.user.id, title.trim(), description || '', priority || 'medium']
+      [company_id, req.user.id, title.trim(), sanitizeHtml(description || ''), priority || 'medium']
     );
 
     // Get the inserted ticket with all fields needed by mobile
@@ -260,7 +261,7 @@ router.put('/ticket/:id', authenticate, async (req, res) => {
     }
     if (description !== undefined) {
       updates.push(`description = $${paramCount++}`);
-      values.push(description);
+      values.push(sanitizeHtml(description));
     }
     if (status !== undefined) {
       const validStatuses = ['open', 'backlog', 'on-deck', 'in_progress', 'resolved', 'closed'];

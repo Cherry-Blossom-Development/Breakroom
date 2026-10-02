@@ -1159,7 +1159,7 @@ onMounted(async () => {
 
           <div class="detail-description">
             <h3>Description</h3>
-            <div v-if="draft.description" class="rich-content" v-html="toRichHtml(draft.description)"></div>
+            <div v-if="draft.description" class="rich-content" v-safe-html="toRichHtml(draft.description)"></div>
             <p v-else class="no-description">No description provided.</p>
           </div>
 

@@ -1,4 +1,5 @@
 const express = require('express');
+const { sanitizeHtml } = require('../utilities/sanitizeHtml');
 const router = express.Router();
 const { checkAndFilterContent } = require('../utilities/contentFilter');
 const multer = require('multer');
@@ -592,7 +593,7 @@ router.post('/posts', authenticate, async (req, res) => {
     await client.query(
       `INSERT INTO blog_posts (user_id, title, content, is_published)
        VALUES ($1, $2, $3, $4)`,
-      [req.user.id, title.trim(), content || '', isPublished || false]
+      [req.user.id, title.trim(), sanitizeHtml(content || ''), isPublished || false]
     );
     await recalcBlogDiscoverActivity(client, req.user.id);
 
@@ -643,7 +644,7 @@ router.put('/posts/:id', authenticate, async (req, res) => {
       `UPDATE blog_posts
        SET title = $1, content = $2, is_published = $3
        WHERE id = $4 AND user_id = $5`,
-      [title.trim(), content || '', isPublished || false, id, req.user.id]
+      [title.trim(), sanitizeHtml(content || ''), isPublished || false, id, req.user.id]
     );
     await recalcBlogDiscoverActivity(client, req.user.id);
 

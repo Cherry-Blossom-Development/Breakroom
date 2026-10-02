@@ -1,4 +1,5 @@
 const express = require('express');
+const { sanitizeHtml } = require('../utilities/sanitizeHtml');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
@@ -122,7 +123,7 @@ router.post('/', authenticate, async (req, res) => {
     await client.query(
       `INSERT INTO companies (name, description, address, city, state, country, postal_code, phone, email, website)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [name.trim(), description || null, address || null, city || null, state || null,
+      [name.trim(), sanitizeHtml(description) || null, address || null, city || null, state || null,
        country || null, postal_code || null, phone || null, email || null, website || null]
     );
 
@@ -529,7 +530,7 @@ router.put('/:id', authenticate, async (req, res) => {
         email = COALESCE($9, email),
         website = COALESCE($10, website)
        WHERE id = $11`,
-      [name, description, address, city, state, country, postal_code, phone, email, website, id]
+      [name, sanitizeHtml(description), address, city, state, country, postal_code, phone, email, website, id]
     );
 
     const result = await client.query('SELECT * FROM companies WHERE id = $1', [id]);

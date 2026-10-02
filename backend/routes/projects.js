@@ -7,6 +7,7 @@ const { getProjectDependencyEdges } = require('../utilities/ticketDependencies')
 const { isActiveEmployee, getTicketAccess } = require('../utilities/ticketAccess');
 const { PROJECT_ROLES, WORKER_ROLES, getProjectAccess } = require('../utilities/projectAccess');
 const { sendMailToUser } = require('../utilities/aws-ses-email');
+const { sanitizeHtml } = require('../utilities/sanitizeHtml');
 const { parseEstimate } = require('../utilities/ticketEstimates');
 const { recordStatusChange, getProjectTicketTimeline, getProjectStatusHistory } = require('../utilities/ticketStatusHistory');
 
@@ -623,7 +624,7 @@ router.post('/:id/tickets', authenticate, async (req, res) => {
     await client.query(
       `INSERT INTO tickets (company_id, creator_id, title, description, priority, estimate_amount, estimate_unit, status)
        VALUES ($1, $2, $3, $4, $5, $6, $7, 'backlog')`,
-      [project.company_id, req.user.id, title.trim(), description || '', priority || 'medium', estimate.amount, estimate.unit]
+      [project.company_id, req.user.id, title.trim(), sanitizeHtml(description || ''), priority || 'medium', estimate.amount, estimate.unit]
     );
 
     // Get the inserted ticket with all fields needed by mobile
