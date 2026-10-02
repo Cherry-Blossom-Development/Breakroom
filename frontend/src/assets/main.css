@@ -23,3 +23,39 @@ a,
     background-color: hsla(160, 100%, 37%, 0.2);
   }
 }
+
+/* Rich-text lists -- ticket/company/job descriptions, the editor, blog
+   posts, bios, storefronts -- draw their own bullets and numbers instead
+   of relying on the browser's list markers, which some setups hide (seen
+   in an Edge profile: lists showed indented, but with no bullets). */
+:is(.rich-content, .tiptap, .post-content, .post-body, .store-body, .bio-text, .author-bio) :is(ul, ol) {
+  list-style: none;
+  padding-left: 1.6em;
+}
+
+:is(.rich-content, .tiptap, .post-content, .post-body, .store-body, .bio-text, .author-bio) :is(ul, ol) > li {
+  position: relative;
+}
+
+:is(.rich-content, .tiptap, .post-content, .post-body, .store-body, .bio-text, .author-bio) ul > li::before {
+  content: '\2022';
+  position: absolute;
+  right: 100%;
+  margin-right: 0.5em;
+}
+
+:is(.rich-content, .tiptap, .post-content, .post-body, .store-body, .bio-text, .author-bio) ol {
+  counter-reset: rich-list;
+}
+
+:is(.rich-content, .tiptap, .post-content, .post-body, .store-body, .bio-text, .author-bio) ol > li {
+  counter-increment: rich-list;
+}
+
+:is(.rich-content, .tiptap, .post-content, .post-body, .store-body, .bio-text, .author-bio) ol > li::before {
+  content: counter(rich-list) '.';
+  position: absolute;
+  right: 100%;
+  margin-right: 0.4em;
+  font-variant-numeric: tabular-nums;
+}
