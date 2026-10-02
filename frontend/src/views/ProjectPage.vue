@@ -110,12 +110,76 @@ const boardLink = computed(() => (props.embedded
   ? { name: 'projectKanban', params: { id: route.params.id } }
   : `/project/${route.params.id}`))
 
-// Backlog list search: #id or words in the title
+// Backlog list rows. Subtasks are grouped under their split parent
+// (migration 086) -- the parent is otherwise off the board -- as a header
+// row followed by its backlog subtasks, indented. A group sits where its
+// first subtask would (the API orders by priority, then newest), and a
+// parent appears only while some of its subtasks are in the backlog.
+// Search (#id or title words): a parent match shows its whole group; a
+// subtask match shows that subtask under its parent.
 const backlogSearch = ref('')
-const filteredBacklog = computed(() => {
+const collapsedGroups = ref(new Set())
+
+function toggleGroup(parentId) {
+  const next = new Set(collapsedGroups.value)
+  if (next.has(parentId)) next.delete(parentId)
+  else next.add(parentId)
+  collapsedGroups.value = next
+}
+
+const backlogRows = computed(() => {
   const q = backlogSearch.value.trim().toLowerCase().replace(/^#/, '')
-  if (!q) return backlogTickets.value
-  return backlogTickets.value.filter(t => String(t.id) === q || t.title.toLowerCase().includes(q))
+  const matches = (t) => String(t.id) === q || t.title.toLowerCase().includes(q)
+
+  // Ordered entries: standalone tickets and groups (by first subtask)
+  const entries = []
+  const groups = new Map()
+  for (const ticket of backlogTickets.value) {
+    const parent = parentOf(ticket)
+    if (!parent) {
+      entries.push({ ticket })
+      continue
+    }
+    if (!groups.has(parent.id)) {
+      const group = { parent, children: [] }
+      groups.set(parent.id, group)
+      entries.push(group)
+    }
+    groups.get(parent.id).children.push(ticket)
+  }
+
+  const rows = []
+  for (const entry of entries) {
+    if (!entry.parent) {
+      if (!q || matches(entry.ticket)) rows.push({ kind: 'ticket', key: `t${entry.ticket.id}`, ticket: entry.ticket })
+      continue
+    }
+    const { parent, children } = entry
+    const shown = !q || matches(parent) ? children : children.filter(matches)
+    if (!shown.length) continue
+    const all = subtasksOf(parent.id)
+    // Searching always shows the matches, even in a collapsed group
+    const collapsed = !q && collapsedGroups.value.has(parent.id)
+    rows.push({
+      kind: 'parent',
+      key: `p${parent.id}`,
+      ticket: parent,
+      collapsed,
+      backlogCount: children.length,
+      subtaskCount: all.length,
+      doneCount: all.filter(t => isDone(t.status)).length
+    })
+    if (!collapsed) {
+      shown.forEach((ticket, i) => rows.push({
+        kind: 'ticket',
+        key: `t${ticket.id}`,
+        ticket,
+        child: true,
+        lastChild: i === shown.length - 1
+      }))
+    }
+  }
+  return rows
 })
 
 // Workspace board links to the workspace's closed list; the standalone
@@ -1284,25 +1348,52 @@ onMounted(async () => {
       </div>
 
       <p v-if="!backlogTickets.length" class="backlog-empty">The backlog is empty.</p>
-      <p v-else-if="!filteredBacklog.length" class="backlog-empty">No backlog tickets match "{{ backlogSearch }}".</p>
+      <p v-else-if="!backlogRows.length" class="backlog-empty">No backlog tickets match "{{ backlogSearch }}".</p>
       <ul v-else class="backlog-list">
-        <li v-for="ticket in filteredBacklog" :key="ticket.id">
-          <button class="backlog-item" :data-ticket-id="ticket.id" @click="selectTicket(ticket)">
-            <span class="ticket-id">#{{ ticket.id }}</span>
-            <span class="backlog-main">
-              <span class="backlog-title">{{ ticket.title }}</span>
-              <span class="backlog-meta">
-                <span v-if="parentOf(ticket)">↳ #{{ ticket.parent_ticket_id }} {{ parentOf(ticket).title }}</span>
-                <span v-if="openBlockersByTicket[ticket.id]" class="backlog-blocked">
-                  Blocked by {{ openBlockersByTicket[ticket.id].map(id => '#' + id).join(', ') }}
+        <li
+          v-for="row in backlogRows"
+          :key="row.key"
+          :class="{ 'backlog-child': row.child, 'backlog-group-end': row.lastChild }"
+        >
+          <!-- Split parent: group header -->
+          <div v-if="row.kind === 'parent'" class="backlog-parent">
+            <button
+              class="group-toggle"
+              :aria-expanded="!row.collapsed"
+              :aria-label="`${row.collapsed ? 'Show' : 'Hide'} subtasks of #${row.ticket.id}`"
+              @click="toggleGroup(row.ticket.id)"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" :class="{ rotated: !row.collapsed }"><polyline points="9 6 15 12 9 18" /></svg>
+            </button>
+            <button class="backlog-parent-main" :data-ticket-id="row.ticket.id" @click="selectTicket(row.ticket)">
+              <span class="ticket-id">#{{ row.ticket.id }}</span>
+              <span class="backlog-main">
+                <span class="backlog-parent-title">{{ row.ticket.title }}</span>
+                <span class="backlog-meta">
+                  <span>{{ row.subtaskCount }} subtask{{ row.subtaskCount === 1 ? '' : 's' }}</span>
+                  <span>{{ row.backlogCount }} in backlog</span>
+                  <span v-if="row.doneCount">{{ row.doneCount }} done</span>
                 </span>
-                <span v-if="ticket.assignee_handle">{{ getAssigneeName(ticket) }}</span>
-                <span>Opened {{ formatDate(ticket.created_at) }}</span>
+              </span>
+              <span class="split-kind">{{ row.ticket.split_mode === 'category' ? 'Category' : 'Split ticket' }}</span>
+            </button>
+          </div>
+
+          <button v-else class="backlog-item" :data-ticket-id="row.ticket.id" @click="selectTicket(row.ticket)">
+            <span class="ticket-id">#{{ row.ticket.id }}</span>
+            <span class="backlog-main">
+              <span class="backlog-title">{{ row.ticket.title }}</span>
+              <span class="backlog-meta">
+                <span v-if="openBlockersByTicket[row.ticket.id]" class="backlog-blocked">
+                  Blocked by {{ openBlockersByTicket[row.ticket.id].map(id => '#' + id).join(', ') }}
+                </span>
+                <span v-if="row.ticket.assignee_handle">{{ getAssigneeName(row.ticket) }}</span>
+                <span>Opened {{ formatDate(row.ticket.created_at) }}</span>
               </span>
             </span>
             <span class="backlog-badges">
-              <span v-if="hasEstimate(ticket)" class="ticket-estimate" :title="`Estimate: ${formatEstimate(ticket)}`">{{ formatEstimateShort(ticket) }}</span>
-              <StatusBadge :color="priorityColor[ticket.priority]" size="xs">{{ ticket.priority }}</StatusBadge>
+              <span v-if="hasEstimate(row.ticket)" class="ticket-estimate" :title="`Estimate: ${formatEstimate(row.ticket)}`">{{ formatEstimateShort(row.ticket) }}</span>
+              <StatusBadge :color="priorityColor[row.ticket.priority]" size="xs">{{ row.ticket.priority }}</StatusBadge>
             </span>
           </button>
         </li>
@@ -1800,6 +1891,112 @@ onMounted(async () => {
 
 .backlog-blocked {
   color: var(--color-warning, #c77700);
+}
+
+/* Split parent group header: flat, muted panel with a bracket-like left
+   rule, so it reads as a container rather than a ticket card */
+.backlog-parent {
+  display: flex;
+  align-items: stretch;
+  margin-top: 6px;
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-text-secondary);
+  border-radius: var(--card-radius-sm);
+  background: var(--color-background-soft);
+}
+
+.group-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  flex-shrink: 0;
+  border: none;
+  border-right: 1px solid var(--color-border);
+  background: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.group-toggle:hover {
+  color: var(--color-accent);
+}
+
+.group-toggle svg {
+  transition: transform 0.15s;
+}
+
+.group-toggle svg.rotated {
+  transform: rotate(90deg);
+}
+
+.backlog-parent-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 14px;
+  border: none;
+  background: none;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.backlog-parent-main:hover .backlog-parent-title,
+.backlog-parent-main:focus-visible .backlog-parent-title {
+  color: var(--color-accent);
+  text-decoration: underline;
+}
+
+.backlog-parent-title {
+  font-weight: 700;
+}
+
+.split-kind {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+
+/* Subtasks: indented under their parent with a connecting rule */
+.backlog-child {
+  position: relative;
+  margin-left: 28px;
+}
+
+.backlog-child::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  bottom: 0;
+  left: -16px;
+  border-left: 2px solid var(--color-border);
+}
+
+.backlog-child::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -16px;
+  width: 12px;
+  border-top: 2px solid var(--color-border);
+}
+
+.backlog-group-end::before {
+  bottom: 50%;
+}
+
+.backlog-group-end {
+  margin-bottom: 6px;
 }
 
 .backlog-badges {
