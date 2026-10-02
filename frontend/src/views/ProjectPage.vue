@@ -9,6 +9,7 @@ import RichTextEditor from '../components/RichTextEditor.vue'
 import TicketAttachments from '../components/TicketAttachments.vue'
 import SplitTicketDialog from '../components/SplitTicketDialog.vue'
 import BacklogTicketRow from '../components/BacklogTicketRow.vue'
+import DependencyPicker from '../components/DependencyPicker.vue'
 import { user } from '../stores/user'
 import { ESTIMATE_UNITS, hasEstimate, formatEstimate, formatEstimateShort } from '../utilities/ticketEstimates'
 
@@ -304,7 +305,6 @@ async function fetchProject() {
 // another project of the same company.
 const dependencies = ref([])
 const canWork = ref(false)
-const newDependencyId = ref('')
 
 // Prefer the board's live status (it changes on drag/transition) over the
 // status captured in the edge when the board loaded.
@@ -432,18 +432,25 @@ function replaceTicketEdges(ticketId, edges) {
 }
 
 // Dependency edits are staged in the draft until Save Changes. Picking a
-// ticket in the dropdown stages it immediately -- there's no separate Add
-// step to forget.
-function addDependency() {
-  const id = parseInt(newDependencyId.value)
+// ticket in the autocomplete stages it immediately -- there's no separate
+// Add step to forget.
+function addDependency(id) {
   if (!draft.value || !id) return
   if (draft.value.removeDeps.includes(id)) {
     draft.value.removeDeps = draft.value.removeDeps.filter(x => x !== id)
   } else if (!draft.value.addDeps.includes(id)) {
     draft.value.addDeps.push(id)
   }
-  newDependencyId.value = ''
 }
+
+// The selected ticket's category for the autocomplete: the other subtasks
+// of its split ticket (either split mode), offered before anything else
+const dependencyCategoryIds = computed(() => {
+  const sel = selectedTicket.value
+  if (!sel?.parent_ticket_id) return new Set()
+  return new Set(subtasksOf(sel.parent_ticket_id).filter(t => t.id !== sel.id).map(t => t.id))
+})
+const dependencyCategoryName = computed(() => parentOf(selectedTicket.value)?.title || '')
 
 // x on a saved dependency marks it for removal; on a pending one, drops it;
 // on one already marked for removal, undoes that
@@ -645,7 +652,6 @@ const canRemoveAttachment = (a) => canWork.value || a.uploader_handle === user.u
 function discardChanges() {
   resetDraft(selectedTicket.value)
   editingTicket.value = false
-  newDependencyId.value = ''
   commentText.value = ''
   cancelEditComment()
 }
@@ -818,7 +824,6 @@ async function onDragChange(event, toStatus) {
 function selectTicket(ticket) {
   selectedTicket.value = { ...ticket }
   editingTicket.value = false
-  newDependencyId.value = ''
   resetDraft(ticket)
   ticketAttachments.value = []
   fetchComments(ticket.id)
@@ -830,7 +835,6 @@ function closeDetail() {
   draft.value = null
   original.value = null
   saveError.value = ''
-  newDependencyId.value = ''
   editingTicket.value = false
   ticketComments.value = []
   ticketAttachments.value = []
@@ -1220,12 +1224,13 @@ onMounted(async () => {
             <p v-else class="no-dependencies">No dependencies.</p>
 
             <div v-if="canWork" class="dependency-add">
-              <select v-model="newDependencyId" aria-label="Add a dependency" @change="addDependency">
-                <option value="">Add a ticket this depends on...</option>
-                <option v-for="t in dependencyCandidates" :key="t.id" :value="t.id">
-                  #{{ t.id }} {{ t.title }} ({{ statusLabels[t.status] || t.status }})
-                </option>
-              </select>
+              <DependencyPicker
+                :candidates="dependencyCandidates"
+                :category-ids="dependencyCategoryIds"
+                :category-name="dependencyCategoryName"
+                :status-labels="statusLabels"
+                @select="addDependency"
+              />
             </div>
 
             <template v-if="selectedBlocking.length > 0">
@@ -2736,16 +2741,6 @@ onMounted(async () => {
   gap: 8px;
 }
 
-.dependency-add select {
-  flex: 1;
-  min-width: 0;
-  padding: 6px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-background-card);
-  color: var(--color-text);
-  font-size: 0.875rem;
-}
 
 .dependency-error {
   margin: 8px 0 0;
