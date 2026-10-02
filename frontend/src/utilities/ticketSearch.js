@@ -7,7 +7,8 @@
 //   - Typed text is matched against #id and title: an exact id beats an id
 //     prefix, which beats a title that starts with the text, then a word
 //     that starts with it, then the text anywhere. Several words must all
-//     match.
+//     match; a number among them (with or without #) may match the id, so
+//     a picked "#5 Payment webhooks" still finds #5 after it's edited.
 //   - Category matches always come first; other tickets only fill the
 //     remaining slots, below them.
 //   - At most `limit` results.
@@ -22,7 +23,8 @@ function matchScore(ticket, terms, idQuery) {
   const words = title.split(/[^a-z0-9]+/).filter(Boolean)
   let score = 0
   for (const term of terms) {
-    if (title.startsWith(term)) score += 30
+    if (/^\d+$/.test(term) && id.startsWith(term)) score += id === term ? 40 : 25
+    else if (title.startsWith(term)) score += 30
     else if (words.some(w => w.startsWith(term))) score += 20
     else if (title.includes(term)) score += 10
     else return 0 // every word typed must match
@@ -50,7 +52,7 @@ export function rankDependencyCandidates(candidates, query, categoryIds, limit =
   }
 
   const idQuery = /^#?\d+$/.test(q) ? q.replace('#', '') : null
-  const terms = q.replace(/^#/, '').split(/\s+/).filter(Boolean)
+  const terms = q.split(/\s+/).map(t => t.replace(/^#/, '')).filter(Boolean)
   const scored = candidates
     .map(ticket => ({ ticket, score: matchScore(ticket, terms, idQuery), inCategory: inCategory(ticket) }))
     .filter(r => r.score > 0)

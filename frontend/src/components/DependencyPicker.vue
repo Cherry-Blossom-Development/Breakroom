@@ -5,7 +5,12 @@ import { rankDependencyCandidates } from '../utilities/ticketSearch'
 // "Depends on" autocomplete for the ticket panel (ARIA combobox). Focusing
 // it lists the ticket's category (other subtasks of the same split ticket);
 // typing filters the category first and fills up to 10 results from the
-// rest of the board. Picking one emits `select`; the panel stages it.
+// rest of the board.
+//
+// Two steps, so nothing is added by accident: picking a suggestion (click,
+// or arrows + Enter) only fills the box with it, cursor at the end; Enter
+// on that filled box emits `select` (the panel stages it) and clears the
+// box, leaving the list closed. Editing the text drops the pick.
 const props = defineProps({
   candidates: { type: Array, required: true },   // tickets that may be chosen
   categoryIds: { type: Set, default: () => new Set() },
@@ -22,6 +27,10 @@ const open = ref(false)
 const openUp = ref(false)
 const activeIndex = ref(-1)
 const input = ref(null)
+const picked = ref(null) // ticket picked from the list, not yet added
+
+const labelOf = (ticket) => `#${ticket.id} ${ticket.title}`
+const pickPending = computed(() => !!picked.value && query.value === labelOf(picked.value))
 
 const results = computed(() => rankDependencyCandidates(props.candidates, query.value, props.categoryIds, LIMIT))
 
@@ -52,6 +61,7 @@ function placeList() {
 }
 
 function show() {
+  if (pickPending.value) return // a pick is waiting for Enter
   if (!open.value) placeList()
   open.value = true
   activeIndex.value = results.value.length ? 0 : -1
@@ -62,14 +72,31 @@ function hide() {
   activeIndex.value = -1
 }
 
+// Step 1: put the pick in the box, cursor at the end
 function choose(result) {
-  emit('select', result.ticket.id)
-  query.value = ''
-  // Stay open for adding another; the list refreshes without the one picked
+  picked.value = result.ticket
+  query.value = labelOf(result.ticket)
+  hide()
   nextTick(() => {
-    input.value?.focus()
-    show()
+    const el = input.value
+    if (!el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
   })
+}
+
+// Step 2: Enter adds it
+function addPicked() {
+  emit('select', picked.value.id)
+  picked.value = null
+  query.value = ''
+  hide()
+}
+
+function onInput() {
+  // Typing over a pick starts a new search
+  if (picked.value && query.value !== labelOf(picked.value)) picked.value = null
+  show()
 }
 
 function onKeydown(e) {
@@ -80,15 +107,23 @@ function onKeydown(e) {
     if (!n) return
     activeIndex.value = (activeIndex.value + (e.key === 'ArrowDown' ? 1 : -1) + n) % n
   } else if (e.key === 'Enter') {
-    if (open.value && results.value[activeIndex.value]) {
+    if (pickPending.value) {
+      e.preventDefault()
+      addPicked()
+    } else if (open.value && results.value[activeIndex.value]) {
       e.preventDefault()
       choose(results.value[activeIndex.value])
     }
   } else if (e.key === 'Escape') {
-    // Close the list without also closing the ticket panel
+    // Close the list (or drop a pending pick) without also closing the
+    // ticket panel
     if (open.value) {
       e.stopPropagation()
       hide()
+    } else if (picked.value) {
+      e.stopPropagation()
+      picked.value = null
+      query.value = ''
     }
   }
 }
@@ -113,7 +148,7 @@ const optionId = (i) => `${listId}-opt-${i}`
       autocomplete="off"
       @focus="show"
       @click="show"
-      @input="show"
+      @input="onInput"
       @blur="hide"
       @keydown="onKeydown"
     />
@@ -141,6 +176,7 @@ const optionId = (i) => `${listId}-opt-${i}`
       </template>
       <li v-if="emptyMessage" class="dep-empty" role="presentation">{{ emptyMessage }}</li>
     </ul>
+    <p v-if="pickPending" class="dep-hint" aria-live="polite">Press Enter to add #{{ picked.id }} as a dependency</p>
   </div>
 </template>
 
@@ -229,6 +265,12 @@ const optionId = (i) => `${listId}-opt-${i}`
 .dep-option-status {
   flex-shrink: 0;
   font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.dep-hint {
+  margin: 4px 0 0;
+  font-size: 0.8rem;
   color: var(--color-text-muted);
 }
 
