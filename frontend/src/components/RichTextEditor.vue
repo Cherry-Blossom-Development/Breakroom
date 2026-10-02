@@ -2,14 +2,17 @@
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import { watch, onBeforeUnmount } from 'vue'
+import { toRichHtml } from '../utilities/richText'
 
 const props = defineProps({
   modelValue: { type: String, default: '' }
 })
 const emit = defineEmits(['update:modelValue'])
 
+// Plain-text (pre-editor) descriptions load as one paragraph per line
+// instead of running together
 const editor = useEditor({
-  content: props.modelValue,
+  content: toRichHtml(props.modelValue),
   extensions: [StarterKit],
   onUpdate({ editor }) {
     emit('update:modelValue', editor.getHTML())
@@ -18,10 +21,39 @@ const editor = useEditor({
 
 // Keep editor in sync if parent changes the value externally
 watch(() => props.modelValue, (val) => {
-  if (editor.value && editor.value.getHTML() !== val) {
-    editor.value.commands.setContent(val || '', false)
+  const html = toRichHtml(val)
+  if (editor.value && editor.value.getHTML() !== html) {
+    editor.value.commands.setContent(html, false)
   }
 })
+
+// Lines separated by line breaks (Shift+Enter, pasted text, converted
+// plain text) are one paragraph, which a list would turn into a single
+// item with one bullet. Before turning a selection into a list, split
+// those lines into their own paragraphs so each row gets a bullet/number.
+// (Turning a list off is left alone.)
+function toggleList(type) {
+  const name = type === 'bullet' ? 'bulletList' : 'orderedList'
+  const chain = editor.value.chain().focus()
+  if (!editor.value.isActive(name)) {
+    chain.command(({ tr, state }) => {
+      const { from, to } = state.selection
+      const breaks = []
+      state.doc.nodesBetween(from, to, (node, pos) => {
+        if (node.type.name === 'hardBreak') breaks.push(pos)
+      })
+      // Last first, so earlier positions stay valid
+      for (const pos of breaks.reverse()) {
+        tr.delete(pos, pos + 1)
+        tr.split(pos)
+      }
+      return true
+    })
+  }
+  if (type === 'bullet') chain.toggleBulletList()
+  else chain.toggleOrderedList()
+  chain.run()
+}
 
 onBeforeUnmount(() => {
   editor.value?.destroy()
@@ -35,8 +67,8 @@ onBeforeUnmount(() => {
       <button type="button" @click="editor.chain().focus().toggleItalic().run()" :class="{ active: editor.isActive('italic') }" title="Italic">I</button>
       <button type="button" @click="editor.chain().focus().toggleStrike().run()" :class="{ active: editor.isActive('strike') }" title="Strikethrough">S</button>
       <span class="toolbar-divider"></span>
-      <button type="button" @click="editor.chain().focus().toggleBulletList().run()" :class="{ active: editor.isActive('bulletList') }" title="Bullet list">&#8226; List</button>
-      <button type="button" @click="editor.chain().focus().toggleOrderedList().run()" :class="{ active: editor.isActive('orderedList') }" title="Numbered list">1. List</button>
+      <button type="button" @click="toggleList('bullet')" :class="{ active: editor.isActive('bulletList') }" title="Bullet list">&#8226; List</button>
+      <button type="button" @click="toggleList('ordered')" :class="{ active: editor.isActive('orderedList') }" title="Numbered list">1. List</button>
       <span class="toolbar-divider"></span>
       <button type="button" @click="editor.chain().focus().setParagraph().run()" :class="{ active: editor.isActive('paragraph') }" title="Paragraph">P</button>
       <button type="button" @click="editor.chain().focus().toggleHeading({ level: 3 }).run()" :class="{ active: editor.isActive('heading', { level: 3 }) }" title="Heading">H</button>

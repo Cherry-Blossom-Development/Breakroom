@@ -6,6 +6,7 @@ import draggable from 'vuedraggable'
 import StatusBadge from '../components/StatusBadge.vue'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
 import RichTextEditor from '../components/RichTextEditor.vue'
+import { toRichHtml } from '../utilities/richText'
 import TicketAttachments from '../components/TicketAttachments.vue'
 import SplitTicketDialog from '../components/SplitTicketDialog.vue'
 import BacklogTicketRow from '../components/BacklogTicketRow.vue'
@@ -1158,7 +1159,7 @@ onMounted(async () => {
 
           <div class="detail-description">
             <h3>Description</h3>
-            <div v-if="draft.description" class="rich-content" v-html="draft.description"></div>
+            <div v-if="draft.description" class="rich-content" v-html="toRichHtml(draft.description)"></div>
             <p v-else class="no-description">No description provided.</p>
           </div>
 

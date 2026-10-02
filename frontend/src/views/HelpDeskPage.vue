@@ -4,6 +4,7 @@ import { authFetch } from '../utilities/authFetch'
 import StatusBadge from '../components/StatusBadge.vue'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
 import RichTextEditor from '../components/RichTextEditor.vue'
+import { toRichHtml } from '../utilities/richText'
 import TicketAttachments from '../components/TicketAttachments.vue'
 import { user } from '../stores/user'
 
@@ -527,7 +528,7 @@ onMounted(() => {
 
           <div class="detail-description">
             <h3>Description</h3>
-            <div v-if="selectedTicket.description" class="rich-content" v-html="selectedTicket.description"></div>
+            <div v-if="selectedTicket.description" class="rich-content" v-html="toRichHtml(selectedTicket.description)"></div>
             <p v-else class="no-description">No description provided.</p>
           </div>
 
