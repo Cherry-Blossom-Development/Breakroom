@@ -189,7 +189,7 @@ router.get('/:id', authenticate, async (req, res) => {
 
     const ticketsResult = await client.query(
       `SELECT t.id, t.company_id, t.parent_ticket_id, t.split_mode, t.creator_id, t.assigned_to,
-              t.title, t.description, t.status, t.priority,
+              t.title, t.description, t.status, t.priority, tp.backlog_rank,
               t.estimate_amount, t.estimate_unit, t.created_at, t.updated_at, t.resolved_at,
               creator.handle as creator_handle, creator.first_name as creator_first_name,
               creator.last_name as creator_last_name,
@@ -653,6 +653,62 @@ router.post('/:id/tickets', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Error creating project ticket:', err);
     res.status(500).json({ message: 'Failed to create ticket' });
+  } finally {
+    client.release();
+  }
+});
+
+// Save the backlog's manual order (migration 087). Body: { order: [ticket
+// ids in display order] } -- the backlog list sends every ticket and split
+// parent it shows, flattened (a group's parent, then its subtasks), so one
+// sequence orders both the top level and each group. Only the given
+// tickets are touched; each must be in this project.
+const MAX_BACKLOG_ORDER = 5000;
+
+router.put('/:id/backlog-order', authenticate, async (req, res) => {
+  const { order } = req.body;
+  const client = await getClient();
+
+  try {
+    const access = await getProjectAccess(client, req.params.id, req.user.id);
+    if (!access) return res.status(404).json({ message: 'Project not found' });
+    if (!access.canWork) return res.status(403).json({ message: 'Not authorized to reorder this backlog' });
+
+    if (!Array.isArray(order) || order.length === 0 || order.length > MAX_BACKLOG_ORDER) {
+      return res.status(400).json({ message: 'order must be a non-empty list of ticket ids' });
+    }
+    const ids = order.map(Number);
+    if (ids.some(id => !Number.isInteger(id) || id <= 0) || new Set(ids).size !== ids.length) {
+      return res.status(400).json({ message: 'order must list each ticket id once' });
+    }
+
+    const inList = ids.map((_, i) => `$${i + 2}`).join(', ');
+    const found = await client.query(
+      `SELECT ticket_id FROM ticket_projects WHERE project_id = $1 AND ticket_id IN (${inList})`,
+      [req.params.id, ...ids]
+    );
+    if (found.rowCount !== ids.length) {
+      return res.status(400).json({ message: 'Some of those tickets are not in this project' });
+    }
+
+    // One UPDATE: rank = position in the list
+    const values = [req.params.id];
+    const cases = ids.map((id, rank) => {
+      values.push(id, rank);
+      return `WHEN $${values.length - 1} THEN $${values.length}`;
+    }).join(' ');
+    values.push(...ids);
+    const idPlaceholders = ids.map((_, i) => `$${values.length - ids.length + i + 1}`).join(', ');
+    await client.query(
+      `UPDATE ticket_projects SET backlog_rank = CASE ticket_id ${cases} END
+       WHERE project_id = $1 AND ticket_id IN (${idPlaceholders})`,
+      values
+    );
+
+    res.json({ message: 'Backlog order saved', count: ids.length });
+  } catch (err) {
+    console.error('Error saving backlog order:', err);
+    res.status(500).json({ message: 'Failed to save backlog order' });
   } finally {
     client.release();
   }
