@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { authFetch } from '../utilities/authFetch'
 import StatusBadge from '../components/StatusBadge.vue'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
+import InviteAutocomplete from '../components/InviteAutocomplete.vue'
 
 // Project settings (migration 082): sprint duration and project members.
 // Roles and what they allow are enforced by the backend
@@ -282,13 +283,7 @@ onMounted(fetchSettings)
         <form v-if="canManage" class="invite-form" @submit.prevent="sendInvite">
           <h4>Invite someone</h4>
           <div class="invite-controls">
-            <input
-              v-model="inviteIdentifier"
-              type="text"
-              placeholder="Handle or email"
-              aria-label="Handle or email of the person to invite"
-              :disabled="inviting"
-            />
+            <InviteAutocomplete v-model="inviteIdentifier" :project-id="projectId" :disabled="inviting" />
             <select v-model="inviteRole" aria-label="Role" :disabled="inviting">
               <option v-for="r in assignableRoles" :key="r" :value="r">{{ ROLE_LABELS[r] }}</option>
             </select>
@@ -365,11 +360,6 @@ input[type="text"] {
   border-radius: 4px;
   background: var(--color-background-card);
   color: var(--color-text);
-}
-
-.invite-controls input {
-  flex: 1 1 220px;
-  min-width: 0;
 }
 
 .btn-primary {

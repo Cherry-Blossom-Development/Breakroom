@@ -880,6 +880,64 @@ router.put('/:id/settings', authenticate, async (req, res) => {
   }
 });
 
+// Autocomplete for the invite box: up to 10 people whose handle, first,
+// last or full name contains q (case-insensitive). Ranked: people in the
+// project's company first, then names/handles that start with q, then the
+// rest; alphabetical by handle within a tier. Guests and anyone already
+// on the project (active or invited) are left out; emails are never sent.
+const INVITE_SUGGESTION_LIMIT = 10;
+
+router.get('/:id/invite-suggestions', authenticate, async (req, res) => {
+  const q = String(req.query.q || '').trim().replace(/^@/, '').toLowerCase();
+  const client = await getClient();
+
+  try {
+    const access = await getProjectAccess(client, req.params.id, req.user.id);
+    if (!access) return res.status(404).json({ message: 'Project not found' });
+    if (!access.canManage) {
+      return res.status(403).json({ message: 'Only project owners and managers can invite members' });
+    }
+    if (q.length < 2 || q.length > 100) return res.json({ users: [] });
+
+    const escaped = q.replace(/[\\%_]/g, c => `\\${c}`);
+    const result = await client.query(
+      `SELECT u.id AS user_id, u.handle, u.first_name, u.last_name,
+              EXISTS (
+                SELECT 1 FROM employees e
+                WHERE e.user_id = u.id AND e.company_id = $1 AND e.status = 'active'
+              ) AS in_company,
+              (LOWER(u.handle) LIKE $2 OR LOWER(u.first_name) LIKE $2 OR LOWER(u.last_name) LIKE $2
+               OR LOWER(CONCAT_WS(' ', u.first_name, u.last_name)) LIKE $2) AS starts_with
+       FROM users u
+       WHERE (u.is_guest IS NULL OR u.is_guest = FALSE)
+         AND (LOWER(u.handle) LIKE $3 OR LOWER(u.first_name) LIKE $3 OR LOWER(u.last_name) LIKE $3
+              OR LOWER(CONCAT_WS(' ', u.first_name, u.last_name)) LIKE $3)
+         AND NOT EXISTS (
+           SELECT 1 FROM project_members pm
+           WHERE pm.project_id = $4 AND pm.user_id = u.id AND pm.status IN ('active', 'invited')
+         )
+       ORDER BY in_company DESC, starts_with DESC, LOWER(u.handle)
+       LIMIT ${INVITE_SUGGESTION_LIMIT}`,
+      [access.project.company_id, `${escaped}%`, `%${escaped}%`, req.params.id]
+    );
+
+    res.json({
+      users: result.rows.map(r => ({
+        user_id: r.user_id,
+        handle: r.handle,
+        first_name: r.first_name,
+        last_name: r.last_name,
+        in_company: !!r.in_company
+      }))
+    });
+  } catch (err) {
+    console.error('Error fetching invite suggestions:', err);
+    res.status(500).json({ message: 'Failed to search people' });
+  } finally {
+    client.release();
+  }
+});
+
 // Invite a Prosaurus user (by handle or account email) to the project
 router.post('/:id/members', authenticate, async (req, res) => {
   const { identifier } = req.body;
