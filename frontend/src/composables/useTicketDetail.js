@@ -413,6 +413,7 @@ export function useTicketDetail({ reload = async () => {}, openTicket = null } =
         if (!res.ok) throw new Error(data.message || 'Failed to save contributors')
         ticketContributors.value = data.contributors
         draft.value.contributors = null
+        fetchContributorRoles(ticketId) // pick up any role just introduced
       }
 
       // The comment helpers clear their text only on success
@@ -476,6 +477,19 @@ export function useTicketDetail({ reload = async () => {}, openTicket = null } =
       if (res.ok) ticketContributors.value = (await res.json()).contributors
     } catch (err) {
       console.error('Error fetching contributors:', err)
+    }
+  }
+
+  // Roles used on contributors elsewhere in the company, for the role
+  // boxes' suggestions (most used first)
+  const contributorRoles = ref([])
+
+  async function fetchContributorRoles(ticketId) {
+    try {
+      const res = await authFetch(`/api/helpdesk/ticket/${ticketId}/contributor-roles`)
+      if (res.ok) contributorRoles.value = (await res.json()).roles
+    } catch (err) {
+      console.error('Error fetching contributor roles:', err)
     }
   }
 
@@ -599,6 +613,7 @@ export function useTicketDetail({ reload = async () => {}, openTicket = null } =
     fetchComments(ticket.id)
     fetchAttachments(ticket.id)
     fetchContributors(ticket.id)
+    fetchContributorRoles(ticket.id)
   }
 
   function closeDetail() {
@@ -610,6 +625,7 @@ export function useTicketDetail({ reload = async () => {}, openTicket = null } =
     ticketComments.value = []
     ticketAttachments.value = []
     ticketContributors.value = []
+    contributorRoles.value = []
     commentText.value = ''
     editingCommentId.value = null
     editCommentText.value = ''
@@ -754,6 +770,7 @@ export function useTicketDetail({ reload = async () => {}, openTicket = null } =
     canRemoveAttachment,
     ticketContributors,
     shownContributors,
+    contributorRoles,
     addContributor,
     removeContributor,
     setContributorRole,

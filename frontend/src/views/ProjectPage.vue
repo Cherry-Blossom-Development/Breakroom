@@ -60,7 +60,7 @@ const {
   addDependency, dependencyCategoryIds, dependencyCategoryName, toggleDependency,
   draft, savingChanges, saveError, isDirty, saveChanges, discardChanges, chooseStatus,
   ticketAttachments, uploadAttachments, canAttach, canRemoveAttachment,
-  shownContributors, addContributor, removeContributor, setContributorRole,
+  shownContributors, contributorRoles, addContributor, removeContributor, setContributorRole,
   leavePrompt, leaveSaveBtn, resolveLeave, requestClose, allowedTransitions, openLinkedTicket,
   selectTicket, addComment, startEditComment, cancelEditComment, saveEditComment, deleteComment
 } = useTicketDetail({ reload: () => fetchProject() })
@@ -622,6 +622,7 @@ onMounted(async () => {
               :contributors="shownContributors"
               :people="assignees"
               :can-edit="canWork"
+              :role-suggestions="contributorRoles"
               id-prefix="popup-contrib"
               @add="addContributor"
               @remove="removeContributor"

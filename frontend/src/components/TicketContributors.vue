@@ -10,6 +10,7 @@ const props = defineProps({
   contributors: { type: Array, required: true }, // [{ user_id, role, handle, first_name, last_name }]
   people: { type: Array, default: () => [] },     // who can be added: the project's assignees list
   canEdit: { type: Boolean, default: false },
+  roleSuggestions: { type: Array, default: () => [] }, // roles used on other tickets
   idPrefix: { type: String, default: 'contrib' }
 })
 const emit = defineEmits(['add', 'remove', 'set-role'])
@@ -17,6 +18,23 @@ const emit = defineEmits(['add', 'remove', 'set-role'])
 const MAX_ROLE_LENGTH = 100
 
 const personName = (p) => `${p.first_name || ''} ${p.last_name || ''}`.trim() || p.handle
+
+// Suggested roles: the company's existing ones plus any typed into this
+// list so far, without case-insensitive duplicates. A <datalist> only
+// suggests -- any new role can still be typed.
+const roleOptions = computed(() => {
+  const seen = new Set()
+  const out = []
+  for (const role of [...props.roleSuggestions, ...props.contributors.map(c => c.role)]) {
+    const r = (role || '').trim()
+    if (r && !seen.has(r.toLowerCase())) {
+      seen.add(r.toLowerCase())
+      out.push(r)
+    }
+  }
+  return out
+})
+const rolesListId = `${props.idPrefix}-roles`
 
 const available = computed(() => {
   const taken = new Set(props.contributors.map(c => c.user_id))
@@ -47,6 +65,8 @@ function add() {
           type="text"
           :maxlength="MAX_ROLE_LENGTH"
           placeholder="Role"
+          :list="rolesListId"
+          autocomplete="off"
           :aria-label="`Role for ${personName(c)}`"
           @input="emit('set-role', c.user_id, $event.target.value)"
         />
@@ -63,6 +83,10 @@ function add() {
     </ul>
     <p v-else class="no-contributors">No contributors.</p>
 
+    <datalist v-if="canEdit" :id="rolesListId">
+      <option v-for="role in roleOptions" :key="role" :value="role" />
+    </datalist>
+
     <form v-if="canEdit && available.length > 0" class="contributor-add" @submit.prevent="add">
       <select :id="`${idPrefix}-person`" v-model="newPersonId" aria-label="Person to add">
         <option :value="null" disabled>Add a person...</option>
@@ -73,6 +97,8 @@ function add() {
         type="text"
         :maxlength="MAX_ROLE_LENGTH"
         placeholder="Role (optional)"
+        :list="rolesListId"
+        autocomplete="off"
         aria-label="Role for the new contributor"
       />
       <button type="submit" class="contributor-add-btn" :disabled="newPersonId === null">Add</button>

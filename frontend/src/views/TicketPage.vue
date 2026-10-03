@@ -46,7 +46,7 @@ const {
   addDependency, dependencyCategoryIds, dependencyCategoryName, toggleDependency,
   draft, original, savingChanges, saveError, isDirty, saveChanges, discardChanges,
   ticketAttachments, canAttach, canRemoveAttachment,
-  shownContributors, addContributor, removeContributor, setContributorRole,
+  shownContributors, contributorRoles, addContributor, removeContributor, setContributorRole,
   leavePrompt, leaveSaveBtn, confirmLeave, resolveLeave, allowedTransitions, openLinkedTicket,
   selectTicket, addComment, startEditComment, cancelEditComment, saveEditComment, deleteComment
 } = useTicketDetail({
@@ -421,6 +421,7 @@ function discard() {
               :contributors="shownContributors"
               :people="assignees"
               :can-edit="canWork"
+              :role-suggestions="contributorRoles"
               id-prefix="page-contrib"
               @add="addContributor"
               @remove="removeContributor"

@@ -453,6 +453,36 @@ router.get('/ticket/:id/contributors', authenticate, async (req, res) => {
   }
 });
 
+// Roles already used on contributors anywhere in the ticket's company, most
+// used first -- suggestions for the role box (any new text is still fine)
+const MAX_ROLE_SUGGESTIONS = 200;
+
+router.get('/ticket/:id/contributor-roles', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const access = await getTicketAccess(client, req.params.id, req.user.id);
+    if (!access) return res.status(404).json({ message: 'Ticket not found' });
+    if (!access.canView) return res.status(403).json({ message: 'Access denied' });
+
+    const result = await client.query(
+      `SELECT MIN(tc.role) AS role, COUNT(*) AS uses
+       FROM ticket_contributors tc
+       JOIN tickets t ON t.id = tc.ticket_id
+       WHERE t.company_id = $1 AND tc.role <> ''
+       GROUP BY LOWER(tc.role)
+       ORDER BY uses DESC, role
+       LIMIT ${MAX_ROLE_SUGGESTIONS}`,
+      [access.ticket.company_id]
+    );
+    res.json({ roles: result.rows.map(r => r.role) });
+  } catch (err) {
+    console.error('Error fetching contributor roles:', err);
+    res.status(500).json({ message: 'Failed to fetch contributor roles' });
+  } finally {
+    client.release();
+  }
+});
+
 // Body: { contributors: [{ user_id, role }] } -- the complete new list
 router.put('/ticket/:id/contributors', authenticate, async (req, res) => {
   const { contributors } = req.body;
