@@ -10,6 +10,7 @@ import { toRichHtml } from '../utilities/richText'
 import TicketAttachments from '../components/TicketAttachments.vue'
 import SplitTicketDialog from '../components/SplitTicketDialog.vue'
 import BacklogTicketRow from '../components/BacklogTicketRow.vue'
+import BacklogGroup from '../components/BacklogGroup.vue'
 import DependencyPicker from '../components/DependencyPicker.vue'
 import TicketContributors from '../components/TicketContributors.vue'
 import { user } from '../stores/user'
@@ -95,16 +96,18 @@ const boardLink = computed(() => (props.embedded
 // Subtasks are grouped under their split parent (migration 086) -- the
 // parent is otherwise off the board -- as a header row with its backlog
 // subtasks indented beneath; a parent appears only while some of its
-// subtasks are in the backlog.
+// subtasks are in the backlog. Splits nest, so groups do too: a subtask
+// that was split again is a group inside its parent's group, like the
+// GANTT chart's nested categories (components/BacklogGroup.vue).
 //
 // Order (migration 087) is manual: drag rows (and whole groups) to reorder;
 // each drop saves the full order for this project. A group is ordered by
-// its parent's rank, subtasks by theirs within the group. Tickets never
+// its parent's rank, items by theirs within the group. Tickets never
 // placed (rank null, e.g. new ones) sit at the top in the API's default
 // order -- priority, then newest -- so they get noticed and placed.
 const backlogSearch = ref('')
 const collapsedGroups = ref(new Set())
-const backlogEntries = ref([]) // [{ key, ticket } | { key, parent, children }]
+const backlogEntries = ref([]) // tree: [{ key, ticket } | { key, parent, children: [...same] }]
 const orderError = ref('')
 
 function toggleGroup(parentId) {
@@ -127,28 +130,31 @@ function byRank(items, rankOf) {
     .map(x => x.item)
 }
 
+// Each backlog ticket goes under the group of every split ticket above it,
+// outermost first, creating the groups as needed
 function rebuildBacklog() {
-  const entries = []
-  const groups = new Map()
+  const root = { children: [] }
+  const groups = new Map() // parent id -> group
   for (const ticket of backlogTickets.value) {
-    const parent = parentOf(ticket)
-    if (!parent) {
-      entries.push({ key: `t${ticket.id}`, ticket })
-      continue
+    let container = root
+    for (const ancestor of ancestorsOf(ticket)) {
+      let group = groups.get(ancestor.id)
+      if (!group) {
+        group = { key: `p${ancestor.id}`, parent: ancestor, children: [] }
+        groups.set(ancestor.id, group)
+        container.children.push(group)
+      }
+      container = group
     }
-    if (!groups.has(parent.id)) {
-      const group = { key: `p${parent.id}`, parent, children: [] }
-      groups.set(parent.id, group)
-      entries.push(group)
-    }
-    groups.get(parent.id).children.push(ticket)
+    container.children.push({ key: `t${ticket.id}`, ticket })
   }
-  for (const group of groups.values()) group.children = byRank(group.children, t => t.backlog_rank)
-  backlogEntries.value = byRank(entries, e => (e.parent || e.ticket).backlog_rank)
+  const rankOf = (item) => (item.parent || item.ticket).backlog_rank
+  for (const group of groups.values()) group.children = byRank(group.children, rankOf)
+  backlogEntries.value = byRank(root.children, rankOf)
 }
 
 // Search (#id or title words): a parent match shows its whole group, a
-// subtask match shows that subtask under its parent. Rows are hidden, not
+// subtask match shows that subtask under its parents. Rows are hidden, not
 // removed, so the list being dragged is always the full order -- and
 // dragging is off while searching, since only part of it shows.
 const backlogQuery = computed(() => backlogSearch.value.trim().toLowerCase().replace(/^#/, ''))
@@ -156,17 +162,25 @@ const matchesSearch = (t) => {
   const q = backlogQuery.value
   return !q || String(t.id) === q || t.title.toLowerCase().includes(q)
 }
-function visibleChildren(entry) {
-  const groupMatches = [entry.parent, ...ancestorsOf(entry.parent)].some(matchesSearch)
-  return !backlogQuery.value || groupMatches ? entry.children : entry.children.filter(matchesSearch)
-}
-const entryVisible = (entry) => (entry.parent ? visibleChildren(entry).length > 0 : matchesSearch(entry.ticket))
+// Keys of the items that show while searching (null: no search, all show).
+// A group shows when anything inside it does.
+const visibleBacklogKeys = computed(() => {
+  if (!backlogQuery.value) return null
+  const keys = new Set()
+  const walk = (item, groupMatched) => {
+    if (!item.parent) {
+      if (groupMatched || matchesSearch(item.ticket)) keys.add(item.key)
+      return
+    }
+    const matched = groupMatched || matchesSearch(item.parent)
+    for (const child of item.children) walk(child, matched)
+    if (item.children.some(child => keys.has(child.key))) keys.add(item.key)
+  }
+  for (const entry of backlogEntries.value) walk(entry, false)
+  return keys
+})
+const entryVisible = (entry) => !visibleBacklogKeys.value || visibleBacklogKeys.value.has(entry.key)
 const visibleBacklogCount = computed(() => backlogEntries.value.filter(entryVisible).length)
-const groupCollapsed = (entry) => !backlogQuery.value && collapsedGroups.value.has(entry.parent.id)
-function lastVisibleChildId(entry) {
-  const shown = visibleChildren(entry)
-  return shown.length ? shown[shown.length - 1].id : null
-}
 // Direct subtasks; one that was split again counts by its own subtasks' progress
 function groupStats(parent) {
   const statuses = subtasksOf(parent.id).map(t => liveStatus(t.id, t.status))
@@ -180,15 +194,22 @@ function groupStats(parent) {
 const canReorder = computed(() => canWork.value && !backlogQuery.value)
 
 // After a drop: rank every shown ticket by its new position (a group's
-// parent, then its subtasks) and save. On failure the old ranks come back,
+// parent, then everything inside it, depth first) and save. On failure the old ranks come back,
 // which rebuilds the list in its old order.
 async function persistBacklogOrder(event) {
   if (event && event.oldIndex === event.newIndex) return
   const order = []
-  for (const entry of backlogEntries.value) {
-    if (entry.parent) order.push(entry.parent.id, ...entry.children.map(t => t.id))
-    else order.push(entry.ticket.id)
+  const flatten = (items) => {
+    for (const item of items) {
+      if (item.parent) {
+        order.push(item.parent.id)
+        flatten(item.children)
+      } else {
+        order.push(item.ticket.id)
+      }
+    }
   }
+  flatten(backlogEntries.value)
   const ticketFor = (id) => ticketsById.value.get(id) || splitParentsById.value.get(id)
   const previous = order.map(id => [id, ticketFor(id)?.backlog_rank ?? null])
   order.forEach((id, rank) => {
@@ -881,67 +902,20 @@ onMounted(async () => {
         >
           <template #item="{ element: entry }">
             <li v-show="entryVisible(entry)">
-              <!-- Split parent: group header + its subtasks -->
-              <template v-if="entry.parent">
-                <div class="backlog-parent">
-                  <span v-if="canReorder" class="drag-handle group-handle" title="Drag to reorder this group" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg>
-                  </span>
-                  <button
-                    class="group-toggle"
-                    :aria-expanded="!groupCollapsed(entry)"
-                    :aria-label="`${groupCollapsed(entry) ? 'Show' : 'Hide'} subtasks of #${entry.parent.id}`"
-                    @click="toggleGroup(entry.parent.id)"
-                  >
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" :class="{ rotated: !groupCollapsed(entry) }"><polyline points="9 6 15 12 9 18" /></svg>
-                  </button>
-                  <button class="backlog-parent-main" :data-ticket-id="entry.parent.id" @click="selectTicket(entry.parent)">
-                    <span class="ticket-id">#{{ entry.parent.id }}</span>
-                    <span class="backlog-main">
-                      <span v-if="ancestorsOf(entry.parent).length" class="backlog-ancestry">
-                        <template v-for="a in ancestorsOf(entry.parent)" :key="a.id">#{{ a.id }} {{ a.title }} › </template>
-                      </span>
-                      <span class="backlog-parent-title">{{ entry.parent.title }}</span>
-                      <span class="backlog-meta">
-                        <span>{{ groupStats(entry.parent).total }} subtask{{ groupStats(entry.parent).total === 1 ? '' : 's' }}</span>
-                        <span>{{ groupStats(entry.parent).inBacklog }} in backlog</span>
-                        <span v-if="groupStats(entry.parent).done">{{ groupStats(entry.parent).done }} done</span>
-                      </span>
-                    </span>
-                    <span class="split-kind">{{ entry.parent.split_mode === 'category' ? 'Category' : 'Split ticket' }}</span>
-                  </button>
-                </div>
-
-                <draggable
-                  v-show="!groupCollapsed(entry)"
-                  :list="entry.children"
-                  item-key="id"
-                  tag="ul"
-                  class="backlog-children"
-                  :group="`backlog-sub-${entry.parent.id}`"
-                  handle=".drag-handle"
-                  ghost-class="backlog-ghost"
-                  :animation="150"
-                  :disabled="!canReorder"
-                  @end="persistBacklogOrder"
-                >
-                  <template #item="{ element: child }">
-                    <li
-                      v-show="visibleChildren(entry).includes(child)"
-                      class="backlog-child"
-                      :class="{ 'backlog-group-end': child.id === lastVisibleChildId(entry) }"
-                    >
-                      <BacklogTicketRow
-                        :ticket="child"
-                        :blocked-by="openBlockersByTicket[child.id] || null"
-                        :assignee-name="child.assignee_handle ? getAssigneeName(child) : ''"
-                        :draggable="canReorder"
-                        @open="selectTicket"
-                      />
-                    </li>
-                  </template>
-                </draggable>
-              </template>
+              <!-- Split parent: group header + everything under it, nested -->
+              <BacklogGroup
+                v-if="entry.parent"
+                :entry="entry"
+                :can-reorder="canReorder"
+                :visible-keys="visibleBacklogKeys"
+                :collapsed="collapsedGroups"
+                :blockers="openBlockersByTicket"
+                :assignee-name="getAssigneeName"
+                :stats="groupStats"
+                @open="selectTicket"
+                @toggle="toggleGroup"
+                @reorder="persistBacklogOrder"
+              />
 
               <BacklogTicketRow
                 v-else
@@ -1441,15 +1415,6 @@ onMounted(async () => {
   color: var(--color-text-muted);
 }
 
-.backlog-children {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 8px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
 .backlog-hint {
   margin: -4px 0 10px;
   font-size: 0.8rem;
@@ -1467,85 +1432,6 @@ onMounted(async () => {
   opacity: 0.4;
 }
 
-.group-handle {
-  display: inline-flex;
-  align-items: center;
-  padding: 0 2px 0 8px;
-  color: var(--color-text-muted);
-  cursor: grab;
-}
-
-.group-handle:active {
-  cursor: grabbing;
-}
-
-/* Split parent group header: flat, muted panel with a bracket-like left
-   rule, so it reads as a container rather than a ticket card */
-.backlog-parent {
-  display: flex;
-  align-items: stretch;
-  margin-top: 6px;
-  border: 1px solid var(--color-border);
-  border-left: 4px solid var(--color-text-secondary);
-  border-radius: var(--card-radius-sm);
-  background: var(--color-background-soft);
-}
-
-.group-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  flex-shrink: 0;
-  border: none;
-  border-right: 1px solid var(--color-border);
-  background: none;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.group-toggle:hover {
-  color: var(--color-accent);
-}
-
-.group-toggle svg {
-  transition: transform 0.15s;
-}
-
-.group-toggle svg.rotated {
-  transform: rotate(90deg);
-}
-
-.backlog-parent-main {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-  min-width: 0;
-  padding: 10px 14px;
-  border: none;
-  background: none;
-  color: var(--color-text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.backlog-parent-main:hover .backlog-parent-title,
-.backlog-parent-main:focus-visible .backlog-parent-title {
-  color: var(--color-accent);
-  text-decoration: underline;
-}
-
-.backlog-parent-title {
-  font-weight: 700;
-}
-
-.backlog-ancestry {
-  font-size: 0.8rem;
-  color: var(--color-text-muted);
-}
-
 .split-kind {
   flex-shrink: 0;
   padding: 2px 8px;
@@ -1556,38 +1442,6 @@ onMounted(async () => {
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--color-text-secondary);
-}
-
-/* Subtasks: indented under their parent with a connecting rule */
-.backlog-child {
-  position: relative;
-  margin-left: 28px;
-}
-
-.backlog-child::before {
-  content: '';
-  position: absolute;
-  top: -8px;
-  bottom: 0;
-  left: -16px;
-  border-left: 2px solid var(--color-border);
-}
-
-.backlog-child::after {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: -16px;
-  width: 12px;
-  border-top: 2px solid var(--color-border);
-}
-
-.backlog-group-end::before {
-  bottom: 50%;
-}
-
-.backlog-group-end {
-  margin-bottom: 6px;
 }
 
 
