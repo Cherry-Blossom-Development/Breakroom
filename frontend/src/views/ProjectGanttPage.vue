@@ -366,8 +366,8 @@ onUnmounted(() => resizeObserver?.disconnect())
                 v-for="bar in bars"
                 :key="bar.row.ticket.id"
                 class="label-row"
-                :class="{ 'label-category': bar.row.isCategory, 'label-subtask': bar.row.inCategory }"
-                :style="{ height: `${ROW_H}px` }"
+                :class="{ 'label-category': bar.row.isCategory }"
+                :style="{ height: `${ROW_H}px`, paddingLeft: `${12 + 10 * (bar.row.depth || 0)}px` }"
               >
                 <span class="label-id">#{{ bar.row.ticket.id }}</span>
                 <span class="label-title" :title="bar.row.ticket.title">{{ bar.row.ticket.title }}</span>
@@ -439,8 +439,8 @@ onUnmounted(() => resizeObserver?.disconnect())
             </tr>
           </thead>
           <tbody>
-            <tr v-for="r in rows" :key="r.ticket.id" :class="{ 'row-category': r.isCategory, 'row-subtask': r.inCategory }">
-              <td><span class="label-id">#{{ r.ticket.id }}</span> {{ r.ticket.title }}</td>
+            <tr v-for="r in rows" :key="r.ticket.id" :class="{ 'row-category': r.isCategory }">
+              <td :style="r.depth ? { paddingLeft: `${12 + 12 * r.depth}px` } : null"><span class="label-id">#{{ r.ticket.id }}</span> {{ r.ticket.title }}</td>
               <td>
                 <template v-if="r.isCategory">Category · {{ categoryProgress(r) }}</template>
                 <span v-else-if="r.overdue" class="label-overdue">! Overdue</span>
@@ -725,16 +725,8 @@ onUnmounted(() => resizeObserver?.disconnect())
   font-weight: 700;
 }
 
-.label-subtask {
-  padding-left: 22px !important;
-}
-
 .row-category td {
   font-weight: 600;
-}
-
-.row-subtask td:first-child {
-  padding-left: 24px;
 }
 
 .empty-state {

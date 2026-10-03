@@ -7,7 +7,7 @@ import { ESTIMATE_UNITS, hasEstimate, formatEstimate, splitEvenly } from '../uti
 // the parent's estimate divided evenly (same unit) and stay editable; once
 // any estimate is edited by hand, adding/removing rows stops re-dividing.
 // A ticket that's already split can be split again to add subtasks: its
-// mode is fixed and nothing is pre-divided.
+// mode is fixed and nothing is pre-divided. Subtasks can be split too.
 const props = defineProps({
   ticket: { type: Object, required: true }
 })

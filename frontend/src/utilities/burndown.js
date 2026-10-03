@@ -104,9 +104,17 @@ export function buildBurndown({ tickets, history, start, end, now = new Date(), 
     if (!prev || created < prev) splitAt.set(t.parent_ticket_id, created)
   }
 
-  const counted = categoryId === null
-    ? tickets
-    : tickets.filter(t => t.id === categoryId || t.parent_ticket_id === categoryId)
+  // A category covers everything split from it, at any depth
+  const byId = new Map(tickets.map(t => [t.id, t]))
+  const underCategory = (t) => {
+    const seen = new Set()
+    for (let cur = t; cur && !seen.has(cur.id); cur = byId.get(cur.parent_ticket_id)) {
+      if (cur.id === categoryId) return true
+      seen.add(cur.id)
+    }
+    return false
+  }
+  const counted = categoryId === null ? tickets : tickets.filter(underCategory)
   const sized = counted.map(t => {
     const hours = estimateWorkingHours(t)
     return {

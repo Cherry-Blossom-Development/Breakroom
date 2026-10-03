@@ -179,7 +179,8 @@ const matchesSearch = (t) => {
   return !q || String(t.id) === q || t.title.toLowerCase().includes(q)
 }
 function visibleChildren(entry) {
-  return !backlogQuery.value || matchesSearch(entry.parent) ? entry.children : entry.children.filter(matchesSearch)
+  const groupMatches = [entry.parent, ...ancestorsOf(entry.parent)].some(matchesSearch)
+  return !backlogQuery.value || groupMatches ? entry.children : entry.children.filter(matchesSearch)
 }
 const entryVisible = (entry) => (entry.parent ? visibleChildren(entry).length > 0 : matchesSearch(entry.ticket))
 const visibleBacklogCount = computed(() => backlogEntries.value.filter(entryVisible).length)
@@ -188,12 +189,13 @@ function lastVisibleChildId(entry) {
   const shown = visibleChildren(entry)
   return shown.length ? shown[shown.length - 1].id : null
 }
+// Direct subtasks; one that was split again counts by its own subtasks' progress
 function groupStats(parent) {
-  const all = subtasksOf(parent.id)
+  const statuses = subtasksOf(parent.id).map(t => liveStatus(t.id, t.status))
   return {
-    total: all.length,
-    inBacklog: all.filter(isBacklog).length,
-    done: all.filter(t => isDone(t.status)).length
+    total: statuses.length,
+    inBacklog: statuses.filter(s => s === 'backlog' || s === 'open').length,
+    done: statuses.filter(isDone).length
   }
 }
 
@@ -316,14 +318,26 @@ const ticketsById = computed(() => new Map(tickets.value.map(t => [t.id, t])))
 // open from their subtasks' "Subtask of" link.
 const splitParents = ref([])
 const splitParentsById = computed(() => new Map(splitParents.value.map(t => [t.id, t])))
-const subtasksOf = (id) => tickets.value.filter(t => t.parent_ticket_id === id)
+// Splits nest to any depth, so a ticket's subtasks can include split
+// tickets of their own (in splitParents rather than on the board)
+const subtasksOf = (id) => [...tickets.value, ...splitParents.value].filter(t => t.parent_ticket_id === id)
 const parentOf = (ticket) => (ticket?.parent_ticket_id ? splitParentsById.value.get(ticket.parent_ticket_id) : null)
+// The split tickets above this one, outermost first
+function ancestorsOf(ticket) {
+  const chain = []
+  const seen = new Set()
+  for (let p = parentOf(ticket); p && !seen.has(p.id); p = parentOf(p)) {
+    seen.add(p.id)
+    chain.unshift(p)
+  }
+  return chain
+}
 
 const showSplitDialog = ref(false)
-// Split: subtasks can't be split further, and finished work isn't split
+// Split: any open ticket, subtasks included; finished work isn't split
 const canSplit = computed(() => {
   const t = selectedTicket.value
-  return !!t && canWork.value && !t.parent_ticket_id && !isDone(t.status)
+  return !!t && canWork.value && !isDone(t.status)
 })
 
 async function openSplitDialog() {
@@ -343,16 +357,18 @@ async function onSplit() {
   const parent = splitParentsById.value.get(parentId)
   if (parent) selectTicket(parent)
 }
-function liveStatus(id, fallback) {
+function liveStatus(id, fallback, seen = new Set()) {
   const ticket = ticketsById.value.get(id)
   if (ticket) return ticket.status
   // A split ticket's own status goes stale -- its subtasks carry the work --
-  // so anything depending on it follows them: done once they all are
-  if (splitParentsById.value.has(id)) {
-    const subs = subtasksOf(id)
+  // so anything depending on it follows them: done once they all are.
+  // Subtasks that were split in turn follow their own subtasks.
+  if (splitParentsById.value.has(id) && !seen.has(id)) {
+    seen.add(id)
+    const subs = subtasksOf(id).map(t => liveStatus(t.id, t.status, seen))
     if (subs.length) {
-      if (subs.every(t => isDone(t.status))) return 'resolved'
-      return subs.some(t => t.status !== 'backlog' && t.status !== 'open') ? 'in_progress' : 'backlog'
+      if (subs.every(isDone)) return 'resolved'
+      return subs.some(s => s !== 'backlog' && s !== 'open') ? 'in_progress' : 'backlog'
     }
   }
   return fallback
@@ -449,7 +465,7 @@ function addDependency(id) {
 const dependencyCategoryIds = computed(() => {
   const sel = selectedTicket.value
   if (!sel?.parent_ticket_id) return new Set()
-  return new Set(subtasksOf(sel.parent_ticket_id).filter(t => t.id !== sel.id).map(t => t.id))
+  return new Set(tickets.value.filter(t => t.parent_ticket_id === sel.parent_ticket_id && t.id !== sel.id).map(t => t.id))
 })
 const dependencyCategoryName = computed(() => parentOf(selectedTicket.value)?.title || '')
 
@@ -1118,7 +1134,8 @@ onMounted(async () => {
                   <span class="dependency-id">#{{ sub.id }}</span> {{ sub.title }}
                 </button>
                 <span v-if="formatEstimateShort(sub)" class="ticket-estimate">{{ formatEstimateShort(sub) }}</span>
-                <StatusBadge :color="statusColor[sub.status]" soft size="xs">{{ statusLabels[sub.status] || sub.status }}</StatusBadge>
+                <span v-if="sub.split_mode" class="split-kind">Split</span>
+                <StatusBadge :color="statusColor[liveStatus(sub.id, sub.status)]" soft size="xs">{{ statusLabels[liveStatus(sub.id, sub.status)] || liveStatus(sub.id, sub.status) }}</StatusBadge>
               </li>
             </ul>
           </div>
@@ -1447,6 +1464,9 @@ onMounted(async () => {
                   <button class="backlog-parent-main" :data-ticket-id="entry.parent.id" @click="selectTicket(entry.parent)">
                     <span class="ticket-id">#{{ entry.parent.id }}</span>
                     <span class="backlog-main">
+                      <span v-if="ancestorsOf(entry.parent).length" class="backlog-ancestry">
+                        <template v-for="a in ancestorsOf(entry.parent)" :key="a.id">#{{ a.id }} {{ a.title }} › </template>
+                      </span>
                       <span class="backlog-parent-title">{{ entry.parent.title }}</span>
                       <span class="backlog-meta">
                         <span>{{ groupStats(entry.parent).total }} subtask{{ groupStats(entry.parent).total === 1 ? '' : 's' }}</span>
@@ -2063,6 +2083,11 @@ onMounted(async () => {
 
 .backlog-parent-title {
   font-weight: 700;
+}
+
+.backlog-ancestry {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
 }
 
 .split-kind {

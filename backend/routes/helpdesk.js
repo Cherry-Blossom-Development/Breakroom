@@ -575,7 +575,8 @@ router.delete('/comment/:id', authenticate, async (req, res) => {
 // priority and assignee as the parent; parent_ticket_id set) and records on
 // the parent what became of it: 'hidden' or 'category'. A parent that was
 // already split can be split again to add more subtasks; it keeps its
-// original mode. Subtasks can't be split themselves (one level only).
+// original mode. Subtasks can be split too, to any depth: a split subtask
+// keeps its own parent_ticket_id and becomes a split parent itself.
 const SPLIT_MODES = ['hidden', 'category'];
 const MAX_SUBTASKS = 20;
 
@@ -589,13 +590,10 @@ router.post('/ticket/:id/split', authenticate, async (req, res) => {
     if (!access.canWork) return res.status(403).json({ message: 'Not authorized to split this ticket' });
 
     const parentResult = await client.query(
-      'SELECT id, company_id, parent_ticket_id, split_mode, status, priority, assigned_to FROM tickets WHERE id = $1',
+      'SELECT id, company_id, split_mode, status, priority, assigned_to FROM tickets WHERE id = $1',
       [req.params.id]
     );
     const parent = parentResult.rows[0];
-    if (parent.parent_ticket_id) {
-      return res.status(400).json({ message: 'A subtask can’t be split further' });
-    }
     if (['resolved', 'closed'].includes(parent.status)) {
       return res.status(400).json({ message: 'A finished ticket can’t be split' });
     }
