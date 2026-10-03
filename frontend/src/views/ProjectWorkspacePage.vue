@@ -28,8 +28,9 @@ const returnPath = typeof previousPath === 'string' && !previousPath.startsWith(
   : '/projects'
 
 const menuItems = [
-  // also highlighted on the board's Backlog and Closed Tickets lists
-  { name: 'projectKanban', label: 'Kanban Board', icon: 'kanban', alsoActiveOn: ['projectWorkspaceBacklog', 'projectWorkspaceClosed'] },
+  // also highlighted on the board's Backlog and Closed Tickets lists and
+  // on a ticket's full page
+  { name: 'projectKanban', label: 'Kanban Board', icon: 'kanban', alsoActiveOn: ['projectWorkspaceBacklog', 'projectWorkspaceClosed', 'projectWorkspaceTicket'] },
   { name: 'projectGantt', label: 'GANTT Chart', icon: 'gantt' },
   { name: 'projectBurndown', label: 'Burndown Chart', icon: 'burndown' },
 ]

@@ -5,7 +5,9 @@ import { watch, onBeforeUnmount } from 'vue'
 import { toRichHtml } from '../utilities/richText'
 
 const props = defineProps({
-  modelValue: { type: String, default: '' }
+  modelValue: { type: String, default: '' },
+  // Put the cursor at the end on mount (click-to-edit fields)
+  autofocus: { type: Boolean, default: false }
 })
 const emit = defineEmits(['update:modelValue'])
 
@@ -14,6 +16,7 @@ const emit = defineEmits(['update:modelValue'])
 const editor = useEditor({
   content: toRichHtml(props.modelValue),
   extensions: [StarterKit],
+  autofocus: props.autofocus ? 'end' : false,
   onUpdate({ editor }) {
     emit('update:modelValue', editor.getHTML())
   }

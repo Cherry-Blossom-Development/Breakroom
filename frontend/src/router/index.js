@@ -276,6 +276,12 @@ const router = createRouter({
           props: { embedded: true, view: 'backlog' },
         },
         {
+          path: 'ticket/:ticketId',
+          name: 'projectWorkspaceTicket',
+          component: () => import('../views/TicketPage.vue'),
+          props: { embedded: true },
+        },
+        {
           path: 'closed',
           name: 'projectWorkspaceClosed',
           component: () => import('../views/ProjectClosedTicketsPage.vue'),
@@ -345,6 +351,12 @@ const router = createRouter({
       name: 'projectBacklog',
       component: () => import('../views/ProjectPage.vue'),
       props: { view: 'backlog' },
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/project/:id/ticket/:ticketId',
+      name: 'projectTicket',
+      component: () => import('../views/TicketPage.vue'),
       meta: { requiresAuth: true },
     },
     {
