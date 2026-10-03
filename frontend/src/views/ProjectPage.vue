@@ -11,6 +11,7 @@ import TicketAttachments from '../components/TicketAttachments.vue'
 import SplitTicketDialog from '../components/SplitTicketDialog.vue'
 import BacklogTicketRow from '../components/BacklogTicketRow.vue'
 import DependencyPicker from '../components/DependencyPicker.vue'
+import TicketContributors from '../components/TicketContributors.vue'
 import { user } from '../stores/user'
 import { ESTIMATE_UNITS, hasEstimate, formatEstimate, formatEstimateShort } from '../utilities/ticketEstimates'
 import { useTicketDetail, priorityColor, statusColor, statusHex, statusLabels } from '../composables/useTicketDetail'
@@ -58,6 +59,7 @@ const {
   addDependency, dependencyCategoryIds, dependencyCategoryName, toggleDependency,
   draft, savingChanges, saveError, isDirty, saveChanges, discardChanges, chooseStatus,
   ticketAttachments, uploadAttachments, canAttach, canRemoveAttachment,
+  shownContributors, addContributor, removeContributor, setContributorRole,
   leavePrompt, leaveSaveBtn, resolveLeave, requestClose, allowedTransitions, openLinkedTicket,
   selectTicket, addComment, startEditComment, cancelEditComment, saveEditComment, deleteComment
 } = useTicketDetail({ reload: () => fetchProject() })
@@ -591,6 +593,19 @@ onMounted(async () => {
                 {{ emp.first_name }} {{ emp.last_name }} ({{ emp.handle }})
               </option>
             </select>
+          </div>
+
+          <div class="detail-contributors">
+            <h3>Contributors</h3>
+            <TicketContributors
+              :contributors="shownContributors"
+              :people="assignees"
+              :can-edit="canWork"
+              id-prefix="popup-contrib"
+              @add="addContributor"
+              @remove="removeContributor"
+              @set-role="setContributorRole"
+            />
           </div>
 
           <div class="detail-description">
@@ -1286,6 +1301,16 @@ onMounted(async () => {
 
 .detail-description {
   margin-bottom: 20px;
+}
+
+.detail-contributors {
+  margin-bottom: 20px;
+}
+
+.detail-contributors h3 {
+  margin: 0 0 10px;
+  color: var(--color-text);
+  font-size: 1rem;
 }
 
 .detail-description h3 {

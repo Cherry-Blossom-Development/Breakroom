@@ -264,8 +264,8 @@ export function useTicketDetail({ reload = async () => {}, openTicket = null } =
 
   // ---- Unsaved ticket changes ----
   // The detail panel stages every change -- title/description/priority,
-  // status, assignee, estimate (amount + unit, migration 083) and
-  // dependencies -- in `draft`. Nothing reaches the backend until Save
+  // status, assignee, estimate (amount + unit, migration 083),
+  // dependencies, attachments and contributors -- in `draft`. Nothing reaches the backend until Save
   // Changes, which sends one ticket update plus one call per dependency
   // change. Leaving with unsaved changes asks first.
   const draft = ref(null)
@@ -287,7 +287,8 @@ export function useTicketDetail({ reload = async () => {}, openTicket = null } =
       addDeps: [],
       removeDeps: [],
       addFiles: [], // File objects to upload (migration 085)
-      removeAttachments: [] // saved attachment ids to delete
+      removeAttachments: [], // saved attachment ids to delete
+      contributors: null // edited contributor list (migration 088); null = unchanged
     }
   }
 
@@ -334,6 +335,7 @@ export function useTicketDetail({ reload = async () => {}, openTicket = null } =
       || draft.value.removeDeps.length > 0
       || draft.value.addFiles.length > 0
       || draft.value.removeAttachments.length > 0
+      || contributorsChanged.value
       || hasUnpostedComment.value
   })
 
@@ -364,10 +366,10 @@ export function useTicketDetail({ reload = async () => {}, openTicket = null } =
         const data = await res.json()
         if (!res.ok) throw new Error(data.message || 'Failed to save changes')
         applyTicketUpdate(data.ticket)
-        // Fields are saved; keep any pending dependency/attachment changes
-        const { addDeps, removeDeps, addFiles, removeAttachments } = draft.value
+        // Fields are saved; keep any pending dependency/attachment/contributor changes
+        const { addDeps, removeDeps, addFiles, removeAttachments, contributors } = draft.value
         resetDraft(selectedTicket.value)
-        Object.assign(draft.value, { addDeps, removeDeps, addFiles, removeAttachments })
+        Object.assign(draft.value, { addDeps, removeDeps, addFiles, removeAttachments, contributors })
       }
 
       for (const id of [...draft.value.removeDeps]) {
@@ -399,6 +401,18 @@ export function useTicketDetail({ reload = async () => {}, openTicket = null } =
       if (draft.value.addFiles.length > 0) {
         ticketAttachments.value = await uploadAttachments(ticketId, draft.value.addFiles)
         draft.value.addFiles = []
+      }
+
+      if (contributorsChanged.value) {
+        const res = await authFetch(`/api/helpdesk/ticket/${ticketId}/contributors`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ contributors: draft.value.contributors.map(c => ({ user_id: c.user_id, role: c.role })) })
+        })
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.message || 'Failed to save contributors')
+        ticketContributors.value = data.contributors
+        draft.value.contributors = null
       }
 
       // The comment helpers clear their text only on success
@@ -449,6 +463,59 @@ export function useTicketDetail({ reload = async () => {}, openTicket = null } =
   const canAttach = computed(() => !!selectedTicket.value
     && (canWork.value || selectedTicket.value.creator_handle === user.username))
   const canRemoveAttachment = (a) => canWork.value || a.uploader_handle === user.username
+
+  // ---- Contributors (migration 088) ----
+  // People on the ticket besides its assignee, each with a freeform role.
+  // Edits work on a copy in draft.contributors until Save Changes, which
+  // sends the whole list in one call.
+  const ticketContributors = ref([])
+
+  async function fetchContributors(ticketId) {
+    try {
+      const res = await authFetch(`/api/helpdesk/ticket/${ticketId}/contributors`)
+      if (res.ok) ticketContributors.value = (await res.json()).contributors
+    } catch (err) {
+      console.error('Error fetching contributors:', err)
+    }
+  }
+
+  const contributorKey = (list) => JSON.stringify(list.map(c => [c.user_id, (c.role || '').trim()]))
+  const contributorsChanged = computed(() => !!draft.value?.contributors
+    && contributorKey(draft.value.contributors) !== contributorKey(ticketContributors.value))
+
+  // The list as shown: the draft's while it's being edited, else the saved one
+  const shownContributors = computed(() => draft.value?.contributors ?? ticketContributors.value)
+
+  function editContributors() {
+    if (!draft.value.contributors) {
+      draft.value.contributors = ticketContributors.value.map(c => ({ ...c }))
+    }
+    return draft.value.contributors
+  }
+
+  // person: an entry from the project's assignees list
+  function addContributor(person, role = '') {
+    const list = editContributors()
+    if (list.some(c => c.user_id === person.user_id)) return
+    list.push({
+      user_id: person.user_id,
+      role: role.trim(),
+      handle: person.handle,
+      first_name: person.first_name,
+      last_name: person.last_name
+    })
+  }
+
+  function removeContributor(userId) {
+    const list = editContributors()
+    const i = list.findIndex(c => c.user_id === userId)
+    if (i !== -1) list.splice(i, 1)
+  }
+
+  function setContributorRole(userId, role) {
+    const c = editContributors().find(x => x.user_id === userId)
+    if (c) c.role = role
+  }
 
   function discardChanges() {
     resetDraft(selectedTicket.value)
@@ -528,8 +595,10 @@ export function useTicketDetail({ reload = async () => {}, openTicket = null } =
     editingTicket.value = false
     resetDraft(ticket)
     ticketAttachments.value = []
+    ticketContributors.value = []
     fetchComments(ticket.id)
     fetchAttachments(ticket.id)
+    fetchContributors(ticket.id)
   }
 
   function closeDetail() {
@@ -540,6 +609,7 @@ export function useTicketDetail({ reload = async () => {}, openTicket = null } =
     editingTicket.value = false
     ticketComments.value = []
     ticketAttachments.value = []
+    ticketContributors.value = []
     commentText.value = ''
     editingCommentId.value = null
     editCommentText.value = ''
@@ -682,6 +752,11 @@ export function useTicketDetail({ reload = async () => {}, openTicket = null } =
     uploadAttachments,
     canAttach,
     canRemoveAttachment,
+    ticketContributors,
+    shownContributors,
+    addContributor,
+    removeContributor,
+    setContributorRole,
     discardChanges,
     chooseStatus,
     leavePrompt,

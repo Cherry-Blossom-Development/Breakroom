@@ -8,6 +8,7 @@ import RichTextEditor from '../components/RichTextEditor.vue'
 import TicketAttachments from '../components/TicketAttachments.vue'
 import SplitTicketDialog from '../components/SplitTicketDialog.vue'
 import DependencyPicker from '../components/DependencyPicker.vue'
+import TicketContributors from '../components/TicketContributors.vue'
 import { toRichHtml } from '../utilities/richText'
 import { user } from '../stores/user'
 import { ESTIMATE_UNITS, formatEstimate, formatEstimateShort } from '../utilities/ticketEstimates'
@@ -45,6 +46,7 @@ const {
   addDependency, dependencyCategoryIds, dependencyCategoryName, toggleDependency,
   draft, original, savingChanges, saveError, isDirty, saveChanges, discardChanges,
   ticketAttachments, canAttach, canRemoveAttachment,
+  shownContributors, addContributor, removeContributor, setContributorRole,
   leavePrompt, leaveSaveBtn, confirmLeave, resolveLeave, allowedTransitions, openLinkedTicket,
   selectTicket, addComment, startEditComment, cancelEditComment, saveEditComment, deleteComment
 } = useTicketDetail({
@@ -414,6 +416,19 @@ function discard() {
           </dl>
 
           <section class="side-section">
+            <h2>Contributors</h2>
+            <TicketContributors
+              :contributors="shownContributors"
+              :people="assignees"
+              :can-edit="canWork"
+              id-prefix="page-contrib"
+              @add="addContributor"
+              @remove="removeContributor"
+              @set-role="setContributorRole"
+            />
+          </section>
+
+          <section class="side-section">
             <h2>Depends on</h2>
             <ul v-if="selectedDependsOn.length > 0" class="link-list">
               <li v-for="dep in selectedDependsOn" :key="dep.id" class="link-item" :class="dep.pending && `pending-${dep.pending}`">
@@ -763,6 +778,10 @@ function discard() {
 .side-section {
   padding-top: 16px;
   border-top: 1px solid var(--color-border);
+}
+
+.side-section + .side-section {
+  margin-top: 16px;
 }
 
 .blocking-heading {

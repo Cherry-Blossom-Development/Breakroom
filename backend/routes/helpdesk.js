@@ -418,6 +418,108 @@ router.delete('/ticket/:id/dependencies/:dependsOnId', authenticate, async (req,
   }
 });
 
+// ---- Contributors (migration 088) ----
+// People on a ticket besides its assignee, each with a freeform role.
+// Anyone who can view the ticket sees them; people who can work it set the
+// whole list in one PUT (the ticket panel stages edits until Save).
+const MAX_CONTRIBUTORS = 50;
+const MAX_ROLE_LENGTH = 100;
+
+async function getTicketContributors(client, ticketId) {
+  const result = await client.query(
+    `SELECT tc.user_id, tc.role, tc.created_at, u.handle, u.first_name, u.last_name
+     FROM ticket_contributors tc
+     JOIN users u ON u.id = tc.user_id
+     WHERE tc.ticket_id = $1
+     ORDER BY tc.created_at, tc.user_id`,
+    [ticketId]
+  );
+  return result.rows;
+}
+
+router.get('/ticket/:id/contributors', authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const access = await getTicketAccess(client, req.params.id, req.user.id);
+    if (!access) return res.status(404).json({ message: 'Ticket not found' });
+    if (!access.canView) return res.status(403).json({ message: 'Access denied' });
+
+    res.json({ contributors: await getTicketContributors(client, req.params.id) });
+  } catch (err) {
+    console.error('Error fetching contributors:', err);
+    res.status(500).json({ message: 'Failed to fetch contributors' });
+  } finally {
+    client.release();
+  }
+});
+
+// Body: { contributors: [{ user_id, role }] } -- the complete new list
+router.put('/ticket/:id/contributors', authenticate, async (req, res) => {
+  const { contributors } = req.body;
+  const client = await getClient();
+  try {
+    const access = await getTicketAccess(client, req.params.id, req.user.id);
+    if (!access) return res.status(404).json({ message: 'Ticket not found' });
+    if (!access.canWork) return res.status(403).json({ message: 'Not authorized to change contributors' });
+
+    if (!Array.isArray(contributors) || contributors.length > MAX_CONTRIBUTORS) {
+      return res.status(400).json({ message: `contributors must be a list of at most ${MAX_CONTRIBUTORS} people` });
+    }
+    const rows = [];
+    const seen = new Set();
+    for (const c of contributors) {
+      const userId = Number(c?.user_id);
+      if (!Number.isInteger(userId) || userId <= 0) {
+        return res.status(400).json({ message: 'Each contributor needs a user_id' });
+      }
+      if (seen.has(userId)) {
+        return res.status(400).json({ message: 'A person can only be listed once' });
+      }
+      seen.add(userId);
+      const role = typeof c.role === 'string' ? c.role.trim() : '';
+      if (role.length > MAX_ROLE_LENGTH) {
+        return res.status(400).json({ message: `Roles can be at most ${MAX_ROLE_LENGTH} characters` });
+      }
+      if (!(await canBeAssigned(client, access.ticket, userId))) {
+        return res.status(400).json({ message: 'Contributors must be employees of this company or members of the project' });
+      }
+      rows.push({ userId, role });
+    }
+
+    await client.beginTransaction();
+    try {
+      const existing = await client.query('SELECT user_id FROM ticket_contributors WHERE ticket_id = $1', [req.params.id]);
+      const existingIds = new Set(existing.rows.map(r => r.user_id));
+      const removed = [...existingIds].filter(id => !seen.has(id));
+      for (const userId of removed) {
+        await client.query('DELETE FROM ticket_contributors WHERE ticket_id = $1 AND user_id = $2', [req.params.id, userId]);
+      }
+      // Existing rows keep their created_at (list order); only the role changes
+      for (const { userId, role } of rows) {
+        if (existingIds.has(userId)) {
+          await client.query('UPDATE ticket_contributors SET role = $1 WHERE ticket_id = $2 AND user_id = $3', [role, req.params.id, userId]);
+        } else {
+          await client.query(
+            'INSERT INTO ticket_contributors (ticket_id, user_id, role, added_by) VALUES ($1, $2, $3, $4)',
+            [req.params.id, userId, role, req.user.id]
+          );
+        }
+      }
+      await client.commit();
+    } catch (err) {
+      await client.rollback();
+      throw err;
+    }
+
+    res.json({ contributors: await getTicketContributors(client, req.params.id) });
+  } catch (err) {
+    console.error('Error saving contributors:', err);
+    res.status(500).json({ message: 'Failed to save contributors' });
+  } finally {
+    client.release();
+  }
+});
+
 // Get comments for a ticket
 router.get('/ticket/:ticketId/comments', authenticate, async (req, res) => {
   const { ticketId } = req.params;
