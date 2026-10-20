@@ -12,6 +12,58 @@ const { sendMail, sendMailToUser } = require('../utilities/aws-ses-email');
 const { uploadToS3, deleteFromS3, getS3Url } = require('../utilities/aws-s3');
 const { emitToUser } = require('../utilities/socket');
 const { sendToUsers } = require('../utilities/fcm');
+const { SITES } = require('../utilities/site');
+
+const escapeHtml = (s) => String(s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+// Band invite email for a Greywire band, in the Greywire style (matches the
+// greywire templates in data/migrations/091-site-emails.sql).
+function greywireBandInviteHtml({ inviterName, bandName, url, buttonLabel, intro, footnote }) {
+  return `<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; background-color: #e8e6e1; font-family: Arial, Helvetica, sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #e8e6e1; padding: 40px 20px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden;">
+          <tr>
+            <td style="background-color: #141619; padding: 32px 40px; border-bottom: 4px solid #d07a3e;">
+              <p style="color: #d07a3e; margin: 0; font-size: 13px; letter-spacing: 2px; text-transform: uppercase;">Greywire Studio</p>
+              <h1 style="color: #e8e6e1; margin: 8px 0 0; font-size: 26px; font-weight: 600;">You're invited to a band</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 36px 40px;">
+              <p style="color: #33383e; font-size: 16px; line-height: 1.6; margin: 0 0 20px;">
+                ${escapeHtml(inviterName)} has invited you to join <strong>${escapeHtml(bandName)}</strong> in the Greywire community.
+              </p>
+              ${intro ? `<p style="color: #33383e; font-size: 16px; line-height: 1.6; margin: 0 0 20px;">${intro}</p>` : ''}
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td align="center" style="padding: 4px 0 28px;">
+                    <a href="${url}" style="display: inline-block; background-color: #d07a3e; color: #141619; text-decoration: none; padding: 14px 36px; border-radius: 6px; font-size: 16px; font-weight: 700;">${buttonLabel}</a>
+                  </td>
+                </tr>
+              </table>
+              <p style="color: #6b7077; font-size: 13px; line-height: 1.5; margin: 0;">
+                ${footnote}<br>
+                Or copy and paste: <a href="${url}" style="color: #b0612a; word-break: break-all;">${url}</a>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color: #f4f3f0; padding: 20px 40px; text-align: center; border-top: 1px solid #e0ded8;">
+              <p style="color: #9ba0a6; font-size: 12px; margin: 0;">Greywire Studio &mdash; <a href="https://greywirestudio.com" style="color: #9ba0a6;">greywirestudio.com</a></p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
 
 const imageUpload = multer({
   storage: multer.memoryStorage(),
@@ -306,6 +358,14 @@ async function inviteExistingUserToBand(client, { bandId, targetUser, inviterId 
     return { error: { status: 400, message: 'You are already in your own band' } };
   }
 
+  const bandRow = await client.query('SELECT name, site FROM bands WHERE id = $1', [bandId]);
+  const { name: bandName, site: bandSite } = bandRow.rows[0];
+
+  // A Greywire band can only take Greywire members (the site is members-only)
+  if (bandSite === 'greywire' && !(await isMember(client, targetUser.id))) {
+    return { error: { status: 400, message: `@${targetUser.handle} isn't a Greywire member yet` } };
+  }
+
   const existing = await client.query(
     'SELECT status FROM band_members WHERE band_id = $1 AND user_id = $2',
     [bandId, targetUser.id]
@@ -326,18 +386,27 @@ async function inviteExistingUserToBand(client, { bandId, targetUser, inviterId 
     );
   }
 
-  const [bandRow, inviterRow] = await Promise.all([
-    client.query('SELECT name FROM bands WHERE id = $1', [bandId]),
-    client.query('SELECT handle, first_name FROM users WHERE id = $1', [inviterId]),
-  ]);
-  const bandName = bandRow.rows[0].name;
+  const inviterRow = await client.query('SELECT handle, first_name FROM users WHERE id = $1', [inviterId]);
   const inviterName = inviterRow.rows[0].first_name || `@${inviterRow.rows[0].handle}`;
-  const appUrl = process.env.APP_URL || process.env.CORS_ORIGIN || 'https://www.prosaurus.com';
 
   // Email
-  const fromRow = await client.query(`SELECT from_address FROM system_emails WHERE is_active = true LIMIT 1`);
-  const fromAddress = fromRow.rowCount > 0 ? fromRow.rows[0].from_address : 'noreply@prosaurus.com';
-  const html = `
+  let fromAddress, subject, html;
+  if (bandSite === 'greywire') {
+    fromAddress = SITES.greywire.emailFrom;
+    subject = `${inviterName} invited you to join ${bandName} on Greywire`;
+    html = greywireBandInviteHtml({
+      inviterName,
+      bandName,
+      url: `${SITES.greywire.url}/sessions`,
+      buttonLabel: 'View Invite',
+      footnote: 'Sign in to the Greywire community and open Band Practice to accept or decline.',
+    });
+  } else {
+    const appUrl = process.env.APP_URL || process.env.CORS_ORIGIN || 'https://www.prosaurus.com';
+    const fromRow = await client.query(`SELECT from_address FROM system_emails WHERE is_active = true LIMIT 1`);
+    fromAddress = fromRow.rowCount > 0 ? fromRow.rows[0].from_address : 'noreply@prosaurus.com';
+    subject = `${inviterName} invited you to join ${bandName} on Prosaurus`;
+    html = `
     <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#333">
       <h2>You've been invited to join a band!</h2>
       <p>${inviterName} has invited you to join <strong>${bandName}</strong> on Prosaurus.</p>
@@ -349,7 +418,8 @@ async function inviteExistingUserToBand(client, { bandId, targetUser, inviterId 
       <p style="color:#666;font-size:0.9em">Log in to Prosaurus and open Band Practice to accept or decline.</p>
     </div>
   `;
-  await sendMailToUser(targetUser, fromAddress, `${inviterName} invited you to join ${bandName} on Prosaurus`, html);
+  }
+  await sendMailToUser(targetUser, fromAddress, subject, html);
 
   // In-app notification
   const notifTypeResult = await client.query(
@@ -461,7 +531,7 @@ router.post('/:id/email-invites', authenticate, async (req, res) => {
       return res.status(201).json({ message: `Invite sent to @${existing.rows[0].handle}` });
     }
 
-    const band = await client.query('SELECT name FROM bands WHERE id = $1', [req.params.id]);
+    const band = await client.query('SELECT name, site FROM bands WHERE id = $1', [req.params.id]);
     if (band.rowCount === 0) return res.status(404).json({ message: 'Band not found' });
 
     // Check for existing pending invite to this email for this band
@@ -484,6 +554,21 @@ router.post('/:id/email-invites', authenticate, async (req, res) => {
     const inviter = await client.query('SELECT handle, first_name FROM users WHERE id = $1', [req.user.id]);
     const inviterName = inviter.rows[0].first_name || `@${inviter.rows[0].handle}`;
     const bandName = band.rows[0].name;
+
+    if (band.rows[0].site === 'greywire') {
+      const html = greywireBandInviteHtml({
+        inviterName,
+        bandName,
+        url: `${SITES.greywire.url}/band-invite/${token}`,
+        buttonLabel: 'Accept Invite',
+        intro: 'The Greywire community is where Greywire pedal owners chat, share recordings and practice with their bands. Joining is free with any Greywire pedal: sign up, then claim your pedal.',
+        footnote: "This invite expires in 7 days. If you don't want to join, you can ignore this email.",
+      });
+      // Not sendMailToUser: no account yet, so no alternate_email (see below)
+      await sendMail(emailTrimmed, SITES.greywire.emailFrom, `${inviterName} invited you to join ${bandName} on Greywire`, html);
+      return res.status(201).json({ message: `Invite sent to ${emailTrimmed}` });
+    }
+
     const appUrl = process.env.APP_URL || process.env.CORS_ORIGIN || 'https://www.prosaurus.com';
     const inviteUrl = `${appUrl}/band-invite/${token}`;
 

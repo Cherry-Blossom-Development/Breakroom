@@ -260,11 +260,11 @@ function formatDate(str) {
 
 /* ── Greywire membership ── */
 .current-plan-banner.banner--greywire {
-  background: rgba(184, 115, 51, 0.08);
-  border: 1px solid rgba(184, 115, 51, 0.35);
+  background: rgba(208, 122, 62, 0.08);
+  border: 1px solid rgba(208, 122, 62, 0.35);
 }
 
-.banner--greywire .current-plan-name { color: #b87333; }
+.banner--greywire .current-plan-name { color: #d07a3e; }
 
 .membership-list {
   margin: 0 0 24px;

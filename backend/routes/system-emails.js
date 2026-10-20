@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { getClient } = require('../utilities/db');
 const { sendMail } = require('../utilities/aws-ses-email');
+const { SITES, DEFAULT_SITE } = require('../utilities/site');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
@@ -66,9 +67,9 @@ router.get('/', authenticate, requireAdmin, async (req, res) => {
   const client = await getClient();
   try {
     const result = await client.query(
-      `SELECT id, email_key, from_address, subject, description, is_active, created_at, updated_at
+      `SELECT id, email_key, site, from_address, subject, description, is_active, created_at, updated_at
        FROM system_emails
-       ORDER BY email_key`
+       ORDER BY email_key, site`
     );
     res.status(200).json({ emails: result.rows });
   } catch (err) {
@@ -88,7 +89,7 @@ router.get('/:id', authenticate, requireAdmin, async (req, res) => {
   const client = await getClient();
   try {
     const result = await client.query(
-      `SELECT id, email_key, from_address, subject, html_content, description, is_active
+      `SELECT id, email_key, site, from_address, subject, html_content, description, is_active
        FROM system_emails
        WHERE id = $1`,
       [id]
@@ -113,6 +114,7 @@ router.get('/:id', authenticate, requireAdmin, async (req, res) => {
  */
 router.post('/', authenticate, requireAdmin, async (req, res) => {
   const { email_key, from_address, subject, html_content, description } = req.body;
+  const site = SITES[req.body.site] ? req.body.site : DEFAULT_SITE;
 
   if (!email_key || !from_address || !subject || !html_content) {
     return res.status(400).json({ message: 'email_key, from_address, subject, and html_content are required' });
@@ -121,9 +123,9 @@ router.post('/', authenticate, requireAdmin, async (req, res) => {
   const client = await getClient();
   try {
     const result = await client.query(
-      `INSERT INTO system_emails (email_key, from_address, subject, html_content, description)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [email_key, from_address, subject, html_content, description || null]
+      `INSERT INTO system_emails (email_key, site, from_address, subject, html_content, description)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [email_key, site, from_address, subject, html_content, description || null]
     );
 
     res.status(201).json({
@@ -132,7 +134,7 @@ router.post('/', authenticate, requireAdmin, async (req, res) => {
     });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
-      return res.status(400).json({ message: 'An email with this key already exists' });
+      return res.status(400).json({ message: 'This site already has an email with this key' });
     }
     console.error('Error creating system email:', err);
     res.status(500).json({ message: 'Failed to create email template' });
@@ -148,6 +150,7 @@ router.post('/', authenticate, requireAdmin, async (req, res) => {
 router.put('/:id', authenticate, requireAdmin, async (req, res) => {
   const { id } = req.params;
   const { email_key, from_address, subject, html_content, description } = req.body;
+  const site = SITES[req.body.site] ? req.body.site : DEFAULT_SITE;
 
   if (!email_key || !from_address || !subject || !html_content) {
     return res.status(400).json({ message: 'email_key, from_address, subject, and html_content are required' });
@@ -157,9 +160,9 @@ router.put('/:id', authenticate, requireAdmin, async (req, res) => {
   try {
     const result = await client.query(
       `UPDATE system_emails
-       SET email_key = $1, from_address = $2, subject = $3, html_content = $4, description = $5
-       WHERE id = $6`,
-      [email_key, from_address, subject, html_content, description || null, id]
+       SET email_key = $1, site = $2, from_address = $3, subject = $4, html_content = $5, description = $6
+       WHERE id = $7`,
+      [email_key, site, from_address, subject, html_content, description || null, id]
     );
 
     if (result.affectedRows === 0) {
@@ -169,7 +172,7 @@ router.put('/:id', authenticate, requireAdmin, async (req, res) => {
     res.status(200).json({ message: 'Email template updated' });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') {
-      return res.status(400).json({ message: 'An email with this key already exists' });
+      return res.status(400).json({ message: 'This site already has an email with this key' });
     }
     console.error('Error updating system email:', err);
     res.status(500).json({ message: 'Failed to update email template' });

@@ -8,6 +8,7 @@
         <thead>
           <tr>
             <th>Key</th>
+            <th>Site</th>
             <th>Subject</th>
             <th>From</th>
             <th>Description</th>
@@ -18,6 +19,7 @@
         <tbody>
           <tr v-for="email in emails" :key="email.id">
             <td><code>{{ email.email_key }}</code></td>
+            <td>{{ SITE_NAMES[email.site] || email.site }}</td>
             <td>{{ email.subject }}</td>
             <td>{{ email.from_address }}</td>
             <td>{{ email.description || '-' }}</td>
@@ -36,15 +38,23 @@
         <h2>Configure Email</h2>
 
         <!-- Editable Fields -->
-        <div class="form-group">
-          <label>Email Key:</label>
-          <input v-model="editForm.email_key" type="text" placeholder="e.g., welcome_email" />
+        <div class="form-row">
+          <div class="form-group half">
+            <label>Email Key:</label>
+            <input v-model="editForm.email_key" type="text" placeholder="e.g., welcome_email" />
+          </div>
+          <div class="form-group half">
+            <label>Site:</label>
+            <select v-model="editForm.site">
+              <option v-for="(name, key) in SITE_NAMES" :key="key" :value="key">{{ name }}</option>
+            </select>
+          </div>
         </div>
 
         <div class="form-row">
           <div class="form-group half">
             <label>From Address:</label>
-            <input v-model="editForm.from_address" type="email" placeholder="sender@example.com" />
+            <input v-model="editForm.from_address" type="text" placeholder="Name <sender@example.com>" />
           </div>
           <div class="form-group half">
             <label>Subject:</label>
@@ -130,9 +140,14 @@ const showConfigureModal = ref(false)
 const showPreview = ref(false)
 const selectedEmail = ref(null)
 
+// Each email key can have one version per site; a site without its own
+// version uses the Prosaurus one
+const SITE_NAMES = { prosaurus: 'Prosaurus', greywire: 'Greywire' }
+
 // Edit form
 const editForm = ref({
   email_key: '',
+  site: 'prosaurus',
   from_address: '',
   subject: '',
   description: '',
@@ -190,6 +205,7 @@ async function openConfigureModal(email) {
       selectedEmail.value = data
       editForm.value = {
         email_key: data.email_key,
+        site: data.site || 'prosaurus',
         from_address: data.from_address,
         subject: data.subject,
         description: data.description || '',
@@ -220,7 +236,7 @@ function togglePreview() {
 }
 
 async function saveOverOriginal() {
-  const { email_key, from_address, subject, html_content, description } = editForm.value
+  const { email_key, site, from_address, subject, html_content, description } = editForm.value
 
   if (!email_key || !from_address || !subject || !html_content) {
     saveError.value = 'Email key, from address, subject, and HTML content are required'
@@ -241,7 +257,7 @@ async function saveOverOriginal() {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ email_key, from_address, subject, html_content, description })
+      body: JSON.stringify({ email_key, site, from_address, subject, html_content, description })
     })
 
     const data = await res.json()
@@ -260,7 +276,7 @@ async function saveOverOriginal() {
 }
 
 async function saveAsNew() {
-  const { email_key, from_address, subject, html_content, description } = editForm.value
+  const { email_key, site, from_address, subject, html_content, description } = editForm.value
 
   if (!email_key || !from_address || !subject || !html_content) {
     saveError.value = 'Email key, from address, subject, and HTML content are required'
@@ -276,7 +292,7 @@ async function saveAsNew() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ email_key, from_address, subject, html_content, description })
+      body: JSON.stringify({ email_key, site, from_address, subject, html_content, description })
     })
 
     const data = await res.json()
@@ -431,6 +447,7 @@ button:disabled {
 }
 
 .form-group input,
+.form-group select,
 .form-group textarea {
   width: 100%;
   padding: 8px 10px;

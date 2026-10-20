@@ -14,6 +14,7 @@ const { extractToken } = require('../utilities/auth');
 const { checkPermission } = require('../middleware/checkPermission');
 const { findIdentifierCollision } = require('../utilities/userIdentifiers');
 const { getOnlineUserIds } = require('../utilities/socket');
+const { getSystemEmail } = require('../utilities/systemEmail');
 
 require('dotenv').config();
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -138,7 +139,7 @@ router.put('/alternate-email', authenticate, async (req, res) => {
       [alternateEmail, token, expiresAt, req.user.id]
     );
 
-    await sendAlternateEmailVerification(client, alternateEmail, token);
+    await sendAlternateEmailVerification(client, alternateEmail, token, req.site);
 
     res.json({ message: 'Verification email sent' });
   } catch (err) {
@@ -178,7 +179,7 @@ router.post('/alternate-email/resend', authenticate, async (req, res) => {
       [token, expiresAt, req.user.id]
     );
 
-    await sendAlternateEmailVerification(client, row.alternate_email, token);
+    await sendAlternateEmailVerification(client, row.alternate_email, token, req.site);
 
     res.json({ message: 'Verification email resent' });
   } catch (err) {
@@ -246,15 +247,13 @@ router.put('/alternate-email/notify', authenticate, async (req, res) => {
   }
 });
 
-// Shared by the initial-set and resend routes above.
-async function sendAlternateEmailVerification(client, toAddress, token) {
-  const emailTemplate = await client.query(
-    'SELECT from_address, subject, html_content FROM system_emails WHERE email_key = $1 AND is_active = true',
-    ['alternate_email_verification']
-  );
-  if (emailTemplate.rowCount === 0) return;
+// Shared by the initial-set and resend routes above. Uses the template for the
+// site the request came from.
+async function sendAlternateEmailVerification(client, toAddress, token, site) {
+  const emailTemplate = await getSystemEmail(client, 'alternate_email_verification', site);
+  if (!emailTemplate) return;
 
-  const { from_address, subject, html_content } = emailTemplate.rows[0];
+  const { from_address, subject, html_content } = emailTemplate;
   const processedContent = html_content.replace(/\{\{alternate_verification_token\}\}/g, token);
 
   if (process.env.NODE_ENV === 'test') {

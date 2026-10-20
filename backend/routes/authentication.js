@@ -8,6 +8,7 @@ const { sendMail } = require('../utilities/aws-ses-email');
 const { getPlatform } = require('../utilities/platform');
 const { authCookieDomain } = require('../utilities/site');
 const { memberSql } = require('../utilities/greywire');
+const { getSystemEmail } = require('../utilities/systemEmail');
 const { getIO } = require('../utilities/socket');
 const { findIdentifierCollision } = require('../utilities/userIdentifiers');
 const { acceptEulaForUser } = require('../utilities/eulaNotification');
@@ -215,14 +216,11 @@ router.post('/signup', async (req, res) => {
       sameSite: 'lax'
     });
 
-    // Fetch email template from database
-    const emailTemplate = await client.query(
-      'SELECT from_address, subject, html_content FROM system_emails WHERE email_key = $1 AND is_active = true',
-      ['signup_verification']
-    );
+    // Fetch the signup site's email template from database
+    const emailTemplate = await getSystemEmail(client, 'signup_verification', req.site);
 
-    if (emailTemplate.rowCount > 0) {
-      const { from_address, subject, html_content } = emailTemplate.rows[0];
+    if (emailTemplate) {
+      const { from_address, subject, html_content } = emailTemplate;
       // Replace placeholder with actual verification token
       const processedContent = html_content.replace(/\{\{verification_token\}\}/g, verificationToken);
 
@@ -326,13 +324,10 @@ router.post('/resend-verification', async (req, res) => {
   );
 
   // Fetch email template and send
-  const emailTemplate = await client.query(
-    'SELECT from_address, subject, html_content FROM system_emails WHERE email_key = $1 AND is_active = true',
-    ['signup_verification']
-  );
+  const emailTemplate = await getSystemEmail(client, 'signup_verification', req.site);
 
-  if (emailTemplate.rowCount > 0) {
-    const { from_address, subject, html_content } = emailTemplate.rows[0];
+  if (emailTemplate) {
+    const { from_address, subject, html_content } = emailTemplate;
     const processedContent = html_content.replace(/\{\{verification_token\}\}/g, newToken);
 
     // Test mode: write email to file instead of sending when NODE_ENV=test
@@ -711,13 +706,10 @@ router.post('/forgot-password', async (req, res) => {
     [resetToken, expiresAt, userData.id]
   );
 
-  const emailTemplate = await client.query(
-    'SELECT from_address, subject, html_content FROM system_emails WHERE email_key = $1 AND is_active = true',
-    ['password_reset']
-  );
+  const emailTemplate = await getSystemEmail(client, 'password_reset', req.site);
 
-  if (emailTemplate.rowCount > 0) {
-    const { from_address, subject, html_content } = emailTemplate.rows[0];
+  if (emailTemplate) {
+    const { from_address, subject, html_content } = emailTemplate;
     const processedContent = html_content.replace(/\{\{reset_token\}\}/g, resetToken);
 
     if (process.env.NODE_ENV === 'test') {
