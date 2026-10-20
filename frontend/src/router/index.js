@@ -42,6 +42,7 @@ import AdminSystemEmails from '@/views/admin/AdminSystemEmails.vue'
 import AdminTestResults from '@/views/admin/AdminTestResults.vue'
 import AdminFeatures from '@/views/admin/AdminFeatures.vue'
 import AdminGames from '@/views/admin/AdminGames.vue'
+import AdminGreywire from '@/views/admin/AdminGreywire.vue'
 import AdminModeration from '@/views/admin/AdminModeration.vue'
 import AdminImpersonate from '@/views/admin/AdminImpersonate.vue'
 
@@ -126,6 +127,7 @@ const router = createRouter({
         {path: 'test-results', component: AdminTestResults},
         {path: 'features', component: AdminFeatures},
         {path: 'games', component: AdminGames},
+        {path: 'greywire', component: AdminGreywire},
         {path: 'moderation', component: AdminModeration},
         {path: 'impersonate', component: AdminImpersonate}
       ]

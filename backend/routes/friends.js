@@ -5,10 +5,15 @@ const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { emitToUser, isOnline } = require('../utilities/socket');
 const { sendToUser } = require('../utilities/fcm');
+const { memberSql, isMember } = require('../utilities/greywire');
 
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
+
+// On the Greywire site, friends lists only show Greywire members. Friendships
+// themselves are shared between sites, like accounts.
+const greywireOnly = (req, alias = 'u') => (req.site === 'greywire' ? `AND ${memberSql(alias)}` : '');
 
 // Auth middleware
 const authenticate = async (req, res, next) => {
@@ -57,6 +62,7 @@ router.get('/', authenticate, async (req, res) => {
        )
        WHERE (f.user_id = $3 OR f.friend_id = $4)
          AND f.status = 'accepted'
+         ${greywireOnly(req)}
        GROUP BY u.id, u.handle, u.first_name, u.last_name, u.photo_path
        ORDER BY u.handle`,
       [req.user.id, req.user.id, req.user.id, req.user.id]
@@ -87,6 +93,7 @@ router.get('/requests', authenticate, async (req, res) => {
        FROM friends f
        JOIN users u ON f.user_id = u.id
        WHERE f.friend_id = $1 AND f.status = 'pending'
+         ${greywireOnly(req)}
        ORDER BY f.created_at DESC`,
       [req.user.id]
     );
@@ -111,6 +118,7 @@ router.get('/sent', authenticate, async (req, res) => {
        FROM friends f
        JOIN users u ON f.friend_id = u.id
        WHERE f.user_id = $1 AND f.status = 'pending'
+         ${greywireOnly(req)}
        ORDER BY f.created_at DESC`,
       [req.user.id]
     );
@@ -147,6 +155,11 @@ router.post('/request/:userId', authenticate, async (req, res) => {
 
     // Guest accounts are game-only and not real community members.
     if (targetUser.rows[0].is_guest) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // On the Greywire site you can only befriend other members.
+    if (req.site === 'greywire' && !(await isMember(client, targetUserId))) {
       return res.status(404).json({ message: 'User not found' });
     }
 
@@ -213,6 +226,11 @@ router.post('/accept/:userId', authenticate, async (req, res) => {
     );
 
     if (request.rowCount === 0) {
+      return res.status(404).json({ message: 'Friend request not found' });
+    }
+
+    // Requests from non-members are hidden on the Greywire site (see /requests)
+    if (req.site === 'greywire' && !(await isMember(client, requesterUserId))) {
       return res.status(404).json({ message: 'Friend request not found' });
     }
 
@@ -446,6 +464,7 @@ router.get('/search', authenticate, async (req, res) => {
        )
        WHERE f.status = 'accepted'
          AND (LOWER(u.handle) LIKE $3 OR LOWER(u.first_name) LIKE $4 OR LOWER(u.last_name) LIKE $5)
+         ${greywireOnly(req)}
        ORDER BY u.handle
        LIMIT 10`,
       [req.user.id, req.user.id, search, search, search]

@@ -3,6 +3,8 @@ const { getClient } = require('./db');
 const { checkAndFilterContent, getActiveKeywords, matchesKeyword } = require('./contentFilter');
 const { sendToUsers } = require('./fcm');
 const { logCreation } = require('./creationLogger');
+const { getSite } = require('./site');
+const { isMember } = require('./greywire');
 
 require('dotenv').config();
 
@@ -85,6 +87,23 @@ const initializeSocket = (io) => {
         id: user.rows[0].id,
         handle: user.rows[0].handle
       };
+
+      // Same rule as middleware/greywireAccess.js: only members connect from
+      // the Greywire site.
+      const site = getSite({
+        headers: socket.handshake.headers,
+        hostname: (socket.handshake.headers.host || '').split(':')[0],
+      });
+      if (site === 'greywire') {
+        const memberClient = await getClient();
+        try {
+          if (!(await isMember(memberClient, socket.user.id))) {
+            return next(new Error('Greywire membership required'));
+          }
+        } finally {
+          memberClient.release();
+        }
+      }
 
       next();
     } catch (err) {

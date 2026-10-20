@@ -124,6 +124,8 @@ const customDomainsRoutes = require('./routes/custom-domains');
 const analyticsRoutes = require('./routes/analytics');
 const gamesRoutes = require('./routes/games');
 const adminGamesRoutes = require('./routes/admin-games');
+const greywireRoutes = require('./routes/greywire');
+const adminGreywireRoutes = require('./routes/admin-greywire');
 const { getS3Url } = require('./utilities/aws-s3');
 
 
@@ -143,6 +145,10 @@ app.use(attachSite);
 // Sliding session — refresh the JWT on every authenticated request
 const refreshSession = require('./middleware/refreshSession');
 app.use(refreshSession);
+
+// The Greywire site is for members only (pedal owners or hand grants)
+const greywireAccess = require('./middleware/greywireAccess');
+app.use(greywireAccess);
 
 // Use routes
 app.use('/api/auth', authentication);
@@ -185,6 +191,8 @@ app.use('/api/custom-domains', customDomainsRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/games', gamesRoutes);
 app.use('/api/admin/games', adminGamesRoutes);
+app.use('/api/greywire', greywireRoutes);
+app.use('/api/admin/greywire', adminGreywireRoutes);
 const emailNannyRoutes = require('./routes/emailnanny');
 app.use('/api/emailnanny', emailNannyRoutes);
 

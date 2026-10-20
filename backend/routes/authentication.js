@@ -7,6 +7,7 @@ const { getClient } = require('../utilities/db');
 const { sendMail } = require('../utilities/aws-ses-email');
 const { getPlatform } = require('../utilities/platform');
 const { authCookieDomain } = require('../utilities/site');
+const { memberSql } = require('../utilities/greywire');
 const { getIO } = require('../utilities/socket');
 const { findIdentifierCollision } = require('../utilities/userIdentifiers');
 const { acceptEulaForUser } = require('../utilities/eulaNotification');
@@ -614,7 +615,8 @@ router.get('/me', async (req, res) => {
     // Fetch user ID from database
     const client = await getClient();
     const user = await client.query(
-      'SELECT id, timezone, is_guest FROM users WHERE handle = $1',
+      `SELECT u.id, u.timezone, u.is_guest, ${memberSql('u')} AS greywire_member
+       FROM users u WHERE u.handle = $1`,
       [payload.username]
     );
     client.release();
@@ -627,7 +629,8 @@ router.get('/me', async (req, res) => {
       username: payload.username,
       userId: user.rows[0].id,
       timezone: user.rows[0].timezone ?? null,
-      isGuest: !!user.rows[0].is_guest
+      isGuest: !!user.rows[0].is_guest,
+      greywireMember: !!user.rows[0].greywire_member
     });
   } catch (err) {
     return res.status(401).json({ message: 'Invalid token' });
