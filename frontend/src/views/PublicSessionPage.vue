@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
+import { siteName } from '@/utilities/site'
 
 const route = useRoute()
 
@@ -77,7 +78,7 @@ async function fetchSession() {
     session.value = data.session
 
     // Set page title
-    document.title = `${data.session.name} - Prosaurus`
+    document.title = `${data.session.name} - ${siteName}`
 
     // Set up audio element
     setupAudio()
@@ -230,7 +231,7 @@ function formatFileSize(bytes) {
 
       <!-- Prosaurus Branding -->
       <footer class="prosaurus-footer">
-        <p>Shared from <a href="/" target="_blank">Prosaurus</a></p>
+        <p>Shared from <a href="/" target="_blank">{{ siteName }}</a></p>
       </footer>
     </div>
   </main>

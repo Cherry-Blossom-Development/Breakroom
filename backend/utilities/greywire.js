@@ -54,6 +54,19 @@ async function getMembership(client, userId) {
 }
 
 /**
+ * Puts a new member in the Greywire site's default chat rooms. Called when
+ * someone claims a pedal or is granted membership; safe to repeat.
+ */
+async function joinDefaultRooms(client, userId) {
+  await client.query(
+    `INSERT IGNORE INTO users_rooms (user_id, room_id, accepted)
+     SELECT $1, id, true FROM chat_rooms
+     WHERE site = 'greywire' AND is_default = true AND is_active = true`,
+    [userId]
+  );
+}
+
+/**
  * A pedal serial in its stored form (16 uppercase hex digits), or null if the
  * input isn't one. Accepts the spaces, colons and dashes people type when
  * copying it, and an optional 0x prefix.
@@ -64,4 +77,4 @@ function normalizeSerial(input) {
   return /^[0-9A-F]{16}$/.test(hex) ? hex : null;
 }
 
-module.exports = { memberSql, isMember, getMembership, normalizeSerial };
+module.exports = { memberSql, isMember, getMembership, joinDefaultRooms, normalizeSerial };

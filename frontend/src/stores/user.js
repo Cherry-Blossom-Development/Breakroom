@@ -5,6 +5,7 @@ const state = reactive({
   username: null,
   timezone: null,
   isGuest: false,
+  greywireMember: false,
 })
 
 export const user = reactive({
@@ -16,6 +17,10 @@ export const user = reactive({
   },
   get isGuest() {
     return state.isGuest
+  },
+  // Holds a claimed Greywire pedal or a hand grant (backend/utilities/greywire.js)
+  get greywireMember() {
+    return state.greywireMember
   },
   async fetchUser() {
     try {
@@ -29,6 +34,7 @@ export const user = reactive({
       state.username = data.username;
       state.timezone = data.timezone ?? null;
       state.isGuest = data.isGuest ?? false;
+      state.greywireMember = data.greywireMember ?? false;
 
       // Auto-detect and save timezone on first login (when DB value is null)
       if (!state.timezone) {
@@ -50,6 +56,7 @@ export const user = reactive({
       state.username = null;
       state.timezone = null;
       state.isGuest = false;
+      state.greywireMember = false;
     }
   },
 
@@ -66,5 +73,6 @@ export const user = reactive({
     state.username = null;
     state.timezone = null;
     state.isGuest = false;
+    state.greywireMember = false;
   }
 });

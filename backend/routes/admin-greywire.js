@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { checkPermission } = require('../middleware/checkPermission');
-const { normalizeSerial } = require('../utilities/greywire');
+const { normalizeSerial, joinDefaultRooms } = require('../utilities/greywire');
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -150,6 +150,7 @@ router.patch('/pedals/:id', async (req, res) => {
       [req.params.id, event, fromUserId, toUserId, req.user.id]
     );
     await client.commit();
+    if (toUserId) await joinDefaultRooms(client, toUserId);
     res.json({ message: toUserId ? `Pedal moved to ${handle}` : 'Pedal released' });
   } catch (err) {
     await client.rollback().catch(() => {});
@@ -255,6 +256,7 @@ router.post('/grants', async (req, res) => {
       'UPDATE users SET greywire_granted_at = NOW(), greywire_granted_by = $1 WHERE id = $2',
       [req.user.id, user.rows[0].id]
     );
+    await joinDefaultRooms(client, user.rows[0].id);
     res.status(201).json({ message: `Granted membership to ${handle}` });
   } catch (err) {
     console.error('Error granting Greywire membership:', err);

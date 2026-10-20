@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { authFetch } from '@/utilities/authFetch'
 import { user } from '@/stores/user'
+import { isGreywire, siteName } from '@/utilities/site'
 
 const route = useRoute()
 const router = useRouter()
@@ -56,7 +57,7 @@ async function acceptInvite() {
       <div v-else-if="loadError" class="invite-error-state">
         <h2>Invite Not Found</h2>
         <p>{{ loadError }}</p>
-        <RouterLink to="/" class="btn-primary">Go to Prosaurus</RouterLink>
+        <RouterLink to="/" class="btn-primary">Go to {{ siteName }}</RouterLink>
       </div>
 
       <div v-else-if="inviteInfo?.status === 'accepted'" class="invite-already-accepted">
@@ -74,10 +75,17 @@ async function acceptInvite() {
         <h2 class="invite-heading">Band Invite</h2>
         <p class="invite-body">
           <strong>@{{ inviteInfo.inviter_handle }}</strong> has invited you to join
-          <strong>{{ inviteInfo.band_name }}</strong> on Prosaurus.
+          <strong>{{ inviteInfo.band_name }}</strong> on {{ siteName }}.
         </p>
 
-        <div v-if="user.username" class="invite-actions">
+        <!-- Greywire: a signed-in non-member claims a pedal first; the claim
+             page accepts this invite afterwards -->
+        <div v-if="isGreywire && user.username && !user.greywireMember" class="invite-auth-options">
+          <p>The Greywire community is for Greywire pedal owners. Claim your pedal to join the band.</p>
+          <RouterLink :to="`/claim?bandInvite=${token}`" class="btn-primary">Claim My Pedal &amp; Join</RouterLink>
+        </div>
+
+        <div v-else-if="user.username" class="invite-actions">
           <div v-if="acceptError" class="error-msg">{{ acceptError }}</div>
           <button class="btn-primary" :disabled="accepting" @click="acceptInvite">
             {{ accepting ? 'Joining…' : `Join ${inviteInfo.band_name}` }}
@@ -85,7 +93,8 @@ async function acceptInvite() {
         </div>
 
         <div v-else class="invite-auth-options">
-          <p>You need a Prosaurus account to join the band.</p>
+          <p v-if="isGreywire">You need a Greywire community account and a Greywire pedal to join the band.</p>
+          <p v-else>You need a Prosaurus account to join the band.</p>
           <RouterLink :to="`/signup?bandInvite=${token}`" class="btn-primary">Create Account &amp; Join</RouterLink>
           <RouterLink :to="`/login?bandInvite=${token}`" class="btn-secondary">Log In &amp; Join</RouterLink>
         </div>

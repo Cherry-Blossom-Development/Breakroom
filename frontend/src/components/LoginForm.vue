@@ -1,7 +1,7 @@
 <template>
   <form @submit.prevent="handleSubmit">
     <div class="login-logo-wrap">
-      <img src="/logo-192x192-no-text.png" alt="Prosaurus" class="login-logo" />
+      <img :src="siteLogo" :alt="siteName" class="login-logo" />
     </div>
     <span>Log In</span>
     <div>
@@ -26,7 +26,7 @@
     <p class="signup-prompt">
       Don't have an account? <RouterLink to="/signup">Sign up</RouterLink>
     </p>
-    <p class="guest-prompt">
+    <p v-if="!isGreywire" class="guest-prompt">
       Just want to play a game?
       <RouterLink to="/play">Play Haulonaut &mdash; no account needed</RouterLink>
     </p>
@@ -37,6 +37,7 @@
 import axios from 'axios'
 import { useRouter, useRoute } from 'vue-router'
 import { user } from '@/stores/user.js'
+import { isGreywire, siteName, siteLogo } from '@/utilities/site.js'
 
 export default {
   data() {
@@ -51,7 +52,7 @@ export default {
   setup() {
     const router = useRouter()
     const route = useRoute()
-    return { router, route }
+    return { router, route, isGreywire, siteName, siteLogo }
   },
   methods: {
     async handleSubmit() {
@@ -69,6 +70,12 @@ export default {
 
         // Accept band email invite if one was in the URL
         const bandInviteToken = this.route.query.bandInvite
+        // Greywire non-members can't join a band yet; the claim page accepts
+        // the invite once their pedal is claimed
+        if (bandInviteToken && isGreywire && !user.greywireMember) {
+          this.router.push({ name: 'greywireClaim', query: { bandInvite: bandInviteToken } })
+          return
+        }
         if (bandInviteToken) {
           try {
             await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/bands/invite/${bandInviteToken}/accept`, {

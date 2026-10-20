@@ -4,11 +4,12 @@ import { user } from '@/stores/user.js'
 import { features } from '@/stores/features.js'
 import { getVisitorId } from '@/utilities/visitorId.js'
 import { exploreFeatures } from '@/data/exploreFeatures.js'
+import { isGreywire, GREYWIRE_HOSTS } from '@/utilities/site.js'
 
 // Prosaurus-owned hosts. Anything else is a connected custom domain — that visitor
 // gets a dedicated minimal route table (see customDomainRoutes below) so their own
 // domain stays in the address bar the whole time (no redirect to /store/:storeUrl).
-const KNOWN_HOSTS = ['prosaurus.com', 'www.prosaurus.com', 'local.prosaurus.com', 'test.prosaurus.com', 'test.dev.prosaurus.com', 'dev.prosaurus.com', 'localhost', '127.0.0.1']
+const KNOWN_HOSTS = ['prosaurus.com', 'www.prosaurus.com', 'local.prosaurus.com', 'test.prosaurus.com', 'test.dev.prosaurus.com', 'dev.prosaurus.com', 'localhost', '127.0.0.1', ...GREYWIRE_HOSTS]
 const isCustomDomain = typeof window !== 'undefined' && !KNOWN_HOSTS.includes(window.location.hostname)
 
 const customDomainRoutes = [
@@ -53,9 +54,62 @@ import BillingPage from '@/views/profile/ProfileBilling.vue'
 import SettingsPage from '@/views/profile/ProfileSettings.vue'
 import LegalPage from '@/views/profile/ProfileLegal.vue'
 
+// Greywire community (community.greywirestudio.com) gets its own route table:
+// only the music social features (chat, Sessions, friends, profile). Pages are
+// shared with Prosaurus. meta.requiresMember sends signed-in users without a
+// claimed pedal to the claim page (see the guard below).
+const memberOnly = { requiresAuth: true, requiresMember: true }
+const greywireRoutes = [
+  {
+    path: '/',
+    name: 'greywireHome',
+    component: () => import('../views/GreywireHomePage.vue'),
+  },
+  {
+    path: '/claim',
+    name: 'greywireClaim',
+    component: () => import('../views/GreywireClaimPage.vue'),
+    meta: { requiresAuth: true },
+  },
+  { path: '/login', name: 'login', component: () => import('../views/LoginPage.vue') },
+  { path: '/signup', name: 'signup', component: () => import('../views/SignupPage.vue') },
+  { path: '/verify', name: 'verify', component: () => import('../views/VerifyPage.vue') },
+  { path: '/verify-alternate-email', name: 'verifyAlternateEmail', component: () => import('../views/VerifyAlternateEmailPage.vue') },
+  { path: '/forgot-password', name: 'forgotPassword', component: () => import('../views/ForgotPasswordPage.vue') },
+  { path: '/reset-password', name: 'resetPassword', component: () => import('../views/ResetPasswordPage.vue') },
+  { path: '/eula', name: 'eula', component: () => import('../views/EulaPage.vue') },
+  { path: '/terms', redirect: '/eula' },
+  { path: '/privacy', name: 'privacy', component: () => import('../views/PrivacyPolicyPage.vue') },
+  { path: '/chat', name: 'chat', component: () => import('../views/ChatPage.vue'), meta: memberOnly },
+  { path: '/sessions', name: 'sessions', component: () => import('../views/SessionsPage.vue'), meta: memberOnly },
+  {
+    path: '/sessions/:id',
+    name: 'publicSession',
+    component: () => import('../views/PublicSessionPage.vue'),
+    meta: { publicLayout: true }, // Share links work for anyone
+  },
+  { path: '/band-invite/:token', name: 'bandInvite', component: () => import('../views/BandInvitePage.vue') },
+  { path: '/friends', name: 'friends', component: () => import('../views/FriendsPage.vue'), meta: memberOnly },
+  // Profiles are members-only here, so they show inside the app, not publicly
+  { path: '/user/:handle', name: 'publicProfile', component: () => import('../views/PublicProfilePage.vue'), meta: memberOnly },
+  {
+    path: '/profile',
+    name: 'profile',
+    component: ProfileLayout,
+    meta: memberOnly,
+    children: [
+      { path: '', component: ProfilePage },
+      { path: 'billing', component: BillingPage },
+      { path: 'settings', component: SettingsPage },
+      { path: 'legal', component: LegalPage }
+    ]
+  },
+  { path: '/:pathMatch(.*)*', redirect: '/' },
+]
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
-  routes: isCustomDomain ? customDomainRoutes : [
+  routes: isCustomDomain ? customDomainRoutes : isGreywire ? greywireRoutes : [
     {
       path: '/',
       name: 'home',
@@ -499,6 +553,21 @@ router.beforeEach(async (to, from, next) => {
   // Fetch user if not already loaded
   if (!user.username) {
     await user.fetchUser()
+  }
+
+  // Greywire community: signed-out visitors go to its home page, and signed-in
+  // users without a claimed pedal go to the claim page.
+  if (isGreywire) {
+    if (to.matched.some(record => record.meta.requiresAuth) && !user.username) {
+      next({ name: 'greywireHome' })
+    } else if (to.matched.some(record => record.meta.requiresMember) && !user.greywireMember) {
+      next({ name: 'greywireClaim' })
+    } else if (to.name === 'greywireHome' && user.username) {
+      next(user.greywireMember ? { name: 'chat' } : { name: 'greywireClaim' })
+    } else {
+      next()
+    }
+    return
   }
 
   // Guests are game-only accounts — confine them to Haulonaut and a few

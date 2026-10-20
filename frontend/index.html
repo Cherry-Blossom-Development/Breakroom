@@ -11,6 +11,21 @@
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1a1a1a">
     <title>Prosaurus</title>
+    <script>
+      // Greywire community: switch theme, title and icon before first paint.
+      // Hosts must match src/utilities/site.js.
+      if (['community.greywirestudio.com', 'local.greywirestudio.com'].includes(location.hostname)) {
+        document.documentElement.dataset.site = 'greywire';
+        document.title = 'Greywire Community';
+        document.querySelectorAll('link[rel="icon"], link[rel="apple-touch-icon"], link[rel="manifest"]').forEach(function (l) { l.remove(); });
+        var icon = document.createElement('link');
+        icon.rel = 'icon';
+        icon.type = 'image/svg+xml';
+        icon.href = '/greywire/logo.svg';
+        document.head.appendChild(icon);
+        document.querySelectorAll('meta[name="theme-color"]').forEach(function (m) { m.content = '#141619'; });
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>

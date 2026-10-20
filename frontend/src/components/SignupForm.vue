@@ -51,6 +51,7 @@ import axios from 'axios';
 import { useRouter, useRoute } from 'vue-router';
 import { user } from '@/stores/user.js';
 import { getVisitorId } from '@/utilities/visitorId.js';
+import { isGreywire } from '@/utilities/site.js';
 
 // Function to generate a random salt using the Web Crypto API
 function generateSalt(length = 16) {
@@ -170,6 +171,12 @@ export default {
 
           // Accept band email invite if one was in the URL
           const bandInviteToken = this.route.query.bandInvite;
+          // A new Greywire account has no pedal yet: claim first, and the
+          // claim page accepts the invite afterwards
+          if (isGreywire) {
+            this.router.push({ name: 'greywireClaim', query: bandInviteToken ? { bandInvite: bandInviteToken } : {} });
+            return;
+          }
           if (bandInviteToken) {
             try {
               await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/bands/invite/${bandInviteToken}/accept`, {

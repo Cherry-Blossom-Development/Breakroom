@@ -75,7 +75,7 @@ async function ensureGeneralChatterRooms(client, realUserNumber) {
   const inOverlap = realUserNumber <= threshold + GENERAL_CHATTER_OVERLAP;
   if (!inOverlap) {
     await client.query(
-      `UPDATE chat_rooms SET is_default = false WHERE name = $1 AND is_default = true`,
+      `UPDATE chat_rooms SET is_default = false WHERE name = $1 AND is_default = true AND site = 'prosaurus'`,
       [`General Chatter ${gen - 1}`]
     );
   }

@@ -3,7 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
-const { getMembership, normalizeSerial } = require('../utilities/greywire');
+const { getMembership, joinDefaultRooms, normalizeSerial } = require('../utilities/greywire');
 
 require('dotenv').config();
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -113,6 +113,7 @@ router.post('/claim', authenticate, async (req, res) => {
       [id, req.user.id]
     );
     await client.commit();
+    await joinDefaultRooms(client, req.user.id);
 
     res.status(201).json({ message: 'Pedal claimed', membership: await getMembership(client, req.user.id) });
   } catch (err) {

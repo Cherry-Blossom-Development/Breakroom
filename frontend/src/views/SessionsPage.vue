@@ -5,6 +5,7 @@ import { sessions } from '@/stores/sessions'
 import { shortlists } from '@/stores/shortlists'
 import { user } from '@/stores/user.js'
 import { authFetch } from '@/utilities/authFetch'
+import { isGreywire } from '@/utilities/site'
 import { buildDevicePayload } from '@/utilities/deviceId'
 import SessionsPaywallModal from '@/components/SessionsPaywallModal.vue'
 import ShortlistButton from '@/components/ShortlistButton.vue'
@@ -2451,7 +2452,7 @@ onMounted(async () => {
             </div>
 
             <!-- Band Page link (owners only) -->
-            <div v-if="activeBand.my_role === 'owner'" class="band-page-link-row">
+            <div v-if="activeBand.my_role === 'owner' && !isGreywire" class="band-page-link-row">
               <RouterLink :to="`/band-setup/${activeBand.id}`" class="btn-secondary btn-sm band-page-btn">
                 Manage Band Page →
               </RouterLink>

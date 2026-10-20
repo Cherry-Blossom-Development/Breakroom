@@ -1,0 +1,93 @@
+/* Greywire community theme: always dark, with copper accents, matching
+   greywirestudio.com. Applies when <html data-site="greywire"> (set in
+   index.html on Greywire hosts). :root[data-site] outranks base.css's :root
+   rules, including its dark-mode block, so nothing else needs changing.
+
+   The accent is a deeper copper than the website's #d07a3e so white button
+   text keeps a 4.5:1 contrast; text links use the lighter copper instead. */
+:root[data-site="greywire"] {
+  color-scheme: dark;
+
+  --color-background: #1c1f23;
+  --color-background-soft: #24282d;
+  --color-background-mute: #2a2f35;
+  --color-background-page: #141619;
+  --color-background-card: #1c1f23;
+  --color-background-hover: #2a2f35;
+  --color-background-input: #24282d;
+
+  --color-border: #33383e;
+  --color-border-hover: #4a5057;
+  --color-border-light: #33383e;
+  --color-border-medium: #3a4046;
+  --color-border-input: #4a5057;
+
+  --color-heading: #e8e6e1;
+  --color-text: #e8e6e1;
+  --color-text-secondary: #c9cbcd;
+  --color-text-muted: #b4b8bd;
+  --color-text-light: #9ba0a6;
+  --color-text-placeholder: #7d838a;
+  --color-status-offline: #9ba0a6;
+
+  --color-accent: #b05e28;
+  --color-accent-hover: #c26a2e;
+  --color-accent-light: #3a2618;
+
+  --color-error: #ff7b72;
+  --color-error-bg: #3d2020;
+  --color-success: #5fd38a;
+  --color-success-bg: #1a3a2a;
+  --color-warning: #ffc107;
+  --color-warning-bg: #3d3520;
+  --color-warning-bg-hover: #4d4530;
+
+  --color-link: #e9a46f;
+
+  --color-header-bg: #141619;
+  --color-header-text: #e8e6e1;
+
+  --color-overlay: rgba(0, 0, 0, 0.7);
+
+  --color-button-disabled: #3a4046;
+  --color-button-secondary: #2a2f35;
+  --color-button-secondary-hover: #33383e;
+  --color-button-secondary-bg: #2a2f35;
+  --color-button-secondary-text: #c9cbcd;
+
+  --badge-gray: #8e99a4;
+  --badge-gray-soft: #2a2f35;
+  --badge-gray-text: #b4b8bd;
+  --badge-orange: #e08a4e;
+  --badge-orange-soft: #3a2618;
+  --badge-orange-text: #e9a46f;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 2px 10px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 4px 15px rgba(0, 0, 0, 0.6);
+}
+
+:root[data-site="greywire"] body {
+  background: var(--color-background-page);
+}
+
+/* Replace main.css's green default link color. :where() keeps this at the
+   same specificity as main.css's plain `a`, so component styles (sidebar
+   items, buttons) still win. */
+:where(:root[data-site="greywire"]) a,
+:where(:root[data-site="greywire"]) .green {
+  color: var(--color-link);
+}
+
+@media (hover: hover) {
+  :where(:root[data-site="greywire"]) a:hover {
+    background-color: rgba(233, 164, 111, 0.12);
+  }
+}
+
+/* The Greywire logo is a rounded square, not the round Prosaurus mark */
+:root[data-site="greywire"] .sidebar-logo,
+:root[data-site="greywire"] .tablet-logo,
+:root[data-site="greywire"] .login-logo {
+  border-radius: 8px;
+}

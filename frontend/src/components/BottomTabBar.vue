@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue'
 import { RouterLink } from 'vue-router'
+import { isGreywire } from '@/utilities/site.js'
 
 const props = defineProps({
   isAdmin: Boolean,
@@ -35,6 +36,8 @@ function handleLogout() {
       <div class="handle-bar"></div>
     </div>
     <nav class="drawer-nav" @click="closeDrawer">
+      <!-- Prosaurus-only pages; the Greywire drawer has just Profile and Logout -->
+      <template v-if="!isGreywire">
       <RouterLink to="/projects" class="drawer-item">
         <svg class="drawer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
         Projects
@@ -63,17 +66,18 @@ function handleLogout() {
         <svg class="drawer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
         Tool Shed
       </RouterLink>
+      </template>
 
       <div class="drawer-divider"></div>
       <RouterLink to="/profile" class="drawer-item">
         <svg class="drawer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         Profile
       </RouterLink>
-      <RouterLink v-if="isMarketing" to="/marketing" class="drawer-item">
+      <RouterLink v-if="isMarketing && !isGreywire" to="/marketing" class="drawer-item">
         <svg class="drawer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>
         Marketing
       </RouterLink>
-      <RouterLink v-if="isAdmin" to="/admin" class="drawer-item">
+      <RouterLink v-if="isAdmin && !isGreywire" to="/admin" class="drawer-item">
         <svg class="drawer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         Admin
       </RouterLink>
@@ -86,7 +90,7 @@ function handleLogout() {
 
   <!-- Bottom tab bar -->
   <nav class="bottom-tab-bar">
-    <RouterLink to="/breakroom" class="tab-item">
+    <RouterLink v-if="!isGreywire" to="/breakroom" class="tab-item">
       <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
       <span class="tab-label">Home</span>
     </RouterLink>
@@ -94,7 +98,11 @@ function handleLogout() {
       <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
       <span class="tab-label">Chat</span>
     </RouterLink>
-    <RouterLink to="/blog" class="tab-item">
+    <RouterLink v-if="isGreywire" to="/sessions" class="tab-item">
+      <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+      <span class="tab-label">Sessions</span>
+    </RouterLink>
+    <RouterLink v-else to="/blog" class="tab-item">
       <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
       <span class="tab-label">Blog</span>
     </RouterLink>

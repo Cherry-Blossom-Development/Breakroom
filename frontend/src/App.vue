@@ -17,6 +17,7 @@ import AppSidebar from './components/AppSidebar.vue'
 import BottomTabBar from './components/BottomTabBar.vue'
 import SupportModal from './components/SupportModal.vue'
 import { io } from 'socket.io-client'
+import { isGreywire, siteName, siteLogo } from './utilities/site.js'
 
 const mentionQueue = ref([])
 const scheduledWarning = ref(null)
@@ -84,7 +85,7 @@ async function stopImpersonation() {
 }
 
 async function checkAdminPermission() {
-  if (!user.username) {
+  if (!user.username || isGreywire) {
     isAdmin.value = false
     return
   }
@@ -100,7 +101,7 @@ async function checkAdminPermission() {
 }
 
 async function checkMarketingPermission() {
-  if (!user.username) {
+  if (!user.username || isGreywire) {
     isMarketing.value = false
     return
   }
@@ -196,6 +197,10 @@ function teardownNotificationSocket() {
 
 recordVisit()
 
+// On the Greywire site only members can use the API, so a signed-in
+// non-member (who sits on the claim page) gets none of the services below.
+const canUseServices = () => user.username && !user.isGuest && (!isGreywire || user.greywireMember)
+
 // Guests are game-only accounts — they never see chat/blog/friends, so skip
 // all the notification/badge/event machinery that backs those surfaces.
 function initLoggedInServices() {
@@ -211,15 +216,16 @@ function initLoggedInServices() {
 user.fetchUser().then(() => {
   checkAdminPermission()
   checkMarketingPermission()
-  if (user.username && !user.isGuest) {
+  if (canUseServices()) {
     initLoggedInServices()
   }
 })
 
-watch(() => user.username, (newUsername) => {
+// greywireMember changes without the username changing when a pedal is claimed
+watch(() => [user.username, user.greywireMember], () => {
   checkAdminPermission()
   checkMarketingPermission()
-  if (newUsername && !user.isGuest) {
+  if (canUseServices()) {
     initLoggedInServices()
   } else {
     destroyEventService()
@@ -285,6 +291,10 @@ function closeSidebar() {
 
 setInterval(() => {
   user.fetchUser()
+  if (isGreywire) {
+    if (!user.username && route.matched.some(r => r.meta.requiresAuth)) router.push('/')
+    return
+  }
   const publicRoutes = ['/', '/login', '/signup', '/about', '/welcome', '/chat', '/privacy', '/eula', '/terms', '/child-safety']
   // bareLayout routes (public stores) are always accessible — never redirect from them
   if (route.meta.bareLayout) return
@@ -367,7 +377,8 @@ setInterval(() => {
   </template>
 
   <!-- Logged-in: sidebar + bottom bar navigation -->
-  <template v-else-if="user.username && !route.meta.publicLayout">
+  <!-- (On Greywire, only members get the app; others see the public header) -->
+  <template v-else-if="user.username && !route.meta.publicLayout && (!isGreywire || user.greywireMember)">
     <!-- Impersonation banner -->
     <div v-if="impersonatedUser" class="impersonation-banner">
       <span>⚠ Admin impersonation of <strong>{{ impersonatedUser }}</strong> — all actions are real</span>
@@ -401,7 +412,7 @@ setInterval(() => {
         </svg>
         <span v-if="hamburgerUnreadCount > 0" class="hamburger-badge" aria-hidden="true">{{ hamburgerBadgeLabel }}</span>
       </button>
-      <img src="/logo-192x192-no-text.png" alt="Prosaurus" class="tablet-logo" />
+      <img :src="siteLogo" :alt="siteName" class="tablet-logo" />
     </div>
 
     <div class="app-content" :class="{ 'project-layout': route.meta.projectLayout }">
@@ -418,7 +429,28 @@ setInterval(() => {
 
   <!-- Logged-out OR publicLayout routes (e.g. public blog) -->
   <template v-else>
-    <header class="public-header">
+    <!-- Greywire: brand bar; Sign In/Up, or Logout for a signed-in non-member -->
+    <header v-if="isGreywire" class="public-header greywire-header">
+      <div class="wrapper page-container greywire-header-inner">
+        <RouterLink to="/" class="greywire-brand">
+          <img :src="siteLogo" alt="" class="greywire-brand-logo" />
+          <span>Greywire <strong>Community</strong></span>
+        </RouterLink>
+        <nav class="public-nav">
+          <a href="https://greywirestudio.com">Greywire Studio</a>
+          <template v-if="user.username">
+            <RouterLink v-if="user.greywireMember" to="/chat">Back to the community</RouterLink>
+            <a href="#" @click.prevent="logout">Logout</a>
+          </template>
+          <template v-else>
+            <RouterLink to="/login">Sign In</RouterLink>
+            <RouterLink to="/signup">Sign Up</RouterLink>
+          </template>
+        </nav>
+      </div>
+    </header>
+
+    <header v-else class="public-header">
       <div class="wrapper page-container">
         <nav class="public-nav">
           <!-- Logged-in user previewing a public-layout page: no Login/Signup, add Back + Logout -->
@@ -762,6 +794,44 @@ body {
 /* ============================================
    LOGGED-OUT PUBLIC HEADER
    ============================================ */
+
+.greywire-header {
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-header-bg);
+}
+
+.greywire-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.greywire-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--color-text) !important;
+  font-size: 1.05rem;
+  letter-spacing: 0.01em;
+}
+
+.greywire-brand strong {
+  color: var(--color-link);
+  font-weight: 600;
+}
+
+.greywire-brand-logo {
+  width: 32px;
+  height: 32px;
+}
+
+.greywire-header .public-nav {
+  width: auto;
+  flex-wrap: wrap;
+}
 
 .public-header {
   line-height: 1.5;

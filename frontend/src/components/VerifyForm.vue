@@ -17,8 +17,14 @@
         </div>
         <h2>Email Verified!</h2>
         <p class="subtitle">Your email address has been successfully verified.</p>
-        <p class="message">You now have full access to all Prosaurus features.</p>
-        <router-link to="/breakroom" class="btn-primary">Go to Breakroom</router-link>
+        <template v-if="isGreywire">
+          <p class="message">Next, claim your Greywire pedal to get into the community.</p>
+          <router-link to="/" class="btn-primary">Continue</router-link>
+        </template>
+        <template v-else>
+          <p class="message">You now have full access to all Prosaurus features.</p>
+          <router-link to="/breakroom" class="btn-primary">Go to Breakroom</router-link>
+        </template>
       </div>
 
       <!-- Error State -->
@@ -55,9 +61,13 @@
 <script>
 import axios from 'axios';
 import LoadingSpinner from './LoadingSpinner.vue';
+import { isGreywire } from '@/utilities/site.js';
 
 export default {
   components: { LoadingSpinner },
+  setup() {
+    return { isGreywire };
+  },
   data() {
     return {
       isLoading: true,
