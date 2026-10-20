@@ -1,5 +1,42 @@
 <template>
-  <section class="billing-page">
+  <!-- Greywire site: membership is free with a pedal, so there are no plans -->
+  <section v-if="plan && plan.greywire" class="billing-page">
+    <h2>Billing &amp; Membership</h2>
+
+    <div v-if="plan.greywire.member" class="current-plan-banner banner--greywire">
+      <span class="current-plan-label">Greywire member</span>
+      <span class="current-plan-name">Free</span>
+    </div>
+    <div v-else class="current-plan-banner banner--free">
+      <span class="current-plan-label">Not a member yet</span>
+      <span class="current-plan-detail">Claim your pedal's serial to join.</span>
+    </div>
+
+    <ul v-if="plan.greywire.member" class="membership-list">
+      <li v-for="p in plan.greywire.pedals" :key="p.id">
+        Free with your <strong>{{ p.model }}</strong>
+        (serial <span class="serial">{{ p.serial }}</span>), claimed on {{ formatDate(p.claimedAt) }}
+      </li>
+      <li v-if="plan.greywire.grantedAt">
+        Free: membership granted by Greywire Studio on {{ formatDate(plan.greywire.grantedAt) }}
+      </li>
+    </ul>
+
+    <div class="tier-card">
+      <ul class="feature-list">
+        <li><span class="check">✓</span> Chat &amp; messaging</li>
+        <li><span class="check">✓</span> Sessions: recordings, mashups and shortlists, with no limits</li>
+        <li><span class="check">✓</span> Bands and band practice, as many as you like</li>
+        <li><span class="check">✓</span> Public share links</li>
+        <li><span class="check">✓</span> Friends</li>
+      </ul>
+      <p class="sub-note">
+        Membership costs nothing and has no subscription. It lasts as long as you own a registered Greywire pedal.
+      </p>
+    </div>
+  </section>
+
+  <section v-else-if="loaded" class="billing-page">
     <h2>Billing &amp; Plans</h2>
     <p class="intro">
       Prosaurus offers two tiers. Most features are completely free — Pro is only needed
@@ -130,6 +167,9 @@ import { ref, onMounted } from 'vue'
 import { authFetch } from '@/utilities/authFetch'
 
 const plan = ref(null)
+// Wait for the plan before rendering, so the Greywire site doesn't flash the
+// Prosaurus tiers first
+const loaded = ref(false)
 
 onMounted(async () => {
   try {
@@ -137,8 +177,14 @@ onMounted(async () => {
     if (res.ok) plan.value = await res.json()
   } catch {
     // non-fatal — page still renders without the banner
+  } finally {
+    loaded.value = true
   }
 })
+
+function formatDate(str) {
+  return str ? new Date(str).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : ''
+}
 </script>
 
 <style scoped>
@@ -211,6 +257,26 @@ onMounted(async () => {
 }
 
 .banner--pro .current-plan-name { color: #6b46c1; }
+
+/* ── Greywire membership ── */
+.current-plan-banner.banner--greywire {
+  background: rgba(184, 115, 51, 0.08);
+  border: 1px solid rgba(184, 115, 51, 0.35);
+}
+
+.banner--greywire .current-plan-name { color: #b87333; }
+
+.membership-list {
+  margin: 0 0 24px;
+  padding-left: 20px;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+.serial {
+  font-family: monospace;
+  letter-spacing: 0.03em;
+}
 
 .current-plan-detail {
   font-size: 0.85rem;

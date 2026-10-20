@@ -8,6 +8,7 @@ const { uploadToS3, deleteFromS3, getS3Url, streamFromS3 } = require('../utiliti
 const { normalizeToWav } = require('../utilities/audio');
 const { extractToken } = require('../utilities/auth');
 const { isSubscribed } = require('../utilities/subscription');
+const { isMember } = require('../utilities/greywire');
 const { emitToUser } = require('../utilities/socket');
 const { checkAndFilterContent } = require('../utilities/contentFilter');
 const { sendToUser } = require('../utilities/fcm');
@@ -217,7 +218,8 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
   const { name, recorded_at, band_id, session_type, instrument_id } = req.body;
   const sessionTypeVal = session_type === 'individual' ? 'individual' : session_type === 'mashup' ? 'mashup' : 'band';
 
-  // Enforce free-tier limits: 3 band sessions, 3 individual sessions (per site)
+  // Enforce free-tier limits: 3 band sessions, 3 individual sessions (per site).
+  // Greywire members have no limits on the Greywire site.
   const FREE_LIMITS = { band: 3, individual: 3 };
   const limitClient = await getClient();
   try {
@@ -226,7 +228,7 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
       [req.user.id, sessionTypeVal, req.site]
     );
     const count = parseInt(countResult.rows[0].cnt, 10);
-    if (count >= FREE_LIMITS[sessionTypeVal]) {
+    if (count >= FREE_LIMITS[sessionTypeVal] && !(req.site === 'greywire' && await isMember(limitClient, req.user.id))) {
       const { subscribed } = await isSubscribed(req.user.id);
       if (!subscribed) {
         return res.status(402).json({

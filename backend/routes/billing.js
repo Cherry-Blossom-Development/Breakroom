@@ -5,6 +5,7 @@ const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const tokenCrypto = require('../utilities/token-crypto');
 const { getProcessor } = require('../utilities/payments');
+const { getMembership } = require('../utilities/greywire');
 
 require('dotenv').config();
 
@@ -43,17 +44,20 @@ async function getFeePercent(userId, client) {
 
 // ─── Plan / fee routes ───────────────────────────────────────────────────────
 
-// GET /api/billing/plan — current subscription tier and application fee rate
+// GET /api/billing/plan — current subscription tier and application fee rate.
+// On the Greywire site it also returns `greywire` (see utilities/greywire.js
+// getMembership), since membership there is free with a pedal.
 router.get('/plan', authenticate, async (req, res) => {
   let client;
   try {
     client = await getClient();
+    const greywire = req.site === 'greywire' ? { greywire: await getMembership(client, req.user.id) } : {};
     const result = await client.query(
       `SELECT platform, status, expires_at FROM user_subscriptions WHERE user_id = $1`,
       [req.user.id]
     );
     if (result.rowCount === 0) {
-      return res.json({ subscribed: false, platform: null, status: null, expires_at: null, fee_percent: 5 });
+      return res.json({ subscribed: false, platform: null, status: null, expires_at: null, fee_percent: 5, ...greywire });
     }
     const sub = result.rows[0];
     const active = sub.status === 'active' &&
@@ -63,7 +67,8 @@ router.get('/plan', authenticate, async (req, res) => {
       platform: sub.platform,
       status: sub.status,
       expires_at: sub.expires_at,
-      fee_percent: active ? 0 : 5
+      fee_percent: active ? 0 : 5,
+      ...greywire
     });
   } catch (err) {
     console.error('Failed to get plan:', err);

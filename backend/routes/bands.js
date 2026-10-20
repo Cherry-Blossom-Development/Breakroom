@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { isSubscribed } = require('../utilities/subscription');
+const { isMember } = require('../utilities/greywire');
 const { sendMail, sendMailToUser } = require('../utilities/aws-ses-email');
 const { uploadToS3, deleteFromS3, getS3Url } = require('../utilities/aws-s3');
 const { emitToUser } = require('../utilities/socket');
@@ -200,7 +201,8 @@ router.post('/', authenticate, async (req, res) => {
   const { name, description } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ message: 'Band name is required' });
 
-  // Enforce free-tier limit: 1 band (per site)
+  // Enforce free-tier limit: 1 band (per site). Greywire members have no
+  // limit on the Greywire site.
   const limitClient = await getClient();
   try {
     const countResult = await limitClient.query(
@@ -208,7 +210,7 @@ router.post('/', authenticate, async (req, res) => {
       [req.user.id, req.site]
     );
     const count = parseInt(countResult.rows[0].cnt, 10);
-    if (count >= 1) {
+    if (count >= 1 && !(req.site === 'greywire' && await isMember(limitClient, req.user.id))) {
       const { subscribed } = await isSubscribed(req.user.id);
       if (!subscribed) {
         return res.status(402).json({
