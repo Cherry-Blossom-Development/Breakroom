@@ -46,9 +46,10 @@ router.get('/mine', authenticateToken, async (req, res) => {
        JOIN band_members bm ON bm.band_id = sl.band_id AND bm.user_id = $1 AND bm.status = 'active'
        JOIN bands b ON b.id = sl.band_id
        LEFT JOIN shortlist_sessions ss ON ss.shortlist_id = sl.id
+       WHERE b.site = $2
        GROUP BY sl.id
        ORDER BY b.name, sl.name`,
-      [req.user.id]
+      [req.user.id, req.site]
     );
     res.json({ shortlists: result.rows });
   } catch (err) {

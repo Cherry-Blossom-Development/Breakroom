@@ -93,12 +93,13 @@ router.get('/rooms', authenticateToken, async (req, res) => {
        LEFT JOIN users_rooms ur ON cr.id = ur.room_id AND ur.user_id = $1
        WHERE cr.is_active = true
          AND cr.type = 'room'
+         AND cr.site = $2
          AND (
            ((cr.owner_id IS NULL OR cr.is_default = true) AND (ur.user_id IS NULL OR ur.accepted = true))
            OR (cr.owner_id IS NOT NULL AND cr.is_default = false AND ur.user_id IS NOT NULL AND ur.accepted = true)
          )
        ORDER BY cr.name`,
-      [req.user.id]
+      [req.user.id, req.site]
     );
 
     res.status(200).json({
@@ -123,6 +124,7 @@ router.get('/rooms/discoverable', authenticateToken, async (req, res) => {
        FROM chat_rooms cr
        LEFT JOIN users u ON cr.owner_id = u.id
        WHERE cr.is_active = true
+         AND cr.site = $2
          AND (
            (cr.discoverable = true AND cr.owner_id IS NOT NULL
             AND NOT EXISTS (
@@ -135,7 +137,7 @@ router.get('/rooms/discoverable', authenticateToken, async (req, res) => {
            ))
          )
        ORDER BY cr.name`,
-      [req.user.id]
+      [req.user.id, req.site]
     );
 
     res.status(200).json({ rooms: rooms.rows });
@@ -163,9 +165,10 @@ router.get('/rooms/unread-summary', authenticateToken, async (req, res) => {
            AND cm.is_hidden = false
            AND cm.created_at > COALESCE(ur.last_read_at, '1970-01-01 00:00:00')
        WHERE cr.is_active = true
+         AND (cr.type = 'dm' OR cr.site = $2)
        GROUP BY cr.id, cr.name, ur.last_read_at
        ORDER BY MAX(cm.created_at) ASC`,
-      [req.user.id]
+      [req.user.id, req.site]
     );
     res.json(result.rows);
   } catch (err) {
@@ -199,9 +202,10 @@ router.get('/rooms/recent', authenticateToken, async (req, res) => {
            AND unread.is_hidden = false
            AND unread.created_at > COALESCE(ur.last_read_at, '1970-01-01 00:00:00')
        WHERE cr.is_active = true
+         AND (cr.type = 'dm' OR cr.site = $2)
        GROUP BY cr.id, cr.name, cm.id, cm.message, u.handle, cm.created_at
        ORDER BY cm.created_at ASC`,
-      [req.user.id]
+      [req.user.id, req.site]
     );
     res.json(result.rows);
   } catch (err) {
@@ -224,8 +228,8 @@ router.post('/rooms/:roomId/join', authenticateToken, async (req, res) => {
               cr.discoverable, cr.is_default
        FROM chat_rooms cr
        LEFT JOIN users u ON cr.owner_id = u.id
-       WHERE cr.id = $1 AND cr.is_active = true`,
-      [roomId]
+       WHERE cr.id = $1 AND cr.is_active = true AND cr.site = $2`,
+      [roomId, req.site]
     );
 
     if (room.rowCount === 0) {
@@ -578,8 +582,8 @@ router.post('/rooms', authenticateToken, checkPermission('create_room'), async (
   try {
     // Check for duplicate room name
     const existing = await client.query(
-      'SELECT id FROM chat_rooms WHERE name = $1',
-      [name.trim()]
+      'SELECT id FROM chat_rooms WHERE name = $1 AND site = $2',
+      [name.trim(), req.site]
     );
 
     if (existing.rowCount > 0) {
@@ -588,8 +592,8 @@ router.post('/rooms', authenticateToken, checkPermission('create_room'), async (
 
     // Insert the new room
     const result = await client.query(
-      'INSERT INTO chat_rooms (name, description, owner_id) VALUES ($1, $2, $3)',
-      [name.trim(), description?.trim() || null, req.user.id]
+      'INSERT INTO chat_rooms (name, description, owner_id, site) VALUES ($1, $2, $3, $4)',
+      [name.trim(), description?.trim() || null, req.user.id, req.site]
     );
 
     const roomId = result.insertId;
@@ -637,7 +641,7 @@ router.put('/rooms/:id', authenticateToken, async (req, res) => {
   try {
     // Verify room exists and check ownership
     const room = await client.query(
-      'SELECT owner_id FROM chat_rooms WHERE id = $1 AND is_active = true',
+      'SELECT owner_id, site FROM chat_rooms WHERE id = $1 AND is_active = true',
       [id]
     );
 
@@ -651,8 +655,8 @@ router.put('/rooms/:id', authenticateToken, async (req, res) => {
 
     // Check for duplicate name (excluding current room)
     const existing = await client.query(
-      'SELECT id FROM chat_rooms WHERE name = $1 AND id != $2',
-      [name.trim(), id]
+      'SELECT id FROM chat_rooms WHERE name = $1 AND id != $2 AND site = $3',
+      [name.trim(), id, room.rows[0].site]
     );
 
     if (existing.rowCount > 0) {
@@ -737,8 +741,9 @@ router.get('/invites', authenticateToken, async (req, res) => {
        JOIN chat_rooms cr ON ur.room_id = cr.id
        LEFT JOIN users u ON ur.invited_by = u.id
        WHERE ur.user_id = $1 AND ur.accepted = false AND ur.invited_by IS NOT NULL AND cr.is_active = true
+         AND cr.site = $2
        ORDER BY ur.created_at DESC`,
-      [req.user.id]
+      [req.user.id, req.site]
     );
 
     res.status(200).json({ invites: invites.rows });

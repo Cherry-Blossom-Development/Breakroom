@@ -94,8 +94,8 @@ router.post('/signup', async (req, res) => {
     expiresAt.setHours(expiresAt.getHours() + 1);
 
     const result = await client.query(`INSERT INTO
-      "users" (handle, first_name, last_name, email, verification_token, verification_expires_at, hash, salt, signup_platform, signup_visitor_id)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);`, [
+      "users" (handle, first_name, last_name, email, verification_token, verification_expires_at, hash, salt, signup_platform, signup_visitor_id, signup_site)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);`, [
         req.body.handle,
         req.body.first_name,
         req.body.last_name,
@@ -105,7 +105,8 @@ router.post('/signup', async (req, res) => {
         req.body.hash,
         req.body.salt,
         getPlatform(req),
-        req.body.visitorId || null
+        req.body.visitorId || null,
+        req.site
       ]);
 
     const newUserId = result.insertId;
@@ -125,9 +126,10 @@ router.post('/signup', async (req, res) => {
       await client.query('INSERT INTO user_groups (user_id, group_id) VALUES ($1, $2)', [newUserId, standardGroup.rows[0].id]);
     }
 
-    // Add new user to all default chat rooms and create their breakroom blocks
+    // Add new user to the signup site's default chat rooms and create their breakroom blocks
     const defaultRooms = await client.query(
-      'SELECT id, name FROM chat_rooms WHERE is_default = true AND is_active = true ORDER BY id'
+      'SELECT id, name FROM chat_rooms WHERE is_default = true AND is_active = true AND site = $1 ORDER BY id',
+      [req.site]
     );
     for (const room of defaultRooms.rows) {
       await client.query(

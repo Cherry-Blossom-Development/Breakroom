@@ -61,9 +61,9 @@ router.get('/', authenticate, async (req, res) => {
               (SELECT COUNT(*) FROM band_members WHERE band_id = b.id AND status = 'active') AS member_count
        FROM bands b
        JOIN band_members bm ON bm.band_id = b.id AND bm.user_id = $1
-       WHERE bm.status IN ('active', 'invited')
+       WHERE bm.status IN ('active', 'invited') AND b.site = $2
        ORDER BY b.name`,
-      [req.user.id]
+      [req.user.id, req.site]
     );
     res.json({ bands: result.rows });
   } catch (err) {
@@ -200,12 +200,12 @@ router.post('/', authenticate, async (req, res) => {
   const { name, description } = req.body;
   if (!name || !name.trim()) return res.status(400).json({ message: 'Band name is required' });
 
-  // Enforce free-tier limit: 1 band
+  // Enforce free-tier limit: 1 band (per site)
   const limitClient = await getClient();
   try {
     const countResult = await limitClient.query(
-      `SELECT COUNT(*) AS cnt FROM bands WHERE created_by = $1`,
-      [req.user.id]
+      `SELECT COUNT(*) AS cnt FROM bands WHERE created_by = $1 AND site = $2`,
+      [req.user.id, req.site]
     );
     const count = parseInt(countResult.rows[0].cnt, 10);
     if (count >= 1) {
@@ -224,8 +224,8 @@ router.post('/', authenticate, async (req, res) => {
   const client = await getClient();
   try {
     const insert = await client.query(
-      'INSERT INTO bands (name, description, created_by) VALUES ($1, $2, $3)',
-      [name.trim(), description?.trim() || null, req.user.id]
+      'INSERT INTO bands (name, description, created_by, site) VALUES ($1, $2, $3, $4)',
+      [name.trim(), description?.trim() || null, req.user.id, req.site]
     );
     const bandId = insert.insertId;
     await client.query(

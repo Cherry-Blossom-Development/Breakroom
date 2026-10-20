@@ -96,10 +96,10 @@ router.get('/', authenticateToken, async (req, res) => {
        LEFT JOIN bands b ON b.id = s.band_id
        LEFT JOIN instruments i ON i.id = s.instrument_id
        LEFT JOIN session_ratings sr ON sr.session_id = s.id
-       WHERE s.user_id = $1
+       WHERE s.user_id = $1 AND s.site = $3
        GROUP BY s.id
        ORDER BY s.recorded_at DESC, s.uploaded_at DESC`,
-      [req.user.id, req.user.id]
+      [req.user.id, req.user.id, req.site]
     );
     res.json({ sessions: result.rows });
   } catch (err) {
@@ -131,10 +131,10 @@ router.get('/band-members', authenticateToken, async (req, res) => {
        LEFT JOIN instruments i ON i.id = s.instrument_id
        LEFT JOIN users u ON u.id = s.user_id
        LEFT JOIN session_ratings sr ON sr.session_id = s.id
-       WHERE s.user_id != $1
+       WHERE s.user_id != $1 AND s.site = $3
        GROUP BY s.id
        ORDER BY s.recorded_at DESC, s.uploaded_at DESC`,
-      [req.user.id, req.user.id]
+      [req.user.id, req.user.id, req.site]
     );
     res.json({ sessions: result.rows });
   } catch (err) {
@@ -158,12 +158,12 @@ router.get('/practice-suggestions', authenticateToken, async (req, res) => {
       `SELECT s.band_id, COUNT(*) AS cnt
        FROM sessions s
        JOIN band_members bm ON bm.band_id = s.band_id AND bm.user_id = $1 AND bm.status = 'active'
-       WHERE s.user_id = $1 AND s.band_id IS NOT NULL AND s.session_type = $2
+       WHERE s.user_id = $1 AND s.band_id IS NOT NULL AND s.session_type = $2 AND s.site = $3
          AND s.uploaded_at >= DATE_SUB(NOW(), INTERVAL 2 MONTH)
        GROUP BY s.band_id
        ORDER BY cnt DESC, MAX(s.uploaded_at) DESC
        LIMIT 1`,
-      [req.user.id, sessionType]
+      [req.user.id, sessionType, req.site]
     );
     const defaultBandId = bandRow.rowCount > 0 ? bandRow.rows[0].band_id : null;
     const targetBandId = req.query.bandId ? parseInt(req.query.bandId, 10) : defaultBandId;
@@ -217,13 +217,13 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
   const { name, recorded_at, band_id, session_type, instrument_id } = req.body;
   const sessionTypeVal = session_type === 'individual' ? 'individual' : session_type === 'mashup' ? 'mashup' : 'band';
 
-  // Enforce free-tier limits: 3 band sessions, 3 individual sessions
+  // Enforce free-tier limits: 3 band sessions, 3 individual sessions (per site)
   const FREE_LIMITS = { band: 3, individual: 3 };
   const limitClient = await getClient();
   try {
     const countResult = await limitClient.query(
-      'SELECT COUNT(*) AS cnt FROM sessions WHERE user_id = $1 AND session_type = $2',
-      [req.user.id, sessionTypeVal]
+      'SELECT COUNT(*) AS cnt FROM sessions WHERE user_id = $1 AND session_type = $2 AND site = $3',
+      [req.user.id, sessionTypeVal, req.site]
     );
     const count = parseInt(countResult.rows[0].cnt, 10);
     if (count >= FREE_LIMITS[sessionTypeVal]) {
@@ -263,8 +263,8 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
   const client = await getClient();
   try {
     const insertResult = await client.query(
-      'INSERT INTO sessions (user_id, name, s3_key, file_size, mime_type, recorded_at, band_id, session_type, instrument_id, normalized, duration_ms) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)',
-      [req.user.id, name || 'Untitled Session', s3Key, wavBuffer.length, 'audio/wav', recorded_at || null, bandIdVal, sessionTypeVal, instrumentIdVal, 1, durationMs]
+      'INSERT INTO sessions (user_id, name, s3_key, file_size, mime_type, recorded_at, band_id, session_type, instrument_id, normalized, duration_ms, site) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)',
+      [req.user.id, name || 'Untitled Session', s3Key, wavBuffer.length, 'audio/wav', recorded_at || null, bandIdVal, sessionTypeVal, instrumentIdVal, 1, durationMs, req.site]
     );
     const session = await client.query(
       `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,
