@@ -12,6 +12,7 @@ const cookieParser = require('cookie-parser');
 const { createAdapter } = require('@socket.io/redis-adapter');
 const { createRedisClients } = require('./utilities/redis');
 const { startCustomDomainCache, isActiveCustomDomain } = require('./utilities/customDomainCache');
+const { siteOrigins, attachSite } = require('./utilities/site');
 
 const app = express();
 const server = http.createServer(app);
@@ -23,8 +24,7 @@ const port = process.env.PORT || 3000;
 // main site itself.
 const allowedOrigins = [
   process.env.CORS_ORIGIN,
-  'https://prosaurus.com',
-  'https://www.prosaurus.com'
+  ...siteOrigins
 ];
 
 // Shared by both Express `cors()` and Socket.IO — both accept an (origin, callback) function.
@@ -136,6 +136,9 @@ app.post('/api/billing/webhook/square', express.raw({ type: 'application/json' }
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+// Which site (Prosaurus or Greywire) each request is for — sets req.site
+app.use(attachSite);
 
 // Sliding session — refresh the JWT on every authenticated request
 const refreshSession = require('./middleware/refreshSession');

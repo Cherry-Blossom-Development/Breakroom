@@ -6,6 +6,7 @@ const path = require('path');
 const { getClient } = require('../utilities/db');
 const { sendMail } = require('../utilities/aws-ses-email');
 const { getPlatform } = require('../utilities/platform');
+const { authCookieDomain } = require('../utilities/site');
 const { getIO } = require('../utilities/socket');
 const { findIdentifierCollision } = require('../utilities/userIdentifiers');
 const { acceptEulaForUser } = require('../utilities/eulaNotification');
@@ -204,7 +205,7 @@ router.post('/signup', async (req, res) => {
     const token = jwt.sign(payload, SECRET_KEY, { expiresIn: '30d' });
     res.cookie('jwtToken', token, {
       maxAge: 2592000000, // 30 days
-      domain: process.env.NODE_ENV === 'production' ? '.prosaurus.com' : undefined,
+      domain: authCookieDomain(req),
       path: '/',
       httpOnly: false,
       secure: process.env.CORS_ORIGIN?.startsWith('https') || process.env.NODE_ENV === 'production',
@@ -389,11 +390,11 @@ function guestRateLimited(ip) {
   return false;
 }
 
-function setAuthCookie(res, handle) {
+function setAuthCookie(req, res, handle) {
   const token = jwt.sign({ username: handle }, SECRET_KEY, { expiresIn: '30d' });
   res.cookie('jwtToken', token, {
     maxAge: 2592000000, // 30 days
-    domain: process.env.NODE_ENV === 'production' ? '.prosaurus.com' : undefined,
+    domain: authCookieDomain(req),
     path: '/',
     httpOnly: false,
     secure: process.env.CORS_ORIGIN?.startsWith('https') || process.env.NODE_ENV === 'production',
@@ -424,7 +425,7 @@ router.post('/guest', async (req, res) => {
         [visitorId]
       );
       if (existing.rowCount > 0) {
-        const token = setAuthCookie(res, existing.rows[0].handle);
+        const token = setAuthCookie(req, res, existing.rows[0].handle);
         return res.status(200).json({ message: 'Welcome back', handle: existing.rows[0].handle, token });
       }
     }
@@ -471,7 +472,7 @@ router.post('/guest', async (req, res) => {
     // Deliberately NOT done for guests: General Chatter membership + welcome
     // messages, breakroom_blocks, user_blog, verification email.
 
-    const token = setAuthCookie(res, handle);
+    const token = setAuthCookie(req, res, handle);
     res.status(201).json({ message: 'Guest account created', handle, token });
   } catch (err) {
     console.error('Guest signup error:', err);
@@ -569,7 +570,7 @@ router.post('/login', async (req, res) => {
 
         res.cookie('jwtToken', token, {
           maxAge: 2592000000, // 30 days
-          domain: process.env.NODE_ENV === 'production' ? '.prosaurus.com' : undefined,
+          domain: authCookieDomain(req),
           path: '/',
           httpOnly: false,
           secure: process.env.CORS_ORIGIN?.startsWith('https') || process.env.NODE_ENV === 'production',

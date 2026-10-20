@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { extractToken } = require('../utilities/auth');
+const { authCookieDomain } = require('../utilities/site');
 
 const SECRET_KEY = process.env.SECRET_KEY;
 const COOKIE_MAX_AGE = 30 * 24 * 60 * 60 * 1000; // 30 days in ms
@@ -25,7 +26,7 @@ function refreshSession(req, res, next) {
         // Refresh cookie for web clients
         res.cookie('jwtToken', newToken, {
             maxAge: COOKIE_MAX_AGE,
-            domain: process.env.NODE_ENV === 'production' ? '.prosaurus.com' : undefined,
+            domain: authCookieDomain(req),
             path: '/',
             httpOnly: false,
             secure: process.env.CORS_ORIGIN?.startsWith('https') || process.env.NODE_ENV === 'production',
