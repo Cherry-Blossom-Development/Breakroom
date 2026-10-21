@@ -44,20 +44,27 @@ async function claim() {
     // Pedals come oldest claim first, so the newest is the one just claimed
     claimed.value = data.membership.pedals[data.membership.pedals.length - 1]
     serial.value = ''
-    await user.fetchUser()
 
     const bandInviteToken = route.query.bandInvite
     if (bandInviteToken) {
       try {
         await fetch(`/api/bands/invite/${bandInviteToken}/accept`, { method: 'POST', credentials: 'include' })
       } catch { /* non-critical: the invite stays open */ }
-      setTimeout(() => router.push('/sessions'), 1500)
+      setTimeout(() => enterCommunity('/sessions'), 1500)
     }
   } catch {
     error.value = 'Something went wrong. Please try again.'
   } finally {
     claiming.value = false
   }
+}
+
+// The user store learns about the new membership only on the way out: once
+// it does, App.vue swaps the public layout for the member one, which remounts
+// this page and would wipe the "You're in!" message.
+async function enterCommunity(path) {
+  await user.fetchUser()
+  router.push(path)
 }
 
 function formatDate(str) {
@@ -78,7 +85,7 @@ function formatDate(str) {
           is now registered to you, and membership is free for as long as you own it.
         </p>
         <p v-if="route.query.bandInvite" class="claim-lede">Joining your band…</p>
-        <RouterLink v-else to="/chat" class="claim-btn">Go to the community</RouterLink>
+        <button v-else type="button" class="claim-btn" @click="enterCommunity('/chat')">Go to the community</button>
       </template>
 
       <!-- Guest accounts are game-only and can't hold pedals -->

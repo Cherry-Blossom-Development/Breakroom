@@ -12,7 +12,9 @@ export default defineConfig(({ mode }) => {
     plugins: [vue(), vueJsx(), vueDevTools()],
     server: {
       host: '0.0.0.0',
-      allowedHosts: [env.VITE_ALLOWED_HOST],
+      // local.greywirestudio.com serves the Greywire community in local and
+      // test environments (see src/utilities/site.js)
+      allowedHosts: [env.VITE_ALLOWED_HOST, 'local.greywirestudio.com'],
       proxy: {
         '/api': {
           target: 'http://backend:3000',
