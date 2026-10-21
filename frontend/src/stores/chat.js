@@ -1,6 +1,7 @@
 import { reactive, ref } from 'vue'
 import { io } from 'socket.io-client'
 import { authFetch } from '../utilities/authFetch'
+import { apiBase } from '@/utilities/site.js'
 
 const state = reactive({
   socket: null,
@@ -25,7 +26,7 @@ const state = reactive({
 // Get the socket instance, creating if needed
 function getSocket() {
   if (!state.socket) {
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
+    const baseUrl = apiBase
     state.socket = io(baseUrl, {
       withCredentials: true,
       autoConnect: false

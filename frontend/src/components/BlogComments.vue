@@ -5,6 +5,7 @@ import { user } from '@/stores/user.js'
 import { comments } from '@/stores/comments.js'
 import LoadingSpinner from './LoadingSpinner.vue'
 import FlagDialog from './FlagDialog.vue'
+import { apiBase } from '@/utilities/site.js'
 
 const props = defineProps({
   postId: {
@@ -13,7 +14,7 @@ const props = defineProps({
   }
 })
 
-const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
+const baseUrl = apiBase
 
 // Local state
 const newComment = ref('')

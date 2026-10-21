@@ -3,6 +3,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { io } from 'socket.io-client'
 import HaulonautStatChip from '@/components/HaulonautStatChip.vue'
+import { apiBase } from '@/utilities/site.js'
 import {
   playHaulonautSound, soundMuted, soundVolume, toggleHaulonautSoundMuted, setHaulonautSoundVolume,
   playHaulonautAmbient, stopHaulonautAmbient, ambientMuted, ambientVolume, toggleHaulonautAmbientMuted, setHaulonautAmbientVolume,
@@ -1624,7 +1625,7 @@ let sectorSocket = null
 
 function connectSectorSocket() {
   if (sectorSocket) return
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
+  const baseUrl = apiBase
   sectorSocket = io(baseUrl, { withCredentials: true, autoConnect: false })
 
   sectorSocket.on('connect', () => {

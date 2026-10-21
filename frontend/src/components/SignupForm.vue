@@ -51,7 +51,7 @@ import axios from 'axios';
 import { useRouter, useRoute } from 'vue-router';
 import { user } from '@/stores/user.js';
 import { getVisitorId } from '@/utilities/visitorId.js';
-import { isGreywire } from '@/utilities/site.js';
+import { isGreywire, apiBase } from '@/utilities/site.js';
 
 // Function to generate a random salt using the Web Crypto API
 function generateSalt(length = 16) {
@@ -154,7 +154,7 @@ export default {
           const hash = await hashPasswordWithSalt(this.password, salt);
 
           // Once the hash is ready, you can make the API call
-          let result = await axios.post(`${import.meta.env.VITE_API_BASE_URL || ''}/api/auth/signup`, {
+          let result = await axios.post(`${apiBase}/api/auth/signup`, {
             handle: this.handle,
             first_name: this.first_name,
             last_name: this.last_name,
@@ -179,7 +179,7 @@ export default {
           }
           if (bandInviteToken) {
             try {
-              await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/bands/invite/${bandInviteToken}/accept`, {
+              await fetch(`${apiBase}/api/bands/invite/${bandInviteToken}/accept`, {
                 method: 'POST',
                 credentials: 'include'
               });

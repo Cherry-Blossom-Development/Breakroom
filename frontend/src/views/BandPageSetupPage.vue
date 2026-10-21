@@ -2,6 +2,7 @@
 import { ref, reactive, onMounted, computed } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { authFetch } from '@/utilities/authFetch'
+import { apiBase } from '@/utilities/site.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -35,7 +36,7 @@ const featuredSessionIds = computed(() =>
 )
 
 const publicUrl = computed(() => {
-  const base = import.meta.env.VITE_API_BASE_URL || ''
+  const base = apiBase
   return page.band_url ? `${base}/band/${page.band_url}` : null
 })
 

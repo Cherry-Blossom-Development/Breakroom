@@ -41,6 +41,7 @@
 <script>
 import axios from 'axios';
 import LoadingSpinner from './LoadingSpinner.vue';
+import { apiBase } from '@/utilities/site.js';
 
 export default {
   components: { LoadingSpinner },
@@ -66,7 +67,7 @@ export default {
   methods: {
     async confirmEmail(token) {
       try {
-        let result = await axios.post(`${import.meta.env.VITE_API_BASE_URL || ''}/api/user/alternate-email/confirm`, {
+        let result = await axios.post(`${apiBase}/api/user/alternate-email/confirm`, {
           token: token
         });
         this.message = result.data.message;

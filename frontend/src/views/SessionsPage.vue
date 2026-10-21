@@ -1222,7 +1222,8 @@ async function submitRating(session, value) {
 
 // --- Share ---
 async function shareSession(session) {
-  const url = `https://www.prosaurus.com/sessions/${session.id}`
+  const origin = isGreywire ? window.location.origin : 'https://www.prosaurus.com'
+  const url = `${origin}/sessions/${session.id}`
   if (navigator.share) {
     try { await navigator.share({ url }) } catch { /* user cancelled */ }
   } else {

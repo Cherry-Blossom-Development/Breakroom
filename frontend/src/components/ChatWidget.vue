@@ -9,6 +9,7 @@ import { user } from '@/stores/user.js'
 import { moderationStore } from '@/stores/moderation.js'
 import { chat } from '@/stores/chat.js'
 import { renderMessage } from '@/utilities/linkify.js'
+import { apiBase } from '@/utilities/site.js'
 
 const props = defineProps({
   roomId: {
@@ -508,7 +509,7 @@ const onVideoSelected = async (event) => {
 
 // Setup socket connection
 const setupSocket = () => {
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
+  const baseUrl = apiBase
   socket = io(baseUrl, {
     withCredentials: true,
     autoConnect: true

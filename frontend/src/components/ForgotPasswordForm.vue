@@ -22,6 +22,7 @@
 
 <script>
 import axios from 'axios'
+import { apiBase } from '@/utilities/site.js'
 
 export default {
   data() {
@@ -39,7 +40,7 @@ export default {
       this.errorMessage = ''
       this.successMessage = ''
       try {
-        await axios.post(`${import.meta.env.VITE_API_BASE_URL || ''}/api/auth/forgot-password`, {
+        await axios.post(`${apiBase}/api/auth/forgot-password`, {
           email: this.email
         })
         this.successMessage = 'If that email is registered, a reset link has been sent. Please check your inbox.'

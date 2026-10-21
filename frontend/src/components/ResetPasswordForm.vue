@@ -38,6 +38,7 @@
 <script>
 import axios from 'axios'
 import { useRoute } from 'vue-router'
+import { apiBase } from '@/utilities/site.js'
 
 function generateSalt(length = 16) {
   const array = new Uint8Array(length)
@@ -97,7 +98,7 @@ export default {
         const salt = generateSalt()
         const hash = await hashPasswordWithSalt(this.password, salt)
 
-        await axios.post(`${import.meta.env.VITE_API_BASE_URL || ''}/api/auth/reset-password`, {
+        await axios.post(`${apiBase}/api/auth/reset-password`, {
           token: this.token,
           password: this.password,
           salt,

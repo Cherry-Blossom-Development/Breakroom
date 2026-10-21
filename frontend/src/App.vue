@@ -17,7 +17,7 @@ import AppSidebar from './components/AppSidebar.vue'
 import BottomTabBar from './components/BottomTabBar.vue'
 import SupportModal from './components/SupportModal.vue'
 import { io } from 'socket.io-client'
-import { isGreywire, siteName, siteLogo } from './utilities/site.js'
+import { isGreywire, siteName, siteLogo, apiBase } from './utilities/site.js'
 
 const mentionQueue = ref([])
 const scheduledWarning = ref(null)
@@ -130,7 +130,7 @@ function recordVisit() {
 
 // Socket.IO for real-time notifications
 let socket = null
-const baseUrl = import.meta.env.VITE_API_BASE_URL || ''
+const baseUrl = apiBase
 
 function setupNotificationSocket() {
   if (socket) return

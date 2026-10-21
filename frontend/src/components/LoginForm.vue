@@ -37,7 +37,7 @@
 import axios from 'axios'
 import { useRouter, useRoute } from 'vue-router'
 import { user } from '@/stores/user.js'
-import { isGreywire, siteName, siteLogo } from '@/utilities/site.js'
+import { isGreywire, siteName, siteLogo, apiBase } from '@/utilities/site.js'
 
 export default {
   data() {
@@ -59,7 +59,7 @@ export default {
       this.submitting = true
       this.passwordError = ''
       try {
-        await axios.post(`${import.meta.env.VITE_API_BASE_URL || ''}/api/auth/login`, {
+        await axios.post(`${apiBase}/api/auth/login`, {
           handle: this.handle,
           password: this.password
         }, {
@@ -78,7 +78,7 @@ export default {
         }
         if (bandInviteToken) {
           try {
-            await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/bands/invite/${bandInviteToken}/accept`, {
+            await fetch(`${apiBase}/api/bands/invite/${bandInviteToken}/accept`, {
               method: 'POST',
               credentials: 'include'
             })

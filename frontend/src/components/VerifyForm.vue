@@ -61,7 +61,7 @@
 <script>
 import axios from 'axios';
 import LoadingSpinner from './LoadingSpinner.vue';
-import { isGreywire } from '@/utilities/site.js';
+import { isGreywire, apiBase } from '@/utilities/site.js';
 
 export default {
   components: { LoadingSpinner },
@@ -92,7 +92,7 @@ export default {
   methods: {
     async verifyEmail(token) {
       try {
-        let result = await axios.post(`${import.meta.env.VITE_API_BASE_URL || ''}/api/auth/verify`, {
+        let result = await axios.post(`${apiBase}/api/auth/verify`, {
           token: token
         });
         this.message = result.data.message;
@@ -109,7 +109,7 @@ export default {
     async resendVerification() {
       this.resending = true;
       try {
-        await axios.post(`${import.meta.env.VITE_API_BASE_URL || ''}/api/auth/resend-verification`, {
+        await axios.post(`${apiBase}/api/auth/resend-verification`, {
           token: this.token
         });
         this.error = '';
