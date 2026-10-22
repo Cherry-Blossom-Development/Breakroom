@@ -9,9 +9,7 @@
 
 // url is the base for links in emails. emailFrom is the sender for emails
 // built in code (templated emails carry their own from_address in
-// system_emails). Greywire mail goes out from prosaurus.com under the Greywire
-// name until greywirestudio.com is verified in Amazon SES; then set
-// GREYWIRE_EMAIL_FROM.
+// system_emails). Both domains are verified in Amazon SES (us-west-2).
 const SITES = {
   prosaurus: {
     name: 'Prosaurus',
@@ -24,7 +22,7 @@ const SITES = {
     hosts: ['community.greywirestudio.com', 'local.greywirestudio.com'],
     origins: ['https://community.greywirestudio.com'],
     url: process.env.GREYWIRE_URL || 'https://community.greywirestudio.com',
-    emailFrom: process.env.GREYWIRE_EMAIL_FROM || 'Greywire Studio <noreply@prosaurus.com>',
+    emailFrom: process.env.GREYWIRE_EMAIL_FROM || 'Greywire Studio <noreply@greywirestudio.com>',
   },
 };
 
