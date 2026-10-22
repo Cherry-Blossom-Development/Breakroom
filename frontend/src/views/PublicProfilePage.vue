@@ -5,6 +5,7 @@ import LoadingSpinner from '../components/LoadingSpinner.vue'
 import FlagDialog from '../components/FlagDialog.vue'
 import { user } from '@/stores/user.js'
 import { moderationStore } from '@/stores/moderation.js'
+import { isGreywire } from '@/utilities/site.js'
 
 const route = useRoute()
 
@@ -172,6 +173,8 @@ async function unblockUser() {
           <p v-else class="bio-empty">This user hasn't added a bio yet.</p>
         </div>
 
+        <!-- Work history is Prosaurus-only; Greywire profiles are about the music -->
+        <template v-if="!isGreywire">
         <div class="work-bio-section">
           <h2>Work Biography</h2>
           <div v-if="profile.workBio" class="bio-text" v-safe-html="profile.workBio"></div>
@@ -211,6 +214,7 @@ async function unblockUser() {
           </div>
           <p v-else class="empty-state-text">No work experience listed yet.</p>
         </div>
+        </template>
       </div>
     </template>
   </div>

@@ -2,6 +2,7 @@
 import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import LoadingSpinner from '../../components/LoadingSpinner.vue'
 import RichTextEditor from '../../components/RichTextEditor.vue'
+import { isGreywire } from '@/utilities/site.js'
 
 const isEditing = ref(false)
 const isLoading = ref(true)
@@ -584,6 +585,8 @@ onMounted(() => {
             <p v-else class="bio-empty">No bio yet. Click edit to add one!</p>
           </div>
 
+          <!-- Work history is Prosaurus-only; Greywire profiles are about the music -->
+          <template v-if="!isGreywire">
           <div class="work-bio-section">
             <h2>Work Biography</h2>
             <div v-if="profile.workBio" class="bio-text rich-content" v-safe-html="profile.workBio"></div>
@@ -665,6 +668,7 @@ onMounted(() => {
             </div>
             <p v-else class="bio-empty">No work experience added yet. Click "Add Job" to get started!</p>
           </div>
+          </template>
 
           <div class="location-section">
             <h2>Location</h2>
@@ -749,7 +753,7 @@ onMounted(() => {
               <RichTextEditor v-model="editForm.bio" />
             </div>
 
-            <div class="form-group">
+            <div v-if="!isGreywire" class="form-group">
               <label>Work Biography</label>
               <RichTextEditor v-model="editForm.workBio" />
             </div>
