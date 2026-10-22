@@ -1,12 +1,13 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
+import { isGreywire, siteName } from '@/utilities/site.js'
 
 const documents = ref([
   {
     id: 'eula',
     title: 'End User License Agreement (EULA)',
-    description: 'Governs your use of the Prosaurus platform.',
+    description: isGreywire ? 'Governs your use of the Greywire community.' : 'Governs your use of the Prosaurus platform.',
     route: '/eula',
     status: 'loading',
     acceptedAt: null
@@ -48,7 +49,7 @@ onMounted(async () => {
 <template>
   <div class="legal-page">
     <h2>Legal Documents</h2>
-    <p class="subtitle">Documents associated with your account on Prosaurus.</p>
+    <p class="subtitle">Documents associated with your account on {{ siteName }}.</p>
 
     <div class="doc-list">
       <div v-for="doc in documents" :key="doc.id" class="doc-card">

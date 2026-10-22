@@ -2,8 +2,8 @@
   <div class="popup-overlay" v-if="notification">
     <div class="popup-modal">
       <h2 class="popup-title">{{ notification.name }}</h2>
-      <div class="popup-description" v-if="notification.description">
-        {{ notification.description }}
+      <div class="popup-description" v-if="description">
+        {{ description }}
       </div>
       <RouterLink
         v-if="notification.event_type === 'eula_required'"
@@ -21,8 +21,17 @@
 <script setup>
 import { computed } from 'vue'
 import { notificationStore } from '@/stores/notification'
+import { isGreywire } from '@/utilities/site.js'
 
 const notification = computed(() => notificationStore.currentPopup)
+
+// The EULA popup text in the database names Prosaurus; Greywire words its own
+const description = computed(() => {
+  if (isGreywire && notification.value?.event_type === 'eula_required') {
+    return 'Please read and accept the Greywire community End User License Agreement (EULA) to continue.'
+  }
+  return notification.value?.description
+})
 
 function acceptEula() {
   if (notification.value) {

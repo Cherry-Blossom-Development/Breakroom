@@ -46,6 +46,10 @@
         <a href="https://greywirestudio.com">greywirestudio.com</a>.
       </p>
     </section>
+
+    <p class="gw-legal">
+      <RouterLink to="/eula">Terms</RouterLink> · <RouterLink to="/privacy">Privacy</RouterLink>
+    </p>
   </main>
 </template>
 
@@ -173,5 +177,12 @@
   margin: 0;
   color: var(--color-text-light);
   font-size: 0.95rem;
+}
+
+.gw-legal {
+  margin: 24px 0 0;
+  text-align: center;
+  font-size: 0.9rem;
+  color: var(--color-text-light);
 }
 </style>

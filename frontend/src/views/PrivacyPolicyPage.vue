@@ -1,10 +1,16 @@
 <template>
   <section class="privacy-page page-container">
     <h1>Privacy Policy</h1>
-    <p class="app-subtitle">Prosaurus — Mobile Application</p>
-    <p class="effective-date">Effective Date: February 20, 2026</p>
+    <p class="app-subtitle">{{ isGreywire ? 'Greywire Studio community — community.greywirestudio.com' : 'Prosaurus — Mobile Application' }}</p>
+    <p class="effective-date">Effective Date: {{ isGreywire ? 'October 22, 2026' : 'February 20, 2026' }}</p>
 
-    <p class="intro">
+    <p v-if="isGreywire" class="intro">
+      This Privacy Policy describes how Cherry Blossom Development LLC ("we," "us," or "our"),
+      based in Spokane, Washington, collects, uses, and protects your information when you use
+      the <strong>Greywire Studio community</strong> at community.greywirestudio.com (the "Community").
+      By using the Community, you agree to the practices described in this policy.
+    </p>
+    <p v-else class="intro">
       This Privacy Policy describes how Cherry Blossom Development LLC ("we," "us," or "our"),
       based in Spokane, Washington, collects, uses, and protects your information when you use
       the <strong>Prosaurus</strong> mobile application (the "App"), available on iOS and Android. By using the App, you agree to
@@ -14,8 +20,8 @@
     <div class="section">
       <h2>1. Age Requirement</h2>
       <p>
-        The Prosaurus App is intended for use by adults only. You must be at least
-        <strong>18 years of age</strong> to create an account or use this App. We do not
+        {{ isGreywire ? 'The Community' : 'The Prosaurus App' }} is intended for use by adults only. You must be at least
+        <strong>18 years of age</strong> to create an account or use this {{ app }}. We do not
         knowingly collect personal information from anyone under the age of 18. If we become
         aware that a user under 18 has provided us with personal information, we will promptly
         delete that account and its associated data. If you believe a minor has registered,
@@ -31,15 +37,23 @@
       <ul>
         <li><strong>Account Information:</strong> Username, email address, and password when you register.</li>
         <li><strong>Profile Information:</strong> Display name, profile photo, bio, and any other details you choose to add to your profile.</li>
-        <li><strong>User Content:</strong> Posts, blog entries, artwork, comments, messages, and other content you create or share within the App.</li>
-        <li><strong>Payment Information:</strong> Billing details processed through our payment provider for subscription fees. We do not store full payment card numbers on our servers.</li>
+        <template v-if="isGreywire">
+          <li><strong>User Content:</strong> Chat messages, recordings, band pages, setlists, comments, ratings, and other content you create or share within the Community.</li>
+          <li><strong>Pedal Information:</strong> The serial number and model of any Greywire pedal you claim, and when you claimed it.</li>
+          <li><strong>Payment Information:</strong> Greywire membership is free, and we collect no payment details for it. If you use paid Prosaurus features with the same account, billing details are processed by our payment provider. We do not store full payment card numbers on our servers.</li>
+        </template>
+        <template v-else>
+          <li><strong>User Content:</strong> Posts, blog entries, artwork, comments, messages, and other content you create or share within the App.</li>
+          <li><strong>Payment Information:</strong> Billing details processed through our payment provider for subscription fees. We do not store full payment card numbers on our servers.</li>
+        </template>
         <li><strong>Communications:</strong> Any information you send us via email or support requests.</li>
       </ul>
 
       <h3>Information Collected Automatically</h3>
       <ul>
-        <li><strong>Device Information:</strong> Device type, operating system version, and unique device identifiers.</li>
-        <li><strong>Usage Data:</strong> Features accessed, content viewed, and interactions within the App.</li>
+        <li v-if="isGreywire"><strong>Browser Information:</strong> Browser type, operating system, and device type.</li>
+        <li v-else><strong>Device Information:</strong> Device type, operating system version, and unique device identifiers.</li>
+        <li><strong>Usage Data:</strong> Features accessed, content viewed, and interactions within the {{ app }}.</li>
         <li><strong>Log Data:</strong> IP address, access times, and error reports to help us diagnose and fix technical issues.</li>
         <li><strong>Authentication Tokens:</strong> Session tokens stored securely to keep you logged in.</li>
       </ul>
@@ -49,9 +63,10 @@
       <h2>3. How We Use Your Information</h2>
       <p>We use the information we collect to:</p>
       <ul>
-        <li>Provide, operate, and improve the App and its features.</li>
+        <li>Provide, operate, and improve the {{ app }} and its features.</li>
         <li>Authenticate your identity and maintain the security of your account.</li>
-        <li>Process subscription payments and manage your billing.</li>
+        <li v-if="isGreywire">Check pedal serial claims and manage memberships.</li>
+        <li v-else>Process subscription payments and manage your billing.</li>
         <li>Send you service-related notifications (e.g., account verification, password resets, friend activity).</li>
         <li>Respond to your support requests and communications.</li>
         <li>Monitor and enforce our Terms of Service, including age restrictions.</li>
@@ -68,14 +83,23 @@
       <h2>4. How We Share Your Information</h2>
       <p>We may share your information only in the following limited circumstances:</p>
       <ul>
-        <li>
+        <li v-if="isGreywire">
+          <strong>With Other Users:</strong> Your username and profile are visible to other members. Recordings
+          you share with a public link can be heard by anyone who has the link.
+        </li>
+        <li v-if="isGreywire">
+          <strong>With Prosaurus:</strong> Your account is shared with Prosaurus (prosaurus.com), another service
+          run by Cherry Blossom Development LLC. Your profile, friends, and direct messages are the same on both
+          sites. Chat rooms, recordings, and bands stay on the site where they were created.
+        </li>
+        <li v-else>
           <strong>With Other Users:</strong> Content you post publicly (such as blog posts or gallery artwork
           shared via a public link) is visible to others as you intend. Your username and profile are visible
           to other registered users within the App.
         </li>
         <li>
           <strong>Service Providers:</strong> We work with trusted third-party vendors who assist us in
-          operating the App (e.g., payment processing, cloud hosting, email delivery). These providers
+          operating the {{ app }} (e.g., payment processing, cloud hosting, email delivery). These providers
           are contractually obligated to protect your information and may not use it for their own purposes.
         </li>
         <li>
@@ -127,7 +151,7 @@
         <li><strong>Correction:</strong> You may update or correct inaccurate information through your account settings.</li>
         <li><strong>Deletion:</strong> You may request that we delete your account and associated personal data.</li>
         <li><strong>Portability:</strong> You may request an export of your data in a commonly used format.</li>
-        <li><strong>Opt-Out of Notifications:</strong> You can manage notification preferences within the App settings.</li>
+        <li><strong>Opt-Out of Notifications:</strong> You can manage notification preferences within the {{ app }} settings.</li>
       </ul>
       <p>
         To exercise any of these rights, please contact us at the address listed in Section 10.
@@ -138,7 +162,7 @@
     <div class="section">
       <h2>8. Third-Party Links and Services</h2>
       <p>
-        The App may contain links to external websites or services not operated by us. We are not
+        The {{ app }} may contain links to external websites or services not operated by us. We are not
         responsible for the privacy practices of those third parties. We encourage you to review
         the privacy policies of any external services you access.
       </p>
@@ -149,8 +173,8 @@
       <p>
         We may update this Privacy Policy from time to time to reflect changes in our practices or
         legal requirements. When we make material changes, we will update the effective date at the
-        top of this page and, where appropriate, notify you through the App or via email. Your
-        continued use of the App after any changes constitutes your acceptance of the updated policy.
+        top of this page and, where appropriate, notify you through the {{ app }} or via email. Your
+        continued use of the {{ app }} after any changes constitutes your acceptance of the updated policy.
       </p>
     </div>
 
@@ -171,7 +195,10 @@
 </template>
 
 <script setup>
-// No additional logic needed
+import { isGreywire } from '@/utilities/site.js'
+
+// What the policy calls the service: the Prosaurus mobile app or the Greywire community site
+const app = isGreywire ? 'Community' : 'App'
 </script>
 
 <style scoped>

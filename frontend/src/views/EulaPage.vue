@@ -4,7 +4,7 @@
     <!-- Accept banner for logged-in users who haven't accepted yet -->
     <div v-if="showAcceptBanner" class="accept-banner">
       <div v-if="!accepted">
-        <p>You must accept these terms to use Prosaurus.</p>
+        <p>You must accept these terms to use {{ isGreywire ? 'the Greywire community' : 'Prosaurus' }}.</p>
         <button class="accept-button" :disabled="accepting" @click="acceptTerms">
           {{ accepting ? 'Saving…' : 'Accept These Terms' }}
         </button>
@@ -14,13 +14,14 @@
       </div>
     </div>
     <h1>End User License Agreement</h1>
-    <p class="app-subtitle">Prosaurus — prosaurus.com</p>
-    <p class="effective-date">Effective Date: March 18, 2026</p>
+    <p class="app-subtitle">{{ isGreywire ? 'Greywire Studio community — community.greywirestudio.com' : 'Prosaurus — prosaurus.com' }}</p>
+    <p class="effective-date">Effective Date: {{ isGreywire ? 'October 22, 2026' : 'March 18, 2026' }}</p>
 
     <p class="intro">
       This End User License Agreement ("EULA" or "Agreement") is a legal agreement between you
       ("User," "you," or "your") and Cherry Blossom Development LLC ("Company," "we," "us," or "our"),
-      governing your use of the Prosaurus platform and associated services (collectively, the "Service").
+      governing your use of {{ isGreywire ? 'the Greywire Studio community at community.greywirestudio.com' : 'the Prosaurus platform' }}
+      and associated services (collectively, the "Service").
       By creating an account or using the Service in any way, you acknowledge that you have read,
       understood, and agree to be bound by this Agreement. If you do not agree, do not use the Service.
     </p>
@@ -49,8 +50,50 @@
       </p>
     </div>
 
+    <div v-if="isGreywire" class="section">
+      <h2>3. Greywire Membership</h2>
+      <p>
+        The community is open to members only. Membership is free and comes with a Greywire Studio
+        pedal: you join by claiming your pedal's serial number, or by invitation from us.
+      </p>
+      <ul>
+        <li>
+          <strong>One account per serial.</strong> Each serial number can be claimed by one account.
+          Claim only a pedal you own. Claiming a serial that isn't yours, or sharing one so others can
+          get in, is a violation of this Agreement.
+        </li>
+        <li>
+          <strong>Membership follows the pedal.</strong> Membership belongs to the account that holds
+          the serial. If you sell or give away your pedal, contact us and we can move the serial to the
+          new owner's account; your account then loses membership unless you hold another pedal or an
+          invitation.
+        </li>
+        <li>
+          <strong>Revocation.</strong> We may revoke membership for any violation of this Agreement.
+        </li>
+        <li>
+          <strong>The community only.</strong> Membership covers the online community. It does not
+          change the terms or warranty of the pedal itself, and the pedal works without it.
+        </li>
+      </ul>
+    </div>
+
+    <div v-if="isGreywire" class="section">
+      <h2>4. One Account for Greywire and Prosaurus</h2>
+      <p>
+        Your account is shared with Prosaurus (prosaurus.com), another service run by Cherry Blossom
+        Development LLC. You sign in to both with the same username and password, and your profile,
+        friends and direct messages are the same on both sites. Chat rooms, recordings and bands belong
+        to the site where they were created and are not shown on the other.
+      </p>
+      <p>
+        This Agreement covers your account on both sites. A suspension or termination applies to the
+        whole account.
+      </p>
+    </div>
+
     <div class="section">
-      <h2>3. Prohibited Content — Zero Tolerance Policy</h2>
+      <h2>{{ n(3) }}. Prohibited Content — Zero Tolerance Policy</h2>
       <p>
         We maintain a <strong>zero-tolerance policy</strong> for objectionable content. The following
         types of content are strictly prohibited and will result in immediate account termination
@@ -99,7 +142,7 @@
     </div>
 
     <div class="section">
-      <h2>4. Prohibited Conduct — Zero Tolerance for Abusive Users</h2>
+      <h2>{{ n(4) }}. Prohibited Conduct — Zero Tolerance for Abusive Users</h2>
       <p>
         We maintain a <strong>zero-tolerance policy</strong> for abusive behavior. The following conduct
         is strictly prohibited and will result in immediate and permanent account termination:
@@ -144,7 +187,7 @@
     </div>
 
     <div class="section">
-      <h2>5. Content Ownership and Responsibility</h2>
+      <h2>{{ n(5) }}. Content Ownership and Responsibility</h2>
       <p>
         You retain ownership of content you create and post on the Service. By posting content, you
         grant Cherry Blossom Development LLC a worldwide, royalty-free, non-exclusive license to
@@ -159,7 +202,7 @@
     </div>
 
     <div class="section">
-      <h2>6. Reporting Violations</h2>
+      <h2>{{ n(6) }}. Reporting Violations</h2>
       <p>
         If you encounter content or behavior that violates this Agreement, please report it immediately
         using the in-app reporting tools or by contacting us at:
@@ -180,7 +223,7 @@
     </div>
 
     <div class="section">
-      <h2>7. Automated Content Moderation</h2>
+      <h2>{{ n(7) }}. Automated Content Moderation</h2>
       <p>
         To help maintain a safe environment, the Service uses automated tools to review user-submitted
         content for violations of this Agreement. These tools include:
@@ -212,7 +255,7 @@
     </div>
 
     <div class="section">
-      <h2>8. Enforcement and Account Termination</h2>
+      <h2>{{ n(8) }}. Enforcement and Account Termination</h2>
       <p>
         Cherry Blossom Development LLC reserves the right to suspend or permanently terminate any account,
         at any time and without prior notice, for any violation of this Agreement or for any conduct we
@@ -224,6 +267,7 @@
       <ul>
         <li>Your license to use the Service is immediately revoked.</li>
         <li>Access to your account and all associated content will be disabled.</li>
+        <li v-if="isGreywire">Any Greywire membership on the account ends.</li>
         <li>Active subscription fees are non-refundable in cases of policy violation.</li>
         <li>We may retain records of your account and activity as required by law or for abuse prevention.</li>
       </ul>
@@ -234,7 +278,7 @@
     </div>
 
     <div class="section">
-      <h2>9. Disclaimer of Warranties</h2>
+      <h2>{{ n(9) }}. Disclaimer of Warranties</h2>
       <p>
         The Service is provided "as is" and "as available," without warranties of any kind, express or
         implied. To the fullest extent permitted by law, Cherry Blossom Development LLC disclaims all
@@ -245,7 +289,7 @@
     </div>
 
     <div class="section">
-      <h2>10. Limitation of Liability</h2>
+      <h2>{{ n(10) }}. Limitation of Liability</h2>
       <p>
         To the maximum extent permitted by applicable law, Cherry Blossom Development LLC and its
         officers, directors, employees, and agents shall not be liable for any indirect, incidental,
@@ -257,7 +301,7 @@
     </div>
 
     <div class="section">
-      <h2>11. Governing Law</h2>
+      <h2>{{ n(11) }}. Governing Law</h2>
       <p>
         This Agreement is governed by and construed in accordance with the laws of the State of
         Washington, United States, without regard to its conflict-of-law provisions. Any disputes
@@ -267,7 +311,7 @@
     </div>
 
     <div class="section">
-      <h2>12. Changes to This Agreement</h2>
+      <h2>{{ n(12) }}. Changes to This Agreement</h2>
       <p>
         We may update this EULA at any time. When we make material changes, we will update the
         effective date at the top of this page. Your continued use of the Service after any changes
@@ -277,7 +321,7 @@
     </div>
 
     <div class="section">
-      <h2>13. Contact Us</h2>
+      <h2>{{ n(13) }}. Contact Us</h2>
       <p>
         If you have questions or concerns about this Agreement, please contact us:
       </p>
@@ -295,6 +339,10 @@
 import { ref, onMounted } from 'vue'
 import { user } from '@/stores/user.js'
 import { notificationStore } from '@/stores/notification.js'
+import { isGreywire } from '@/utilities/site.js'
+
+// Greywire adds two sections (membership, shared account) after section 2
+const n = (num) => (isGreywire ? num + 2 : num)
 
 const showAcceptBanner = ref(false)
 const accepted = ref(false)
