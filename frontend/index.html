@@ -23,6 +23,11 @@
         icon.type = 'image/svg+xml';
         icon.href = '/greywire/logo.svg';
         document.head.appendChild(icon);
+        // Space Grotesk for the greywirestudio.com header (GreywireSiteNav.vue)
+        var font = document.createElement('link');
+        font.rel = 'stylesheet';
+        font.href = 'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&display=swap';
+        document.head.appendChild(font);
         document.querySelectorAll('meta[name="theme-color"]').forEach(function (m) { m.content = '#141619'; });
       }
     </script>

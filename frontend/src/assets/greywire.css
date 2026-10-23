@@ -71,6 +71,15 @@
   background: var(--color-background-page);
 }
 
+/* Height of the greywirestudio.com nav fixed above signed-in pages (App.vue,
+   GreywireSiteNav.vue). Desktop only; on tablets and phones it's hidden, so
+   viewport-height pages that subtract it lose nothing there. */
+@media (min-width: 769px) {
+  :root[data-site="greywire"] {
+    --gw-site-nav-height: 61px;
+  }
+}
+
 /* Replace main.css's green default link color. :where() keeps this at the
    same specificity as main.css's plain `a`, so component styles (sidebar
    items, buttons) still win. */

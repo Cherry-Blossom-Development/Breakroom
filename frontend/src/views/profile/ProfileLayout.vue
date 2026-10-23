@@ -28,7 +28,7 @@
 
 <style scoped>
 .profile-layout {
-  min-height: calc(100vh - 60px);
+  min-height: calc(100vh - 60px - var(--gw-site-nav-height, 0px));
   background-color: var(--color-background-page);
   padding: 30px 20px;
 }

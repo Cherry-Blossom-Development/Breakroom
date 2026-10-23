@@ -16,6 +16,7 @@ import ShortlistCommentToast from './components/ShortlistCommentToast.vue'
 import AppSidebar from './components/AppSidebar.vue'
 import BottomTabBar from './components/BottomTabBar.vue'
 import SupportModal from './components/SupportModal.vue'
+import GreywireSiteNav from './components/GreywireSiteNav.vue'
 import { io } from 'socket.io-client'
 import { isGreywire, siteName, siteLogo, apiBase } from './utilities/site.js'
 
@@ -413,9 +414,14 @@ setInterval(() => {
         <span v-if="hamburgerUnreadCount > 0" class="hamburger-badge" aria-hidden="true">{{ hamburgerBadgeLabel }}</span>
       </button>
       <img :src="siteLogo" :alt="siteName" class="tablet-logo" />
+      <!-- Greywire: the full site nav doesn't fit here, so just the way back -->
+      <a v-if="isGreywire" href="https://greywirestudio.com/" class="tablet-site-link">Greywire Studio</a>
     </div>
 
-    <div class="app-content" :class="{ 'project-layout': route.meta.projectLayout }">
+    <!-- Greywire: the greywirestudio.com header above the content (desktop) -->
+    <GreywireSiteNav v-if="isGreywire && !route.meta.projectLayout" class="gw-site-nav-app" />
+
+    <div class="app-content" :class="{ 'project-layout': route.meta.projectLayout, 'has-site-nav': isGreywire }">
       <RouterView />
     </div>
 
@@ -429,26 +435,14 @@ setInterval(() => {
 
   <!-- Logged-out OR publicLayout routes (e.g. public blog) -->
   <template v-else>
-    <!-- Greywire: brand bar; Sign In/Up, or Logout for a signed-in non-member -->
-    <header v-if="isGreywire" class="public-header greywire-header">
-      <div class="wrapper page-container greywire-header-inner">
-        <RouterLink to="/" class="greywire-brand">
-          <img :src="siteLogo" alt="" class="greywire-brand-logo" />
-          <span>Greywire <strong>Community</strong></span>
-        </RouterLink>
-        <nav class="public-nav">
-          <a href="https://greywirestudio.com">Greywire Studio</a>
-          <template v-if="user.username">
-            <RouterLink v-if="user.greywireMember" to="/chat">Back to the community</RouterLink>
-            <a href="#" @click.prevent="logout">Logout</a>
-          </template>
-          <template v-else>
-            <RouterLink to="/login">Sign In</RouterLink>
-            <RouterLink to="/signup">Sign Up</RouterLink>
-          </template>
-        </nav>
-      </div>
-    </header>
+    <!-- Greywire: the website's header; Sign in/up, or Logout for a signed-in non-member -->
+    <GreywireSiteNav v-if="isGreywire" class="gw-site-nav-public">
+      <a v-if="user.username" href="#" @click.prevent="logout">Logout</a>
+      <template v-else>
+        <RouterLink to="/login" class="gw-signin">Sign in</RouterLink>
+        <RouterLink to="/signup">Sign up</RouterLink>
+      </template>
+    </GreywireSiteNav>
 
     <header v-else class="public-header">
       <div class="wrapper page-container">
@@ -795,42 +789,81 @@ body {
    LOGGED-OUT PUBLIC HEADER
    ============================================ */
 
-.greywire-header {
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-header-bg);
+/* Greywire: the website's header stays at the top while scrolling */
+.gw-site-nav-public {
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
-.greywire-header-inner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+/* ============================================
+   GREYWIRE SITE NAV (LOGGED-IN)
+   ============================================ */
+
+/* Desktop: a fixed bar over the content, beside the sidebar. One row of
+   --gw-site-nav-height (greywire.css); pages sized to the viewport subtract it. */
+.gw-site-nav-app {
+  position: fixed;
+  top: 0;
+  left: 220px;
+  right: 0;
+  z-index: 990;
+  height: var(--gw-site-nav-height);
+  box-sizing: border-box;
 }
 
-.greywire-brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  text-decoration: none;
-  color: var(--color-text) !important;
-  font-size: 1.05rem;
-  letter-spacing: 0.01em;
+.gw-site-nav-app .gw-site-nav-inner {
+  height: 100%;
+  padding-top: 0;
+  padding-bottom: 0;
+  flex-wrap: nowrap;
 }
 
-.greywire-brand strong {
+.gw-site-nav-app .gw-links {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.app-content.has-site-nav {
+  padding-top: var(--gw-site-nav-height);
+}
+
+.has-impersonation-banner .gw-site-nav-app {
+  top: 40px;
+}
+
+.has-impersonation-banner .app-content.has-site-nav {
+  padding-top: calc(40px + var(--gw-site-nav-height));
+}
+
+/* Narrower desktops: the logo alone, so the links stay on one row */
+@media (max-width: 1100px) {
+  .gw-site-nav-app .gw-brand-name {
+    display: none;
+  }
+}
+
+/* Tablet & mobile: no room for the bar; the top bar links back instead */
+@media (max-width: 768px) {
+  .gw-site-nav-app {
+    display: none;
+  }
+
+  .app-content.has-site-nav {
+    padding-top: 48px;
+  }
+
+  .has-impersonation-banner .app-content.has-site-nav {
+    padding-top: 88px;
+  }
+}
+
+.tablet-site-link {
+  margin-left: auto;
   color: var(--color-link);
-  font-weight: 600;
-}
-
-.greywire-brand-logo {
-  width: 32px;
-  height: 32px;
-}
-
-.greywire-header .public-nav {
-  width: auto;
-  flex-wrap: wrap;
+  text-decoration: none;
+  font-size: 0.9rem;
 }
 
 .public-header {

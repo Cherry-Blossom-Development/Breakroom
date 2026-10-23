@@ -675,7 +675,8 @@ onUnmounted(() => {
 }
 
 .chat-page {
-  height: calc(100vh - 20px);
+  /* --gw-site-nav-height: the Greywire site nav above the page (greywire.css) */
+  height: calc(100vh - 20px - var(--gw-site-nav-height, 0px));
   padding: 10px;
 }
 
