@@ -2,6 +2,7 @@
 import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import LoadingSpinner from '../../components/LoadingSpinner.vue'
 import RichTextEditor from '../../components/RichTextEditor.vue'
+import MusicianProfile from '../../components/MusicianProfile.vue'
 import { isGreywire } from '@/utilities/site.js'
 
 const isEditing = ref(false)
@@ -581,9 +582,14 @@ onMounted(() => {
         <template v-if="!isEditing">
           <div class="bio-section">
             <h2>About</h2>
+            <p v-if="isGreywire && profile.musician?.musicianOnly" class="hidden-note">
+              Hidden from others on Greywire while you show only your Musician Profile.
+            </p>
             <div v-if="profile.bio" class="bio-text rich-content" v-safe-html="profile.bio"></div>
             <p v-else class="bio-empty">No bio yet. Click edit to add one!</p>
           </div>
+
+          <MusicianProfile v-if="isGreywire" v-model:musician="profile.musician" editable />
 
           <!-- Work history is Prosaurus-only; Greywire profiles are about the music -->
           <template v-if="!isGreywire">
@@ -1061,6 +1067,12 @@ onMounted(() => {
   color: var(--color-text-placeholder);
   font-style: italic;
   margin: 0;
+}
+
+.hidden-note {
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  margin: -6px 0 10px 0;
 }
 
 .detail-row {

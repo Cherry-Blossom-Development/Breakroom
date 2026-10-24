@@ -92,6 +92,49 @@ async function getUserJobs(client, userId) {
   return result.rows;
 }
 
+// Helper to get user's Musician Profile (Greywire site only, see migration 094)
+async function getMusicianProfile(client, userId) {
+  const profile = await client.query(
+    'SELECT bio, musician_only FROM musician_profiles WHERE user_id = $1',
+    [userId]
+  );
+  const instruments = await client.query(
+    `SELECT ui.id, ui.instrument_id, i.name, ui.skill_level, ui.years_playing, ui.is_primary
+     FROM user_instruments ui
+     JOIN instruments i ON i.id = ui.instrument_id
+     WHERE ui.user_id = $1
+     ORDER BY ui.is_primary DESC, i.name`,
+    [userId]
+  );
+  const bands = await client.query(
+    `SELECT id, band_name, role, start_year, end_year, is_current
+     FROM user_band_history
+     WHERE user_id = $1
+     ORDER BY is_current DESC, COALESCE(end_year, start_year) DESC, start_year DESC, id DESC`,
+    [userId]
+  );
+  return {
+    bio: profile.rows[0]?.bio || '',
+    musicianOnly: !!profile.rows[0]?.musician_only,
+    instruments: instruments.rows.map(i => ({
+      id: i.id,
+      instrumentId: i.instrument_id,
+      name: i.name,
+      skillLevel: i.skill_level,
+      yearsPlaying: i.years_playing,
+      isPrimary: !!i.is_primary
+    })),
+    bands: bands.rows.map(b => ({
+      id: b.id,
+      bandName: b.band_name,
+      role: b.role,
+      startYear: b.start_year,
+      endYear: b.end_year,
+      isCurrent: !!b.is_current
+    }))
+  };
+}
+
 // Get current user's profile
 router.get('/', authenticate, async (req, res) => {
   const client = await getClient();
@@ -99,6 +142,7 @@ router.get('/', authenticate, async (req, res) => {
     const friendCount = await getFriendCount(client, req.user.id);
     const skills = await getUserSkills(client, req.user.id);
     const jobs = await getUserJobs(client, req.user.id);
+    const musician = req.site === 'greywire' ? await getMusicianProfile(client, req.user.id) : undefined;
     res.json({
       user: {
         id: req.user.id,
@@ -116,7 +160,8 @@ router.get('/', authenticate, async (req, res) => {
         createdAt: req.user.created_at,
         friendCount,
         skills,
-        jobs
+        jobs,
+        musician
       }
     });
   } finally {
@@ -145,6 +190,9 @@ router.get('/user/:handle', async (req, res) => {
     const friendCount = await getFriendCount(client, user.id);
     const skills = await getUserSkills(client, user.id);
     const jobs = await getUserJobs(client, user.id);
+    const musician = req.site === 'greywire' ? await getMusicianProfile(client, user.id) : undefined;
+    // The owner can choose to show only their Musician Profile on Greywire
+    const musicianOnly = !!musician?.musicianOnly;
 
     res.json({
       user: {
@@ -152,13 +200,14 @@ router.get('/user/:handle', async (req, res) => {
         handle: user.handle,
         firstName: user.first_name,
         lastName: user.last_name,
-        bio: user.bio,
-        workBio: user.work_bio,
+        bio: musicianOnly ? null : user.bio,
+        workBio: musicianOnly ? null : user.work_bio,
         photoPath: user.photo_path,
         createdAt: user.created_at,
         friendCount,
-        skills,
-        jobs
+        skills: musicianOnly ? [] : skills,
+        jobs: musicianOnly ? [] : jobs,
+        musician
       }
     });
   } catch (err) {
@@ -579,6 +628,267 @@ router.delete('/jobs/:jobId', authenticate, async (req, res) => {
   } catch (err) {
     console.error('Error removing job:', err);
     res.status(500).json({ message: 'Failed to remove job' });
+  } finally {
+    client.release();
+  }
+});
+
+// Musician Profile routes exist only on the Greywire site
+const greywireOnly = (req, res, next) => {
+  if (req.site !== 'greywire') {
+    return res.status(404).json({ message: 'Not found' });
+  }
+  next();
+};
+
+const SKILL_LEVELS = ['beginner', 'intermediate', 'advanced', 'professional'];
+
+// Whole number in [min, max], null when blank, or undefined when invalid
+function optionalInt(value, min, max) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < min || n > max) return undefined;
+  return n;
+}
+
+// Validate an instrument's details; returns { error } or the cleaned fields
+function readInstrumentFields(body) {
+  const skillLevel = body.skillLevel || null;
+  if (skillLevel && !SKILL_LEVELS.includes(skillLevel)) {
+    return { error: 'Invalid skill level' };
+  }
+  const yearsPlaying = optionalInt(body.yearsPlaying, 0, 100);
+  if (yearsPlaying === undefined) {
+    return { error: 'Years playing must be a whole number from 0 to 100' };
+  }
+  return { skillLevel, yearsPlaying, isPrimary: !!body.isPrimary };
+}
+
+// Validate a band's details; returns { error } or the cleaned fields
+function readBandFields(body) {
+  const bandName = body.bandName?.trim();
+  if (!bandName) {
+    return { error: 'Band name is required' };
+  }
+  if (bandName.length > 100) {
+    return { error: 'Band name must be 100 characters or fewer' };
+  }
+  const role = body.role?.trim() || null;
+  if (role && role.length > 100) {
+    return { error: 'Role must be 100 characters or fewer' };
+  }
+  const maxYear = new Date().getFullYear() + 1;
+  const startYear = optionalInt(body.startYear, 1900, maxYear);
+  const isCurrent = !!body.isCurrent;
+  const endYear = isCurrent ? null : optionalInt(body.endYear, 1900, maxYear);
+  if (startYear === undefined || endYear === undefined) {
+    return { error: `Years must be between 1900 and ${maxYear}` };
+  }
+  if (startYear && endYear && endYear < startYear) {
+    return { error: 'End year must be after start year' };
+  }
+  return { bandName, role, startYear, endYear, isCurrent };
+}
+
+// Update Musician Profile bio and the musician-only setting
+router.put('/musician', greywireOnly, authenticate, async (req, res) => {
+  const { bio, musicianOnly } = req.body;
+  const client = await getClient();
+
+  try {
+    await client.query(
+      `INSERT INTO musician_profiles (user_id, bio, musician_only)
+       VALUES ($1, $2, $3)
+       ON DUPLICATE KEY UPDATE bio = VALUES(bio), musician_only = VALUES(musician_only)`,
+      [req.user.id, sanitizeHtml(bio || ''), musicianOnly ? 1 : 0]
+    );
+
+    res.json({ musician: await getMusicianProfile(client, req.user.id) });
+  } catch (err) {
+    console.error('Error updating musician profile:', err);
+    res.status(500).json({ message: 'Failed to update musician profile' });
+  } finally {
+    client.release();
+  }
+});
+
+// Add an instrument
+router.post('/musician/instruments', greywireOnly, authenticate, async (req, res) => {
+  const fields = readInstrumentFields(req.body);
+  if (fields.error) {
+    return res.status(400).json({ message: fields.error });
+  }
+  const instrumentId = optionalInt(req.body.instrumentId, 1, 2147483647);
+  if (!instrumentId) {
+    return res.status(400).json({ message: 'Instrument is required' });
+  }
+
+  const client = await getClient();
+  try {
+    const instrument = await client.query('SELECT id FROM instruments WHERE id = $1', [instrumentId]);
+    if (instrument.rowCount === 0) {
+      return res.status(400).json({ message: 'Unknown instrument' });
+    }
+
+    const existing = await client.query(
+      'SELECT id FROM user_instruments WHERE user_id = $1 AND instrument_id = $2',
+      [req.user.id, instrumentId]
+    );
+    if (existing.rowCount > 0) {
+      return res.status(400).json({ message: 'Instrument already added' });
+    }
+
+    // Only one main instrument
+    if (fields.isPrimary) {
+      await client.query('UPDATE user_instruments SET is_primary = 0 WHERE user_id = $1', [req.user.id]);
+    }
+
+    await client.query(
+      `INSERT INTO user_instruments (user_id, instrument_id, skill_level, years_playing, is_primary)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [req.user.id, instrumentId, fields.skillLevel, fields.yearsPlaying, fields.isPrimary ? 1 : 0]
+    );
+
+    res.status(201).json({ musician: await getMusicianProfile(client, req.user.id) });
+  } catch (err) {
+    console.error('Error adding instrument:', err);
+    res.status(500).json({ message: 'Failed to add instrument' });
+  } finally {
+    client.release();
+  }
+});
+
+// Update an instrument's details
+router.put('/musician/instruments/:id', greywireOnly, authenticate, async (req, res) => {
+  const fields = readInstrumentFields(req.body);
+  if (fields.error) {
+    return res.status(400).json({ message: fields.error });
+  }
+
+  const client = await getClient();
+  try {
+    const check = await client.query(
+      'SELECT id FROM user_instruments WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (check.rowCount === 0) {
+      return res.status(404).json({ message: 'Instrument not found' });
+    }
+
+    if (fields.isPrimary) {
+      await client.query('UPDATE user_instruments SET is_primary = 0 WHERE user_id = $1', [req.user.id]);
+    }
+
+    await client.query(
+      `UPDATE user_instruments SET skill_level = $1, years_playing = $2, is_primary = $3
+       WHERE id = $4 AND user_id = $5`,
+      [fields.skillLevel, fields.yearsPlaying, fields.isPrimary ? 1 : 0, req.params.id, req.user.id]
+    );
+
+    res.json({ musician: await getMusicianProfile(client, req.user.id) });
+  } catch (err) {
+    console.error('Error updating instrument:', err);
+    res.status(500).json({ message: 'Failed to update instrument' });
+  } finally {
+    client.release();
+  }
+});
+
+// Remove an instrument
+router.delete('/musician/instruments/:id', greywireOnly, authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      'DELETE FROM user_instruments WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Instrument not found' });
+    }
+
+    res.json({ musician: await getMusicianProfile(client, req.user.id) });
+  } catch (err) {
+    console.error('Error removing instrument:', err);
+    res.status(500).json({ message: 'Failed to remove instrument' });
+  } finally {
+    client.release();
+  }
+});
+
+// Add a band
+router.post('/musician/bands', greywireOnly, authenticate, async (req, res) => {
+  const fields = readBandFields(req.body);
+  if (fields.error) {
+    return res.status(400).json({ message: fields.error });
+  }
+
+  const client = await getClient();
+  try {
+    await client.query(
+      `INSERT INTO user_band_history (user_id, band_name, role, start_year, end_year, is_current)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [req.user.id, fields.bandName, fields.role, fields.startYear, fields.endYear, fields.isCurrent ? 1 : 0]
+    );
+
+    res.status(201).json({ musician: await getMusicianProfile(client, req.user.id) });
+  } catch (err) {
+    console.error('Error adding band:', err);
+    res.status(500).json({ message: 'Failed to add band' });
+  } finally {
+    client.release();
+  }
+});
+
+// Update a band
+router.put('/musician/bands/:id', greywireOnly, authenticate, async (req, res) => {
+  const fields = readBandFields(req.body);
+  if (fields.error) {
+    return res.status(400).json({ message: fields.error });
+  }
+
+  const client = await getClient();
+  try {
+    // Verify ownership (an UPDATE that changes nothing reports 0 rows)
+    const check = await client.query(
+      'SELECT id FROM user_band_history WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (check.rowCount === 0) {
+      return res.status(404).json({ message: 'Band not found' });
+    }
+
+    await client.query(
+      `UPDATE user_band_history
+       SET band_name = $1, role = $2, start_year = $3, end_year = $4, is_current = $5
+       WHERE id = $6 AND user_id = $7`,
+      [fields.bandName, fields.role, fields.startYear, fields.endYear, fields.isCurrent ? 1 : 0, req.params.id, req.user.id]
+    );
+
+    res.json({ musician: await getMusicianProfile(client, req.user.id) });
+  } catch (err) {
+    console.error('Error updating band:', err);
+    res.status(500).json({ message: 'Failed to update band' });
+  } finally {
+    client.release();
+  }
+});
+
+// Remove a band
+router.delete('/musician/bands/:id', greywireOnly, authenticate, async (req, res) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      'DELETE FROM user_band_history WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.user.id]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ message: 'Band not found' });
+    }
+
+    res.json({ musician: await getMusicianProfile(client, req.user.id) });
+  } catch (err) {
+    console.error('Error removing band:', err);
+    res.status(500).json({ message: 'Failed to remove band' });
   } finally {
     client.release();
   }

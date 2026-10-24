@@ -3,6 +3,7 @@ import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import LoadingSpinner from '../components/LoadingSpinner.vue'
 import FlagDialog from '../components/FlagDialog.vue'
+import MusicianProfile from '../components/MusicianProfile.vue'
 import { user } from '@/stores/user.js'
 import { moderationStore } from '@/stores/moderation.js'
 import { isGreywire } from '@/utilities/site.js'
@@ -167,11 +168,14 @@ async function unblockUser() {
       />
 
       <div class="profile-card">
-        <div class="bio-section">
+        <!-- On Greywire the owner can choose to show only their Musician Profile -->
+        <div v-if="!profile.musician?.musicianOnly" class="bio-section">
           <h2>About</h2>
           <div v-if="profile.bio" class="bio-text" v-safe-html="profile.bio"></div>
           <p v-else class="bio-empty">This user hasn't added a bio yet.</p>
         </div>
+
+        <MusicianProfile v-if="isGreywire" :musician="profile.musician" />
 
         <!-- Work history is Prosaurus-only; Greywire profiles are about the music -->
         <template v-if="!isGreywire">
