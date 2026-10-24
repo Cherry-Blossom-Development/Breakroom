@@ -228,7 +228,7 @@ const currentYear = new Date().getFullYear()
 </script>
 
 <template>
-  <section class="musician-profile" aria-labelledby="musician-profile-title">
+  <section class="musician-profile" :class="{ 'read-only': !editable }" aria-labelledby="musician-profile-title">
     <h2 id="musician-profile-title" class="musician-title">Musician Profile</h2>
 
     <div v-if="error" class="musician-error" role="alert">{{ error }}</div>
@@ -289,8 +289,8 @@ const currentYear = new Date().getFullYear()
       <p v-else class="empty-text">{{ editable ? 'No bands yet. Add the bands you play or have played in.' : 'No bands listed yet.' }}</p>
     </div>
 
-    <!-- Music bio -->
-    <div class="musician-block">
+    <!-- Music bio (shown first on public profiles, see .read-only below) -->
+    <div class="musician-block bio-block">
       <div class="block-header">
         <h3>Music Bio</h3>
         <button v-if="editable && !isEditingBio" @click="startBioEdit" class="add-btn">Edit</button>
@@ -402,6 +402,26 @@ const currentYear = new Date().getFullYear()
 }
 
 .musician-profile:last-child {
+  margin-bottom: 0;
+}
+
+/* Public profiles read bio first, then instruments and bands */
+.musician-profile.read-only {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.musician-profile.read-only .musician-title {
+  order: -2;
+  margin-bottom: -6px;
+}
+
+.musician-profile.read-only .bio-block {
+  order: -1;
+}
+
+.musician-profile.read-only .musician-block {
   margin-bottom: 0;
 }
 
