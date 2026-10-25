@@ -5,11 +5,12 @@
 // adds items after Community, e.g. Sign in or Logout.
 const SITE = 'https://greywirestudio.com/'
 const links = [
-  { label: 'Home', href: SITE },
+  { label: 'Home', href: SITE, class: 'gw-home' },
   { label: 'Linework', href: SITE + 'linework.html' },
   { label: 'Flashover', href: SITE + 'flashover.html' },
   { label: 'Switchyard', href: SITE + 'switchyard.html' },
   { label: 'Ideas', href: SITE + 'ideas.html' },
+  { label: 'Your Opinion', href: SITE + 'opinion.html' },
   { label: 'About', href: SITE + 'about.html' },
 ]
 </script>
@@ -22,7 +23,7 @@ const links = [
         <span class="gw-brand-name">Greywire <span>Studio</span></span>
       </a>
       <nav class="gw-links" aria-label="Greywire Studio">
-        <a v-for="link in links" :key="link.label" :href="link.href">{{ link.label }}</a>
+        <a v-for="link in links" :key="link.label" :href="link.href" :class="link.class">{{ link.label }}</a>
         <RouterLink to="/" aria-current="page">Community</RouterLink>
         <slot />
       </nav>

@@ -844,6 +844,17 @@ body {
   }
 }
 
+/* Narrower still: the logo already links home, so drop Home and close up the gaps */
+@media (max-width: 1000px) {
+  .gw-site-nav-app .gw-links {
+    column-gap: 10px;
+  }
+
+  .gw-site-nav-app .gw-links .gw-home {
+    display: none;
+  }
+}
+
 /* Tablet & mobile: no room for the bar; the top bar links back instead */
 @media (max-width: 768px) {
   .gw-site-nav-app {
