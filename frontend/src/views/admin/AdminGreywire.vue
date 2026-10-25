@@ -131,11 +131,15 @@
         </table>
       </div>
     </div>
+
+    <!-- greywirestudio.com Your Opinion surveys -->
+    <GreywireSurveyResults />
   </section>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue'
+import GreywireSurveyResults from '@/components/GreywireSurveyResults.vue'
 
 const pedals = ref([])
 const loadingPedals = ref(true)

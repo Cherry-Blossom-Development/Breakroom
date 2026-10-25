@@ -5,6 +5,7 @@ const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { checkPermission } = require('../middleware/checkPermission');
 const { normalizeSerial, joinDefaultRooms } = require('../utilities/greywire');
+const { SURVEYS } = require('../utilities/surveys');
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
@@ -283,6 +284,64 @@ router.delete('/grants/:userId', async (req, res) => {
   } catch (err) {
     console.error('Error removing Greywire grant:', err);
     res.status(500).json({ message: 'Failed to remove grant' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * GET /api/admin/greywire/surveys
+ * Each website survey with its questions and response counts.
+ */
+router.get('/surveys', async (req, res) => {
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      `SELECT survey, COUNT(*) AS total, SUM(is_valid) AS valid FROM survey_responses GROUP BY survey`
+    );
+    const counts = Object.fromEntries(result.rows.map(r => [r.survey, r]));
+    const surveys = Object.entries(SURVEYS).map(([slug, s]) => ({
+      slug,
+      title: s.title,
+      questions: s.questions,
+      total: Number(counts[slug]?.total || 0),
+      valid: Number(counts[slug]?.valid || 0),
+    }));
+    res.json({ surveys });
+  } catch (err) {
+    console.error('Error loading surveys:', err);
+    res.status(500).json({ message: 'Failed to load surveys' });
+  } finally {
+    client.release();
+  }
+});
+
+/**
+ * GET /api/admin/greywire/surveys/:slug/responses
+ * Every submission, newest first, invalid ones included (is_valid = 0, with
+ * the id of the submission that replaced it). Hashes stay in the database.
+ */
+router.get('/surveys/:slug/responses', async (req, res) => {
+  if (!Object.hasOwn(SURVEYS, req.params.slug)) return res.status(404).json({ message: 'Survey not found' });
+  const client = await getClient();
+  try {
+    const result = await client.query(
+      `SELECT id, answers, is_valid, superseded_by, created_at
+       FROM survey_responses WHERE survey = $1 ORDER BY id DESC`,
+      [req.params.slug]
+    );
+    res.json({
+      responses: result.rows.map(r => ({
+        id: r.id,
+        answers: typeof r.answers === 'string' ? JSON.parse(r.answers) : r.answers,
+        isValid: !!r.is_valid,
+        supersededBy: r.superseded_by,
+        createdAt: r.created_at,
+      })),
+    });
+  } catch (err) {
+    console.error('Error loading survey responses:', err);
+    res.status(500).json({ message: 'Failed to load responses' });
   } finally {
     client.release();
   }

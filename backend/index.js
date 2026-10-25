@@ -126,6 +126,7 @@ const gamesRoutes = require('./routes/games');
 const adminGamesRoutes = require('./routes/admin-games');
 const greywireRoutes = require('./routes/greywire');
 const adminGreywireRoutes = require('./routes/admin-greywire');
+const surveysRoutes = require('./routes/surveys');
 const { getS3Url } = require('./utilities/aws-s3');
 
 
@@ -193,6 +194,7 @@ app.use('/api/games', gamesRoutes);
 app.use('/api/admin/games', adminGamesRoutes);
 app.use('/api/greywire', greywireRoutes);
 app.use('/api/admin/greywire', adminGreywireRoutes);
+app.use('/api/surveys', surveysRoutes);
 const emailNannyRoutes = require('./routes/emailnanny');
 app.use('/api/emailnanny', emailNannyRoutes);
 
