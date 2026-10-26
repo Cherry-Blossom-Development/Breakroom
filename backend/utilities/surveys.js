@@ -144,6 +144,67 @@ const SURVEYS = {
       { id: 'comments', type: 'text', label: 'Anything else about your gear?', maxLength: 2000 },
     ],
   },
+  sounds: {
+    title: 'What sounds cool to you',
+    page: 'survey-sounds.html',
+    questions: [
+      {
+        id: 'sounds', type: 'multi', label: 'Which guitar sounds do you love?',
+        options: [
+          ['clean', 'Clean and sparkly'], ['edge', 'Just breaking up'], ['crunch', 'Classic rock crunch'],
+          ['high-gain', 'High-gain metal'], ['fuzz', 'Thick, woolly fuzz'], ['ambient', 'Ambient and washy'],
+          ['twang', 'Twangy country'], ['funk', 'Funky clean'], ['lo-fi', 'Lo-fi and broken'],
+        ],
+      },
+      {
+        id: 'gain', type: 'single', label: 'How much gain do you usually use?',
+        options: [
+          ['none', 'None, I play clean'], ['little', 'A little, just breaking up'], ['medium', 'Medium crunch'],
+          ['lots', 'A lot, high gain'], ['fuzz', 'Fuzz on everything'],
+        ],
+      },
+      {
+        id: 'eras', type: 'multi', label: 'Which classic sounds would you want from a pedal?',
+        options: [
+          ['60s-fuzz', '60s fuzz'], ['70s-rock', '70s rock distortion'], ['80s-metal', '80s hard rock and metal'],
+          ['90s-grunge', '90s grunge'], ['modern-metal', 'Modern high gain'], ['blues', 'Blues overdrive'],
+          ['shoegaze', 'Shoegaze wall of sound'], ['surf', 'Surf tremolo and reverb'],
+        ],
+      },
+      {
+        id: 'pedals', type: 'multi', label: 'Which pedals would you like us to make next?',
+        options: [
+          ['tap-changer', 'Tap Changer clean boost'], ['three-phase', 'Three Phase phaser'],
+          ['rolling-blackout', 'Rolling Blackout tremolo'], ['double-circuit', 'Double Circuit chorus'],
+          ['overdrive', 'Overdrive'], ['fuzz', 'Fuzz'], ['octave-fuzz', 'Octave fuzz'],
+          ['compressor', 'Compressor'], ['envelope', 'Envelope filter'],
+        ],
+      },
+      {
+        id: 'linked', type: 'single', label: 'How do you feel about pedals that change settings by themselves for each part of a song?',
+        options: [
+          ['not-for-me', 'Not for me'], ['maybe', 'Could be handy'], ['want', 'I want that'],
+          ['must', 'I\'d buy a pedal for that alone'],
+        ],
+      },
+      {
+        id: 'analog', type: 'single', label: 'How much does analog matter to you?',
+        options: [
+          ['only', 'Analog only'], ['prefer', 'I prefer analog'], ['dont-care', 'I don\'t mind, if it sounds good'],
+          ['digital', 'I prefer digital for its flexibility'],
+        ],
+      },
+      {
+        id: 'knobs', type: 'single', label: 'How many knobs do you like on a pedal?',
+        options: [
+          ['one-two', 'One or two, keep it simple'], ['three-four', 'Three or four'],
+          ['lots', 'Lots, I like to tweak'], ['app', 'A few, with deeper settings in an app'],
+        ],
+      },
+      { id: 'tone', type: 'text', label: 'Name a guitar tone you love: a player, a song or an album', maxLength: 300 },
+      { id: 'comments', type: 'text', label: 'Anything else you\'d like to hear from a pedal?', maxLength: 2000 },
+    ],
+  },
 };
 
 /**
