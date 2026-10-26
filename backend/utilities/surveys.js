@@ -71,6 +71,79 @@ const SURVEYS = {
       { id: 'comments', type: 'text', label: 'Anything else you\'d like us to know?', maxLength: 2000 },
     ],
   },
+  gear: {
+    title: 'What gear do you use',
+    page: 'survey-gear.html',
+    questions: [
+      {
+        id: 'guitars', type: 'multi', label: 'What do you mostly play?',
+        options: [
+          ['single-coil', 'Single-coil guitar (Strat or Tele style)'], ['humbucker', 'Humbucker solid body (Les Paul or SG style)'],
+          ['hollow', 'Semi-hollow or hollow body'], ['extended', '7-, 8- or baritone guitar'], ['bass', 'Bass'],
+          ['acoustic', 'Acoustic with a pickup'], ['other', 'Other'],
+        ],
+      },
+      {
+        id: 'amp', type: 'multi', label: 'What do you play through?',
+        options: [
+          ['tube', 'Tube amp'], ['solid-state', 'Solid-state amp'], ['modeling-amp', 'Modeling amp'],
+          ['floor-modeler', 'Floor modeler or multi-effects unit'], ['computer', 'Computer plugins'],
+          ['direct', 'Straight into a PA or audio interface'], ['headphones', 'Headphone amp'],
+        ],
+      },
+      {
+        id: 'pedal-count', type: 'single', label: 'How many pedals are on your board?',
+        options: [['none', 'None'], ['1-3', '1–3'], ['4-7', '4–7'], ['8-12', '8–12'], ['13-plus', '13 or more']],
+      },
+      {
+        id: 'effects', type: 'multi', label: 'Which effects do you use?',
+        options: [
+          ['overdrive', 'Overdrive'], ['distortion', 'Distortion'], ['fuzz', 'Fuzz'], ['boost', 'Boost'],
+          ['compressor', 'Compressor'], ['eq', 'EQ'], ['noise-gate', 'Noise gate'], ['wah', 'Wah or envelope filter'],
+          ['chorus', 'Chorus'], ['phaser', 'Phaser'], ['flanger', 'Flanger'], ['tremolo', 'Tremolo'],
+          ['pitch', 'Octave or pitch shifter'], ['delay', 'Delay'], ['reverb', 'Reverb'], ['looper', 'Looper'],
+          ['tuner', 'Tuner'],
+        ],
+      },
+      {
+        id: 'power', type: 'single', label: 'How do you power your pedals?',
+        options: [
+          ['battery', 'Batteries'], ['daisy-chain', 'One adapter with a daisy chain'],
+          ['isolated', 'Isolated power supply'], ['none', 'Not needed (no pedals, or one unit)'],
+        ],
+      },
+      {
+        id: 'switching', type: 'single', label: 'How do you change sounds during a song?',
+        options: [
+          ['tap', 'Stomp individual pedals'], ['switcher', 'Loop switcher or controller'],
+          ['presets', 'Presets on a multi-effects unit'], ['dont', 'I don\'t change sounds mid-song'],
+        ],
+      },
+      {
+        id: 'midi', type: 'single', label: 'Do you use MIDI with your gear?',
+        options: [
+          ['unfamiliar', 'Not sure what that is'], ['no', 'I know it, but don\'t use it'],
+          ['some', 'Yes, for one or two things'], ['central', 'Yes, it runs my whole rig'],
+        ],
+      },
+      {
+        id: 'problems', type: 'multi', label: 'What bugs you most about your setup?',
+        options: [
+          ['tap-dancing', 'Too much tap dancing'], ['recall', 'Getting settings right for each song'],
+          ['size', 'Board too big or heavy'], ['noise', 'Noise or hum'], ['tone-loss', 'Losing tone with long cables or many pedals'],
+          ['power', 'Power problems'], ['cost', 'Cost'], ['nothing', 'Nothing, it\'s perfect'],
+        ],
+      },
+      {
+        id: 'spend', type: 'single', label: 'What do you usually spend on one pedal?',
+        options: [
+          ['under-50', 'Under $50'], ['50-100', '$50–$100'], ['100-200', '$100–$200'],
+          ['200-300', '$200–$300'], ['300-plus', 'More than $300'],
+        ],
+      },
+      { id: 'comments', type: 'text', label: 'Anything else about your gear?', maxLength: 2000 },
+    ],
+  },
 };
 
 /**
