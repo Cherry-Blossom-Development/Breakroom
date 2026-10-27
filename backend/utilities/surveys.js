@@ -205,6 +205,82 @@ const SURVEYS = {
       { id: 'comments', type: 'text', label: 'Anything else you\'d like to hear from a pedal?', maxLength: 2000 },
     ],
   },
+  buying: {
+    title: 'How you buy gear',
+    page: 'survey-buying.html',
+    questions: [
+      {
+        id: 'where', type: 'multi', label: 'Where do you buy pedals?',
+        options: [
+          ['local-store', 'A local music store'], ['online-store', 'Online music retailers'], ['amazon', 'Amazon'],
+          ['reverb', 'Reverb or other gear marketplaces'], ['maker', 'Direct from the maker\'s website'],
+          ['local-used', 'Used, locally (classifieds, Marketplace)'], ['trade', 'Trades and swaps'],
+        ],
+      },
+      {
+        id: 'condition', type: 'single', label: 'New or used?',
+        options: [['new', 'Mostly new'], ['mix', 'About half and half'], ['used', 'Mostly used']],
+      },
+      {
+        id: 'discover', type: 'multi', label: 'Where do you hear about new gear?',
+        options: [
+          ['youtube', 'YouTube demos and reviews'], ['instagram', 'Instagram'], ['tiktok', 'TikTok'],
+          ['forums', 'Forums and Reddit'], ['friends', 'Friends and bandmates'], ['store-staff', 'Music store staff'],
+          ['artists', 'Players I follow'], ['print-podcasts', 'Magazines and podcasts'],
+        ],
+      },
+      {
+        id: 'decide', type: 'multi', label: 'What makes you buy a pedal?',
+        options: [
+          ['demo', 'Hearing a good demo'], ['try', 'Trying it myself'], ['reviews', 'Reviews and ratings'],
+          ['price', 'A good price or a sale'], ['recommend', 'A friend recommends it'], ['artist', 'A player I like uses it'],
+          ['build', 'Build quality and warranty'], ['small-maker', 'Supporting a small maker'],
+        ],
+      },
+      {
+        id: 'preorder', type: 'single', label: 'Would you preorder a pedal from a new, small maker?',
+        options: [
+          ['no', 'No, I wait until it\'s out and reviewed'], ['discount', 'Maybe, for a preorder discount'],
+          ['refundable', 'Yes, if I could cancel for a refund'], ['yes', 'Yes, if I liked the demos'],
+        ],
+      },
+      {
+        id: 'crowdfund', type: 'single', label: 'Have you backed a crowdfunding campaign for gear?',
+        options: [
+          ['never', 'No, and I wouldn\'t'], ['maybe', 'No, but I might'], ['once', 'Once'], ['several', 'More than once'],
+        ],
+      },
+      {
+        id: 'controller-price', type: 'single', label: 'What would you pay for a controller that switches your pedals for each part of a song?',
+        options: [
+          ['wouldnt-buy', 'I wouldn\'t buy one'], ['under-100', 'Under $100'], ['100-200', '$100–200'],
+          ['200-300', '$200–300'], ['300-plus', 'Over $300'],
+        ],
+      },
+      {
+        id: 'bundle', type: 'single', label: 'Which would you rather buy?',
+        options: [
+          ['single', 'One pedal at a time'], ['pair', 'A pair of pedals at a discount'],
+          ['set', 'A full set with the controller, at a bigger discount'], ['no-preference', 'No preference'],
+        ],
+      },
+      {
+        id: 'warranty', type: 'single', label: 'How much does the warranty matter to you?',
+        options: [
+          ['not-much', 'Not much, pedals rarely break'], ['one-year', 'A year is fine'], ['two-three', 'Two or three years'],
+          ['lifetime', 'A lifetime warranty would win me over'],
+        ],
+      },
+      {
+        id: 'kit', type: 'single', label: 'Would you build a pedal yourself from a kit?',
+        options: [
+          ['no', 'No, I want it ready to play'], ['maybe', 'Maybe, if it were simple'], ['yes', 'Yes, that sounds fun'],
+          ['already', 'I already build pedals'],
+        ],
+      },
+      { id: 'comments', type: 'text', label: 'Anything else about how you buy gear?', maxLength: 2000 },
+    ],
+  },
 };
 
 /**
