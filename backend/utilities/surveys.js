@@ -281,6 +281,70 @@ const SURVEYS = {
       { id: 'comments', type: 'text', label: 'Anything else about how you buy gear?', maxLength: 2000 },
     ],
   },
+  pedalboard: {
+    title: 'Your pedalboard',
+    page: 'survey-pedalboard.html',
+    questions: [
+      {
+        id: 'room', type: 'single', label: 'How much room is left on your board?',
+        options: [
+          ['no-board', 'I don\'t use a board'], ['full', 'None, it\'s full'], ['little', 'Room for one more'],
+          ['plenty', 'Plenty of room'],
+        ],
+      },
+      {
+        id: 'size', type: 'single', label: 'What size of pedal do you prefer?',
+        options: [
+          ['mini', 'Mini, as small as possible'], ['standard', 'Standard, like most pedals'],
+          ['bigger', 'Bigger is fine if it\'s easier to use'], ['dont-mind', 'I don\'t mind'],
+        ],
+      },
+      {
+        id: 'jacks', type: 'single', label: 'Where do you want the jacks?',
+        options: [['top', 'On top'], ['sides', 'On the sides'], ['dont-mind', 'I don\'t mind']],
+      },
+      {
+        id: 'bypass', type: 'single', label: 'True bypass or buffered bypass?',
+        options: [
+          ['true', 'True bypass only'], ['buffer-ok', 'A good buffer is fine'], ['buffer', 'I prefer buffered'],
+          ['dont-know', 'I don\'t know the difference'],
+        ],
+      },
+      {
+        id: 'stereo', type: 'single', label: 'Do you play in stereo?',
+        options: [
+          ['mono', 'No, always mono'], ['someday', 'Not yet, but I\'d like to'], ['sometimes', 'Sometimes'],
+          ['always', 'Always'],
+        ],
+      },
+      {
+        id: 'phone', type: 'single', label: 'Which phone do you use?',
+        options: [['iphone', 'iPhone'], ['android', 'Android'], ['other', 'Something else, or no smartphone']],
+      },
+      {
+        id: 'phone-place', type: 'single', label: 'If an app ran your board, where would your phone go on stage?',
+        options: [
+          ['board-mount', 'In a mount on the board'], ['stand', 'On a mic stand or music stand'],
+          ['pocket', 'In my pocket or on the amp'], ['not-on-stage', 'I wouldn\'t use a phone on stage'],
+        ],
+      },
+      {
+        id: 'looks', type: 'multi', label: 'What looks do you like on a pedal?',
+        options: [
+          ['bare', 'Bare or brushed metal'], ['bold-color', 'Bold, solid colors'], ['artwork', 'Detailed artwork'],
+          ['minimal', 'Dark and minimal'], ['vintage', 'Vintage and retro'], ['matching', 'A matching look across a series'],
+        ],
+      },
+      {
+        id: 'leds', type: 'single', label: 'How bright should a pedal\'s lights be?',
+        options: [
+          ['dim', 'Dim, bright LEDs blind me'], ['normal', 'Normal'], ['bright', 'Bright enough to see outdoors'],
+          ['adjustable', 'Adjustable'],
+        ],
+      },
+      { id: 'comments', type: 'text', label: 'Anything else about your board, or what a pedal should look like?', maxLength: 2000 },
+    ],
+  },
 };
 
 /**
