@@ -82,7 +82,7 @@ router.get('/', authenticate, requireAdmin, async (req, res) => {
               COUNT(fu.user_id) AS user_count
        FROM features f
        LEFT JOIN feature_users fu ON fu.feature_id = f.id
-       GROUP BY f.id
+       GROUP BY f.id, f.feature_key, f.name, f.description, f.is_active, f.created_at
        ORDER BY f.created_at DESC`
     );
     res.json({ features: result.rows });

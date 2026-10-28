@@ -47,7 +47,7 @@ router.get('/mine', authenticateToken, async (req, res) => {
        JOIN bands b ON b.id = sl.band_id
        LEFT JOIN shortlist_sessions ss ON ss.shortlist_id = sl.id
        WHERE b.site = $2
-       GROUP BY sl.id
+       GROUP BY sl.id, sl.name, sl.band_id, b.name, sl.created_by, sl.created_at
        ORDER BY b.name, sl.name`,
       [req.user.id, req.site]
     );
@@ -166,7 +166,8 @@ router.get('/:id', authenticateToken, async (req, res) => {
        LEFT JOIN session_ratings sr ON sr.session_id = s.id
        LEFT JOIN session_comments sc ON sc.session_id = s.id AND sc.is_deleted = 0
        WHERE ss.shortlist_id = $1
-       GROUP BY s.id, ss.added_by, ss.added_at
+       GROUP BY s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,
+                s.band_id, sb.name, s.duration_ms, u.handle, ss.added_by, ss.added_at
        ORDER BY ss.added_at DESC`,
       [req.params.id, req.user.id]
     );

@@ -98,7 +98,8 @@ router.get('/', authenticateToken, async (req, res) => {
        LEFT JOIN instruments i ON i.id = s.instrument_id
        LEFT JOIN session_ratings sr ON sr.session_id = s.id
        WHERE s.user_id = $1 AND s.site = $3
-       GROUP BY s.id
+       GROUP BY s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,
+                s.band_id, b.name, s.instrument_id, i.name, s.duration_ms
        ORDER BY s.recorded_at DESC, s.uploaded_at DESC`,
       [req.user.id, req.user.id, req.site]
     );
@@ -133,7 +134,8 @@ router.get('/band-members', authenticateToken, async (req, res) => {
        LEFT JOIN users u ON u.id = s.user_id
        LEFT JOIN session_ratings sr ON sr.session_id = s.id
        WHERE s.user_id != $1 AND s.site = $3
-       GROUP BY s.id
+       GROUP BY s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,
+                s.band_id, b.name, s.instrument_id, i.name, s.duration_ms, u.handle
        ORDER BY s.recorded_at DESC, s.uploaded_at DESC`,
       [req.user.id, req.user.id, req.site]
     );
@@ -593,7 +595,8 @@ router.patch('/:id', authenticateToken, async (req, res) => {
        LEFT JOIN instruments i ON i.id = s.instrument_id
        LEFT JOIN session_ratings sr ON sr.session_id = s.id
        WHERE s.id = $1
-       GROUP BY s.id`,
+       GROUP BY s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,
+                s.band_id, b.name, s.instrument_id, i.name, s.duration_ms`,
       [req.params.id, req.user.id]
     );
     res.json({ session: updated.rows[0] });
@@ -622,7 +625,8 @@ router.get('/:id/public', async (req, res) => {
        LEFT JOIN instruments i ON i.id = s.instrument_id
        LEFT JOIN session_ratings sr ON sr.session_id = s.id
        WHERE s.id = $1
-       GROUP BY s.id, u.handle, i.name`,
+       GROUP BY s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at,
+                s.instrument_id, i.name, s.duration_ms, u.handle`,
       [req.params.id]
     );
     if (result.rowCount === 0) return res.status(404).json({ message: 'Session not found' });

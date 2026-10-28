@@ -41,7 +41,7 @@ router.get('/', authenticate, checkPermission('admin_access'), async (req, res) 
       `SELECT g.id, g.game_key, g.name, COUNT(ga.user_id) AS admin_count
        FROM games g
        LEFT JOIN game_admins ga ON ga.game_id = g.id
-       GROUP BY g.id
+       GROUP BY g.id, g.game_key, g.name
        ORDER BY g.name`
     );
     res.json({ games: result.rows });
