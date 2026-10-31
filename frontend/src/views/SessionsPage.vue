@@ -215,6 +215,7 @@ async function loadBands() {
     const data = await res.json()
     if (!res.ok) throw new Error(data.message)
     bands.value = data.bands
+    resolvePracticeBand()
   } catch (err) {
     bandsError.value = err.message
   } finally {
@@ -497,6 +498,8 @@ const uploadRenameChoice = ref('keep') // 'keep' | 'rename' — upload mode only
 async function chooseRecordMode(mode) {
   recordMode.value = mode
   if (uploadBandId.value) return // band already resolved; watch(uploadBandId) already populated suggestions
+  if (practiceBandId.value === NO_BAND) return
+  if (practiceBandId.value !== null) { uploadBandId.value = practiceBandId.value; return }
   try {
     const res = await authFetch('/api/sessions/practice-suggestions')
     const data = await res.json()
@@ -845,7 +848,7 @@ function defaultName() {
 // --- Year tabs ---
 const availableYears = computed(() => {
   const years = new Set()
-  for (const s of sessions.list) { const y = sessionYear(s); if (y) years.add(y) }
+  for (const s of practiceSessions.value) { const y = sessionYear(s); if (y) years.add(y) }
   return Array.from(years).sort((a, b) => b - a)
 })
 
@@ -854,8 +857,8 @@ const bandSessions = computed(() => sessions.list.filter(s => s.session_type ===
 
 const yearGroups = computed(() => {
   const list = (selectedYear.value
-    ? bandSessions.value.filter(s => sessionYear(s) === selectedYear.value)
-    : bandSessions.value)
+    ? practiceSessions.value.filter(s => sessionYear(s) === selectedYear.value)
+    : practiceSessions.value)
 
   const byYear = {}
   for (const s of list) {
@@ -924,6 +927,8 @@ async function handleUpload() {
     const nameToUse = keepFilename ? stripExtension(selectedFile.value.name) : (sessionName.value || defaultName())
     const dateToUse = keepFilename ? null : (recordedAt.value || null)
     await sessions.upload(selectedFile.value, nameToUse, dateToUse, uploadBandId.value || null)
+    // The form's band can differ from the picker; follow it so the new recording is visible
+    if (activeBands.value.length > 0) selectPracticeBand(uploadBandId.value || NO_BAND)
     resetRecordMode()
   } catch (err) { handleUploadError(err, uploadError) }
   finally { uploading.value = false }
@@ -987,7 +992,6 @@ const indivYearGroups = computed(() => {
 // --- Band Members sessions ---
 const bandMemberSessions = ref([])
 const bandMemberLoaded = ref(false)
-const bandMemberBandFilter = ref('')
 const bandMemberSelectedYear = ref(null)
 const bmRatingPopupId = ref(null)
 
@@ -1004,20 +1008,9 @@ async function loadBandMemberSessions() {
 }
 
 const filteredBandMemberSessions = computed(() => {
-  if (!bandMemberBandFilter.value) return bandMemberSessions.value
-  return bandMemberSessions.value.filter(s => String(s.band_id) === String(bandMemberBandFilter.value))
-})
-
-const bandMemberBands = computed(() => {
-  const seen = new Set()
-  const result = []
-  for (const s of bandMemberSessions.value) {
-    if (s.band_id && !seen.has(s.band_id)) {
-      seen.add(s.band_id)
-      result.push({ id: s.band_id, name: s.band_name })
-    }
-  }
-  return result.sort((a, b) => a.name.localeCompare(b.name))
+  if (practiceBandId.value === null) return bandMemberSessions.value
+  // Other members' recordings always belong to a band, so "No band" has none (see /sessions/band-members)
+  return bandMemberSessions.value.filter(s => String(s.band_id) === String(practiceBandId.value))
 })
 
 const bandMemberAvailableYears = computed(() => {
@@ -1093,29 +1086,109 @@ async function saveInstrument(session, value) {
 
 const activeBands = computed(() => bands.value.filter(b => b.status === 'active'))
 
+// --- Band picker ---
+// Band Practice and Individual > Band Members share one picker. Its value is an active
+// band's id or NO_BAND. It stays null until bands load (or if they fail), meaning unfiltered.
+const NO_BAND = 'none'
+const PRACTICE_BAND_KEY = 'sessions.practiceBandId'
+const practiceBandId = ref(null)
+const practiceBandReady = ref(false)
+
+const pickedBand = computed(() => activeBands.value.find(b => b.id === practiceBandId.value) || null)
+
+function selectPracticeBand(value) {
+  practiceBandId.value = value
+  localStorage.setItem(PRACTICE_BAND_KEY, String(value))
+}
+
+const practiceBandPick = computed({ get: () => practiceBandId.value, set: selectPracticeBand })
+
+// Use the remembered band if it's still valid, otherwise the first active band. Someone with
+// no bands sees everything under NO_BAND; that isn't remembered, so a first band takes over.
+function resolvePracticeBand() {
+  const ids = activeBands.value.map(b => b.id)
+  if (ids.includes(practiceBandId.value)) return
+  if (ids.length === 0) { practiceBandId.value = NO_BAND; return }
+  const saved = localStorage.getItem(PRACTICE_BAND_KEY)
+  if (saved === NO_BAND) practiceBandId.value = NO_BAND
+  else practiceBandId.value = ids.includes(Number(saved)) ? Number(saved) : ids[0]
+}
+
+// "No band" also holds recordings from a band the user has left, which no entry would otherwise reach
+const practiceSessions = computed(() => {
+  if (practiceBandId.value === null) return bandSessions.value
+  if (practiceBandId.value === NO_BAND) {
+    return bandSessions.value.filter(s => !activeBands.value.some(b => String(b.id) === String(s.band_id)))
+  }
+  return bandSessions.value.filter(s => String(s.band_id) === String(practiceBandId.value))
+})
+
+const practiceEmptyMessage = computed(() => {
+  if (pickedBand.value) return `There are currently no recordings for ${pickedBand.value.name}.`
+  if (activeBands.value.length > 0) return 'You have no recordings without a band.'
+  return 'No sessions yet. Upload a recording above.'
+})
+
+const bandMemberEmptyMessage = computed(() => {
+  if (pickedBand.value) return `There are currently no recordings from members of ${pickedBand.value.name}.`
+  if (activeBands.value.length > 0) return "Band members' recordings always belong to a band. Pick one above to see them."
+  return 'No band member recordings yet.'
+})
+
+// Never leave a year selected that has no recordings: the band may have changed, or the
+// year's last recording may have been deleted.
+function keepYearValid(year, years) {
+  watch(years, list => {
+    if (year.value !== null && !list.includes(year.value)) year.value = list[0] ?? null
+  })
+}
+keepYearValid(selectedYear, availableYears)
+keepYearValid(indivSelectedYear, indivAvailableYears)
+keepYearValid(bandMemberSelectedYear, bandMemberAvailableYears)
+
+// What's open or playing belongs to the previous band
+watch(practiceBandId, () => {
+  expandedShortlistId.value = null
+  shortlistDetail.value = null
+  commentsOpenSessionId.value = null
+  shortlistsOpenOverride.value = null
+  cancelNewShortlist()
+  if (playingId.value !== null) {
+    audioEl.value?.pause()
+    playingId.value = null
+    isPlaying.value = false
+  }
+})
+
 // --- Shortlists ---
-const shortlistsBandFilter = ref('')
 const expandedShortlistId = ref(null)
 const shortlistDetail = ref(null) // { shortlist, sessions } for the expanded shortlist
 const shortlistDetailLoading = ref(false)
 const newShortlistName = ref('')
-const newShortlistBandId = ref('')
+const creatingShortlist = ref(false)
+// Closed when the band has no shortlists, open when it has some, until the user toggles it
+const shortlistsOpenOverride = ref(null)
+const shortlistsOpen = computed(() => shortlistsOpenOverride.value ?? filteredShortlists.value.length > 0)
 const renamingShortlistId = ref(null)
 const renameShortlistValue = ref('')
 const commentsOpenSessionId = ref(null)
 
 const filteredShortlists = computed(() => {
-  return shortlistsBandFilter.value
-    ? shortlists.list.filter(sl => String(sl.band_id) === String(shortlistsBandFilter.value))
-    : shortlists.list
+  return practiceBandId.value === null
+    ? shortlists.list
+    : shortlists.list.filter(sl => String(sl.band_id) === String(practiceBandId.value))
 })
 
+function cancelNewShortlist() {
+  creatingShortlist.value = false
+  newShortlistName.value = ''
+}
+
 async function createShortlistFromCard() {
-  const bandId = newShortlistBandId.value || (activeBands.value[0] && activeBands.value[0].id)
-  if (!newShortlistName.value.trim() || !bandId) return
+  if (!newShortlistName.value.trim() || !pickedBand.value) return
   try {
-    await shortlists.create(parseInt(bandId, 10), newShortlistName.value.trim())
-    newShortlistName.value = ''
+    await shortlists.create(pickedBand.value.id, newShortlistName.value.trim())
+    cancelNewShortlist()
   } catch (err) {
     console.error('Failed to create shortlist:', err)
   }
@@ -1488,10 +1561,11 @@ async function handleMashupUpload() {
 onMounted(async () => {
   sessions.reset()
   shortlists.reset()
-  await Promise.all([sessions.load(), loadAudioDefaults(), registerDevice(), shortlists.load()])
+  await Promise.all([sessions.load(), loadAudioDefaults(), registerDevice(), shortlists.load(), loadBands()])
   if (availableYears.value.length > 0) selectedYear.value = availableYears.value[0]
+  practiceBandReady.value = true
   document.addEventListener('click', closeRatingPopup)
-  await Promise.all([loadBands(), loadInstruments(), loadBandMemberSessions()])
+  await Promise.all([loadInstruments(), loadBandMemberSessions()])
   await refreshMicDevices()
 })
 </script>
@@ -1951,25 +2025,26 @@ onMounted(async () => {
 
       <!-- Band Members -->
       <div class="indiv-section-heading">Band Members</div>
+      <div v-if="activeBands.length > 0" class="band-picker">
+        <label class="band-picker-label" for="band-picker-members">Band</label>
+        <select id="band-picker-members" v-model="practiceBandPick" class="bm-band-select">
+          <option v-for="b in activeBands" :key="b.id" :value="b.id">{{ b.name }}</option>
+          <option :value="NO_BAND">No band</option>
+        </select>
+      </div>
       <div class="card sessions-card">
         <div class="sessions-header">
           <h2 class="card-title">Band Members' Recordings <span class="count">({{ filteredBandMemberSessions.length }})</span></h2>
-          <div class="bm-filters">
-            <select v-model="bandMemberBandFilter" class="bm-band-select">
-              <option value="">All Bands</option>
-              <option v-for="b in bandMemberBands" :key="b.id" :value="b.id">{{ b.name }}</option>
-            </select>
-            <div v-if="bandMemberAvailableYears.length > 0" class="year-tabs">
-              <button class="year-tab" :class="{ active: bandMemberSelectedYear === null }" @click="bandMemberSelectedYear = null">All</button>
-              <button v-for="year in bandMemberAvailableYears" :key="year"
-                      class="year-tab" :class="{ active: bandMemberSelectedYear === year }"
-                      @click="bandMemberSelectedYear = year">{{ year }}</button>
-            </div>
+          <div v-if="bandMemberAvailableYears.length > 0" class="year-tabs">
+            <button class="year-tab" :class="{ active: bandMemberSelectedYear === null }" @click="bandMemberSelectedYear = null">All</button>
+            <button v-for="year in bandMemberAvailableYears" :key="year"
+                    class="year-tab" :class="{ active: bandMemberSelectedYear === year }"
+                    @click="bandMemberSelectedYear = year">{{ year }}</button>
           </div>
         </div>
 
         <div v-if="filteredBandMemberSessions.length === 0" class="empty-state">
-          No band member recordings yet.
+          {{ bandMemberEmptyMessage }}
         </div>
 
         <div v-else>
@@ -2503,6 +2578,13 @@ onMounted(async () => {
 
     <!-- Upload Card (Band Practice) -->
     <template v-if="activeTab === 'band'">
+    <div v-if="activeBands.length > 0" class="band-picker">
+      <label class="band-picker-label" for="band-picker-practice">Band</label>
+      <select id="band-picker-practice" v-model="practiceBandPick" class="bm-band-select">
+        <option v-for="b in activeBands" :key="b.id" :value="b.id">{{ b.name }}</option>
+        <option :value="NO_BAND">No band</option>
+      </select>
+    </div>
     <div class="card upload-card">
       <h2 class="card-title">New Recording</h2>
       <div class="upload-form">
@@ -2608,25 +2690,19 @@ onMounted(async () => {
     </div>
 
     <!-- Shortlists -->
-    <div class="card shortlists-card">
-      <div class="sessions-header">
-        <h2 class="card-title">Shortlists <span class="count">({{ filteredShortlists.length }})</span></h2>
-        <select v-if="activeBands.length > 1" v-model="shortlistsBandFilter" class="bm-band-select">
-          <option value="">All Bands</option>
-          <option v-for="b in activeBands" :key="b.id" :value="b.id">{{ b.name }}</option>
-        </select>
-      </div>
+    <div v-if="practiceBandReady && practiceBandId !== NO_BAND" class="card shortlists-card">
+      <button type="button" class="shortlists-toggle" :aria-expanded="shortlistsOpen"
+              @click="shortlistsOpenOverride = !shortlistsOpen">
+        <span class="month-chevron">{{ shortlistsOpen ? '▼' : '▶' }}</span>
+        <span class="card-title">Shortlists <span class="count">({{ filteredShortlists.length }})</span></span>
+      </button>
 
-      <p class="shortlists-intro">
+      <template v-if="shortlistsOpen">
+      <p v-if="filteredShortlists.length === 0" class="shortlists-intro">
         Pull specific recordings out for focused evaluation and discussion. Use the
-        <span class="inline-icon">📑</span> icon on any recording below (or in your
-        other recordings) to add it to one of these.
+        <span class="inline-icon">📑</span> icon on any recording to add it to a shortlist,
+        or create one here.
       </p>
-
-      <div v-if="filteredShortlists.length === 0" class="empty-state">
-        No shortlists yet. Create one below, or add a recording to a new one via its
-        <span class="inline-icon">📑</span> icon.
-      </div>
 
       <div v-else class="shortlist-list">
         <div v-for="sl in filteredShortlists" :key="sl.id" class="shortlist-row">
@@ -2636,7 +2712,6 @@ onMounted(async () => {
             <input v-else class="inline-edit shortlist-rename-input" :value="renameShortlistValue"
                    @click.stop @input="e => renameShortlistValue = e.target.value"
                    @blur="saveRenameShortlist(sl)" @keydown.enter="e => e.target.blur()" />
-            <span v-if="activeBands.length > 1" class="band-tag">{{ sl.band_name }}</span>
             <span class="month-count">{{ sl.item_count }}</span>
           </button>
           <div class="shortlist-row-actions">
@@ -2726,23 +2801,24 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="new-shortlist-row">
-        <select v-if="activeBands.length > 1" v-model="newShortlistBandId" class="bm-band-select">
-          <option value="">— band —</option>
-          <option v-for="b in activeBands" :key="b.id" :value="b.id">{{ b.name }}</option>
-        </select>
-        <input v-model="newShortlistName" type="text" class="text-input" placeholder="New shortlist name…"
-               @keydown.enter="createShortlistFromCard" />
-        <button class="btn-outline" :disabled="!newShortlistName.trim()" @click="createShortlistFromCard">
-          + New Shortlist
-        </button>
+      <div v-if="pickedBand" class="new-shortlist-row">
+        <template v-if="creatingShortlist">
+          <input v-model="newShortlistName" type="text" class="text-input" placeholder="New shortlist name…"
+                 @keydown.enter="createShortlistFromCard" />
+          <button class="shortlist-btn primary" :disabled="!newShortlistName.trim()" @click="createShortlistFromCard">
+            Create
+          </button>
+          <button class="shortlist-btn" @click="cancelNewShortlist">Cancel</button>
+        </template>
+        <button v-else class="shortlist-btn" @click="creatingShortlist = true">+ New Shortlist</button>
       </div>
+      </template>
     </div>
 
     <!-- Sessions Card -->
     <div class="card sessions-card">
       <div class="sessions-header">
-        <h2 class="card-title">Your Sessions <span class="count">({{ bandSessions.length }})</span></h2>
+        <h2 class="card-title">Your Sessions <span class="count">({{ practiceSessions.length }})</span></h2>
         <div v-if="availableYears.length > 0" class="year-tabs">
           <button class="year-tab" :class="{ active: selectedYear === null }" @click="selectedYear = null">All</button>
           <button v-for="year in availableYears" :key="year"
@@ -2751,8 +2827,10 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div v-if="bandSessions.length === 0" class="empty-state">
-        No sessions yet. Upload a recording above.
+      <div v-if="!practiceBandReady" class="empty-state">Loading…</div>
+
+      <div v-else-if="practiceSessions.length === 0" class="empty-state">
+        {{ practiceEmptyMessage }}
       </div>
 
       <div v-else>
@@ -2988,15 +3066,6 @@ onMounted(async () => {
 .shortlist-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shortlist-rename-input { flex: 1; min-width: 0; }
 
-.band-tag {
-  font-size: 0.72rem;
-  font-weight: 400;
-  color: var(--color-text-muted);
-  background: var(--color-background, #333);
-  border-radius: 10px;
-  padding: 1px 8px;
-}
-
 .shortlist-row-actions { display: flex; gap: 12px; padding: 0 0 8px 22px; }
 
 .link-btn {
@@ -3022,6 +3091,11 @@ onMounted(async () => {
   border-top: 1px solid var(--color-border, #2a2a2a);
 }
 .new-shortlist-row .text-input { flex: 1; min-width: 180px; }
+.shortlists-toggle { display: flex; align-items: center; gap: 8px; width: 100%; background: none; border: none; padding: 0; margin-bottom: 16px; color: var(--color-text); cursor: pointer; text-align: left; }
+.shortlists-toggle .card-title { margin: 0; }
+.shortlist-btn { background: none; border: 1px solid var(--color-accent); border-radius: 6px; padding: 6px 14px; font-size: 0.88rem; color: var(--color-accent); cursor: pointer; }
+.shortlist-btn.primary { background: var(--color-accent); color: #fff; }
+.shortlist-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Table */
 .table-wrapper { overflow-x: auto; margin-bottom: 4px; }
@@ -3115,7 +3189,9 @@ onMounted(async () => {
 .indiv-section-heading { font-size: 1.1rem; font-weight: 700; color: var(--color-text); margin: 8px 0 12px; padding-left: 2px; border-left: 3px solid var(--color-accent); padding-left: 10px; }
 .indiv-placeholder-card { padding: 32px 24px; }
 .indiv-placeholder-msg { color: var(--color-text-muted); font-size: 0.95rem; margin: 0; }
-.bm-filters { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.band-picker { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.band-picker-label { font-size: 1.1rem; font-weight: 700; color: var(--color-text); }
+.band-picker .bm-band-select { min-width: 0; max-width: 100%; font-size: 0.95rem; }
 .bm-band-select { background: var(--color-background-input); border: 1px solid var(--color-border-input); border-radius: 6px; padding: 5px 10px; font-size: 0.85rem; color: var(--color-text); }
 .session-name-text { display: block; font-weight: 500; }
 .session-sub { display: block; font-size: 0.8rem; color: var(--color-text-muted); }
