@@ -177,6 +177,7 @@ export const sessions = {
           const status = err.originalResponse ? err.originalResponse.getStatus() : 0
           // Don't retry requests the server rejected on purpose (limits, auth, bad file)
           if (status >= 400 && status < 500 && status !== 409 && status !== 423) return false
+          if (status === 507) return false // server low on storage
           onRetrying?.(retryAttempt)
           return true
         },

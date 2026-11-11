@@ -25,7 +25,8 @@ const MAX_SESSION_UPLOAD_BYTES = Math.round(1.2 * 1024 ** 3); // 1.2 GB
 const UPLOAD_DIR = process.env.SESSION_UPLOAD_DIR || path.join(__dirname, '..', 'session-uploads');
 const PARTIAL_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000; // abandoned partial uploads are deleted after a day
 const FINISHED_JOB_TTL_MS = 60 * 60 * 1000;        // finished jobs are reported for an hour
-const ALLOWED_EXTS = /\.(mp3|wav|aac|ogg|flac|m4a|webm|opus)$/i;
+const DISK_RESERVE_BYTES = 3 * 1024 ** 3;           // always leave 3 GB free for the database etc.
+const ALLOWED_EXTS =/\.(mp3|wav|aac|ogg|flac|m4a|webm|opus)$/i;
 
 let tusServer = null;
 let datastore = null;
@@ -167,6 +168,15 @@ async function init() {
 
         const isAudio = /^audio\//.test(meta.filetype || '') || ALLOWED_EXTS.test(meta.filename || '');
         if (!isAudio) throw tusError(400, 'Only audio files are allowed');
+
+        // MariaDB shares this disk. Need room for the upload plus its normalized
+        // WAV (can be larger than a compressed original), keeping a reserve free.
+        const { bavail, bsize } = await fs.promises.statfs(UPLOAD_DIR);
+        const freeBytes = bavail * bsize;
+        if (freeBytes - upload.size * 2.5 < DISK_RESERVE_BYTES) {
+          console.error(`Refusing ${upload.size}-byte session upload: only ${freeBytes} bytes free`);
+          throw tusError(507, 'The server is low on storage space right now. Please try again later.');
+        }
 
         const sessionType = normalizeSessionType(meta.session_type);
         const limitError = await checkFreeTierLimit(nodeReq.user.id, sessionType, nodeReq.site);
