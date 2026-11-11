@@ -47,5 +47,8 @@ services:
     volumes:
       # Mount frontend dist so backend can read index.html for OG tag injection
       - /var/www/prosaurus.com:/app/dist:ro
+      # Staging for resumable session uploads (utilities/sessionUploads.js), kept on
+      # the host so partial and unprocessed uploads survive container recreation
+      - /home/ec2-user/session-uploads:/app/session-uploads
     restart: unless-stopped
     command: sh -c "npm run start"

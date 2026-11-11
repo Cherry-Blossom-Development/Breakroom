@@ -1,3 +1,4 @@
+const fs = require('fs');
 const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, CopyObjectCommand } = require('@aws-sdk/client-s3');
 
 const BUCKET_NAME = process.env.S3_BUCKET_NAME || 'breakroom-uploads';
@@ -34,6 +35,30 @@ const uploadToS3 = async (buffer, key, contentType) => {
     const url = getS3Url(key);
     console.log('S3 upload successful:', key);
     return { success: true, key, url };
+  } catch (error) {
+    console.error('S3 upload error:', error.message);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Upload a file from disk to S3, streaming it so it is never held in memory.
+ * A single PUT supports objects up to 5 GB.
+ * @returns {Promise<{success: boolean, key?: string, size?: number, error?: string}>}
+ */
+const uploadFileToS3 = async (filePath, key, contentType) => {
+  try {
+    const { size } = await fs.promises.stat(filePath);
+    await s3Client.send(new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: key,
+      Body: fs.createReadStream(filePath),
+      ContentLength: size,
+      ContentType: contentType,
+      CacheControl: 'max-age=31536000'
+    }));
+    console.log('S3 upload successful:', key);
+    return { success: true, key, size };
   } catch (error) {
     console.error('S3 upload error:', error.message);
     return { success: false, error: error.message };
@@ -144,6 +169,7 @@ const copyInS3 = async (sourceKey, destKey) => {
 
 module.exports = {
   uploadToS3,
+  uploadFileToS3,
   deleteFromS3,
   copyInS3,
   getS3Url,

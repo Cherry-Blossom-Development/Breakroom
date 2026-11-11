@@ -33,7 +33,29 @@ async function normalizeToWav(inputBuffer) {
   }
 }
 
-function runFfmpegPass1(inputPath) {
+// Large files (up to ~1.2 GB / 2 hours) take far longer than the 3-minute
+// in-memory limit; allow 1 minute of ffmpeg time per 20 MB, at least 10 minutes.
+function timeoutForSize(bytes) {
+  return Math.max(10 * 60 * 1000, Math.ceil(bytes / (20 * 1024 * 1024)) * 60 * 1000);
+}
+
+/**
+ * Same normalization as normalizeToWav, but disk to disk so large uploads are
+ * never held in memory.
+ *
+ * @param {string} inputPath - Audio file on disk (any format FFmpeg supports)
+ * @param {string} outputPath - Where to write the normalized WAV
+ * @returns {Promise<{durationMs: number|null}>}
+ */
+async function normalizeFileToWav(inputPath, outputPath) {
+  const { size } = await fs.promises.stat(inputPath);
+  const timeoutMs = timeoutForSize(size);
+  const { channels, stats, durationMs } = await runFfmpegPass1(inputPath, timeoutMs);
+  await runFfmpegPass2(inputPath, stats, channels, outputPath, timeoutMs);
+  return { durationMs };
+}
+
+function runFfmpegPass1(inputPath, timeoutMs = FFMPEG_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const args = [
       '-y',
@@ -51,7 +73,7 @@ function runFfmpegPass1(inputPath) {
       timedOut = true;
       proc.kill('SIGKILL');
       reject(new Error('FFmpeg pass 1 timed out'));
-    }, FFMPEG_TIMEOUT_MS);
+    }, timeoutMs);
 
     proc.stderr.on('data', chunk => stderrChunks.push(chunk));
 
@@ -105,7 +127,8 @@ function runFfmpegPass1(inputPath) {
   });
 }
 
-function runFfmpegPass2(inputPath, stats, channels) {
+// With outputPath, writes the WAV there and resolves null; otherwise resolves the WAV buffer.
+function runFfmpegPass2(inputPath, stats, channels, outputPath = null, timeoutMs = FFMPEG_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     // Build loudnorm filter with measured values from pass 1.
     // If input was silent (-inf), fall back to linear=false so FFmpeg doesn't error.
@@ -136,7 +159,7 @@ function runFfmpegPass2(inputPath, stats, channels) {
       '-ac', String(channels),
       '-sample_fmt', 's16',
       '-f', 'wav',
-      'pipe:1'
+      outputPath || 'pipe:1'
     ];
 
     const proc = spawn('ffmpeg', args);
@@ -147,7 +170,7 @@ function runFfmpegPass2(inputPath, stats, channels) {
       timedOut = true;
       proc.kill('SIGKILL');
       reject(new Error('FFmpeg pass 2 timed out'));
-    }, FFMPEG_TIMEOUT_MS);
+    }, timeoutMs);
 
     proc.stdout.on('data', chunk => stdoutChunks.push(chunk));
     proc.stderr.on('data', () => {}); // suppress pass 2 stderr
@@ -159,6 +182,8 @@ function runFfmpegPass2(inputPath, stats, channels) {
       if (code !== 0) {
         return reject(new Error(`FFmpeg pass 2 failed (code ${code})`));
       }
+
+      if (outputPath) return resolve(null);
 
       const wavBuffer = Buffer.concat(stdoutChunks);
       if (wavBuffer.length < 44) {
@@ -175,4 +200,4 @@ function runFfmpegPass2(inputPath, stats, channels) {
   });
 }
 
-module.exports = { normalizeToWav };
+module.exports = { normalizeToWav, normalizeFileToWav };

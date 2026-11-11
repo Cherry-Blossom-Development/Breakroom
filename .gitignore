@@ -22,3 +22,6 @@ backend/test-emails/
 .claude*
 /backend/firebase-service-account.json
 /backend/google-play-service-account.json
+
+# Resumable session upload staging (backend/utilities/sessionUploads.js)
+backend/session-uploads/

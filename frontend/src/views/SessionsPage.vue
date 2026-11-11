@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import draggable from 'vuedraggable'
 import { sessions } from '@/stores/sessions'
 import { shortlists } from '@/stores/shortlists'
@@ -911,6 +911,48 @@ function onAudioMetadata() {
   // WAV files include duration in their header — no workaround needed.
 }
 
+// --- Resumable upload progress (picked files; see sessions.uploadResumable) ---
+function makeUploadProgress() {
+  return reactive({ sent: 0, total: 0, retrying: false, abort: null, active: false })
+}
+const uploadProgress = makeUploadProgress()
+const indivUploadProgress = makeUploadProgress()
+
+function formatMB(bytes) {
+  return (bytes / (1024 * 1024)).toLocaleString(undefined, { maximumFractionDigits: bytes < 100 * 1024 * 1024 ? 1 : 0 })
+}
+function progressPercent(p) {
+  return p.total ? Math.floor((p.sent / p.total) * 100) : 0
+}
+
+async function runResumableUpload(progress, file, details) {
+  Object.assign(progress, { sent: 0, total: file.size, retrying: false, active: true })
+  const { promise, abort } = sessions.uploadResumable(file, details, {
+    onProgress(sent, total) { progress.sent = sent; progress.total = total },
+    onRetrying(attempt) { progress.retrying = attempt !== null }
+  })
+  progress.abort = abort
+  try {
+    await promise
+  } finally {
+    Object.assign(progress, { active: false, retrying: false, abort: null })
+  }
+}
+
+// Stopping keeps what was sent; picking the same file again with the same details continues it.
+function cancelResumableUpload(progress) {
+  progress.abort?.()
+}
+
+function warnBeforeLeavingUpload(e) {
+  if (uploadProgress.active || indivUploadProgress.active) { e.preventDefault(); e.returnValue = '' }
+}
+window.addEventListener('beforeunload', warnBeforeLeavingUpload)
+onBeforeUnmount(() => window.removeEventListener('beforeunload', warnBeforeLeavingUpload))
+
+const bandProcessing = computed(() => sessions.processing.filter(j => j.sessionType !== 'individual'))
+const indivProcessing = computed(() => sessions.processing.filter(j => j.sessionType === 'individual'))
+
 // --- Upload ---
 function onFileSelect(e) {
   const file = e.target.files[0]
@@ -926,7 +968,13 @@ async function handleUpload() {
     const keepFilename = recordMode.value === 'upload' && uploadRenameChoice.value === 'keep'
     const nameToUse = keepFilename ? stripExtension(selectedFile.value.name) : (sessionName.value || defaultName())
     const dateToUse = keepFilename ? null : (recordedAt.value || null)
-    await sessions.upload(selectedFile.value, nameToUse, dateToUse, uploadBandId.value || null)
+    if (recordMode.value === 'upload') {
+      await runResumableUpload(uploadProgress, selectedFile.value, {
+        name: nameToUse, recordedAt: dateToUse, bandId: uploadBandId.value || null, sessionType: 'band'
+      })
+    } else {
+      await sessions.upload(selectedFile.value, nameToUse, dateToUse, uploadBandId.value || null)
+    }
     // The form's band can differ from the picker; follow it so the new recording is visible
     if (activeBands.value.length > 0) selectPracticeBand(uploadBandId.value || NO_BAND)
     resetRecordMode()
@@ -949,7 +997,14 @@ async function handleIndivUpload() {
     const keepFilename = indivRecordMode.value === 'upload' && indivUploadRenameChoice.value === 'keep'
     const nameToUse = keepFilename ? stripExtension(indivFile.value.name) : (indivName.value || defaultName())
     const dateToUse = keepFilename ? null : (indivRecordedAt.value || null)
-    await sessions.upload(indivFile.value, nameToUse, dateToUse, indivUploadBandId.value || null, 'individual', indivInstrumentId.value || null)
+    if (indivRecordMode.value === 'upload') {
+      await runResumableUpload(indivUploadProgress, indivFile.value, {
+        name: nameToUse, recordedAt: dateToUse, bandId: indivUploadBandId.value || null,
+        sessionType: 'individual', instrumentId: indivInstrumentId.value || null
+      })
+    } else {
+      await sessions.upload(indivFile.value, nameToUse, dateToUse, indivUploadBandId.value || null, 'individual', indivInstrumentId.value || null)
+    }
     resetIndivRecordMode()
   } catch (err) { handleUploadError(err, indivUploadError) }
   finally { indivUploading.value = false }
@@ -1562,6 +1617,7 @@ onMounted(async () => {
   sessions.reset()
   shortlists.reset()
   await Promise.all([sessions.load(), loadAudioDefaults(), registerDevice(), shortlists.load(), loadBands()])
+  sessions.pollProcessing()
   if (availableYears.value.length > 0) selectedYear.value = availableYears.value[0]
   practiceBandReady.value = true
   document.addEventListener('click', closeRatingPopup)
@@ -1805,6 +1861,13 @@ onMounted(async () => {
       <div class="card">
         <h2 class="card-title">New Recording</h2>
         <div class="upload-form">
+          <div v-for="job in indivProcessing" :key="job.uploadId" class="processing-notice" :class="{ failed: job.status === 'failed' }">
+            <template v-if="job.status === 'failed'">
+              <span>“{{ job.name }}” could not be added. {{ job.error }}</span>
+              <button type="button" class="link-btn" @click="sessions.dismissProcessing(job.uploadId)">Dismiss</button>
+            </template>
+            <span v-else>“{{ job.name }}” uploaded. Processing… it will appear in your list when ready (long recordings can take several minutes).</span>
+          </div>
 
           <!-- Step 1: choose upload vs. live record -->
           <div v-if="!indivRecordMode" class="record-mode-chooser">
@@ -1900,6 +1963,14 @@ onMounted(async () => {
               <audio controls :src="recordingPreviewUrl" @loadedmetadata="onAudioMetadata" style="height:32px;"></audio>
             </div>
             <p v-if="indivUploadError" class="error-msg">{{ indivUploadError }}</p>
+            <div v-if="indivUploadProgress.active" class="upload-progress" role="status">
+              <div class="upload-progress-bar"><div class="upload-progress-fill" :style="{ width: progressPercent(indivUploadProgress) + '%' }"></div></div>
+              <div class="upload-progress-row">
+                <span v-if="indivUploadProgress.retrying" class="upload-progress-warn">Connection lost — retrying… ({{ progressPercent(indivUploadProgress) }}% sent, nothing lost)</span>
+                <span v-else>Uploading… {{ progressPercent(indivUploadProgress) }}% ({{ formatMB(indivUploadProgress.sent) }} of {{ formatMB(indivUploadProgress.total) }} MB)</span>
+                <button type="button" class="link-btn" @click="cancelResumableUpload(indivUploadProgress)">Stop</button>
+              </div>
+            </div>
             <div class="save-row">
               <button class="upload-btn" @click="handleIndivUpload" :disabled="!indivFile || indivUploading">
                 {{ indivUploading ? 'Saving…' : (indivRecordMode === 'record' ? 'Save Recording' : 'Upload') }}
@@ -2588,6 +2659,13 @@ onMounted(async () => {
     <div class="card upload-card">
       <h2 class="card-title">New Recording</h2>
       <div class="upload-form">
+        <div v-for="job in bandProcessing" :key="job.uploadId" class="processing-notice" :class="{ failed: job.status === 'failed' }">
+          <template v-if="job.status === 'failed'">
+            <span>“{{ job.name }}” could not be added. {{ job.error }}</span>
+            <button type="button" class="link-btn" @click="sessions.dismissProcessing(job.uploadId)">Dismiss</button>
+          </template>
+          <span v-else>“{{ job.name }}” uploaded. Processing… it will appear in your list when ready (long recordings can take several minutes).</span>
+        </div>
 
         <!-- Step 1: choose upload vs. live record -->
         <div v-if="!recordMode" class="record-mode-chooser">
@@ -2676,6 +2754,14 @@ onMounted(async () => {
             <audio controls :src="recordingPreviewUrl" style="height:32px;"></audio>
           </div>
           <p v-if="uploadError" class="error-msg">{{ uploadError }}</p>
+          <div v-if="uploadProgress.active" class="upload-progress" role="status">
+            <div class="upload-progress-bar"><div class="upload-progress-fill" :style="{ width: progressPercent(uploadProgress) + '%' }"></div></div>
+            <div class="upload-progress-row">
+              <span v-if="uploadProgress.retrying" class="upload-progress-warn">Connection lost — retrying… ({{ progressPercent(uploadProgress) }}% sent, nothing lost)</span>
+              <span v-else>Uploading… {{ progressPercent(uploadProgress) }}% ({{ formatMB(uploadProgress.sent) }} of {{ formatMB(uploadProgress.total) }} MB)</span>
+              <button type="button" class="link-btn" @click="cancelResumableUpload(uploadProgress)">Stop</button>
+            </div>
+          </div>
           <div class="save-row">
             <button class="upload-btn" @click="handleUpload" :disabled="!selectedFile || uploading">
               {{ uploading ? 'Saving…' : (recordMode === 'record' ? 'Save Recording' : 'Upload') }}
@@ -2985,6 +3071,15 @@ onMounted(async () => {
 .upload-btn:not(:disabled):hover { opacity: 0.85; }
 
 .save-row { display: flex; gap: 10px; align-items: center; align-self: flex-start; }
+
+.upload-progress { display: flex; flex-direction: column; gap: 6px; }
+.upload-progress-bar { height: 8px; border-radius: 4px; background: var(--color-border, #555); overflow: hidden; }
+.upload-progress-fill { height: 100%; background: var(--color-accent); transition: width 0.3s; }
+.upload-progress-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 0.9rem; color: var(--color-text-muted); }
+.upload-progress-warn { color: #d9a400; }
+.processing-notice { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--color-border, #555); font-size: 0.9rem; color: var(--color-text-muted); }
+.processing-notice.failed { border-color: #e05555; color: #e05555; }
+
 .discard-btn { background: none; border: 1px solid var(--color-border, #555); border-radius: 6px; padding: 10px 20px; font-size: 0.95rem; font-weight: 600; color: var(--color-text-muted); cursor: pointer; transition: all 0.15s; }
 .discard-btn:not(:disabled):hover { border-color: #e05555; color: #e05555; }
 .discard-btn:disabled { opacity: 0.5; cursor: not-allowed; }

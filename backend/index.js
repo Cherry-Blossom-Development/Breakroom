@@ -113,6 +113,7 @@ const eulaRoutes = require('./routes/eula');
 const moderationRoutes = require('./routes/moderation');
 const adminRoutes = require('./routes/admin');
 const sessionsRoutes = require('./routes/sessions');
+const sessionUploads = require('./utilities/sessionUploads');
 const shortlistsRoutes = require('./routes/shortlists');
 const bandsRoutes = require('./routes/bands');
 const bandPageRoutes = require('./routes/band-pages');
@@ -180,6 +181,8 @@ app.use('/api/features', featuresRoutes);
 app.use('/api/eula', eulaRoutes);
 app.use('/api/moderation', moderationRoutes);
 app.use('/api/admin', adminRoutes);
+// Resumable (tus) uploads for large session recordings — see utilities/sessionUploads.js
+app.all([sessionUploads.UPLOAD_PATH, `${sessionUploads.UPLOAD_PATH}/*splat`], sessionUploads.authenticateUpload, sessionUploads.handleUpload);
 app.use('/api/sessions', sessionsRoutes);
 app.use('/api/shortlists', shortlistsRoutes);
 app.use('/api/bands', bandsRoutes);
@@ -456,5 +459,7 @@ console.log('Fallback route will catch anything not under /api');
 server.listen(port, () => {
   console.log(`App running on ${process.env.CORS_ORIGIN}:${port}`);
   console.log('Socket.IO server is ready');
+  // Set up resumable uploads now so unprocessed uploads from before a restart get requeued
+  sessionUploads.init().catch(err => console.error('Session uploads failed to initialize:', err));
 });
 

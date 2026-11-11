@@ -7,8 +7,8 @@ const { getClient } = require('../utilities/db');
 const { uploadToS3, deleteFromS3, getS3Url, streamFromS3 } = require('../utilities/aws-s3');
 const { normalizeToWav } = require('../utilities/audio');
 const { extractToken } = require('../utilities/auth');
-const { isSubscribed } = require('../utilities/subscription');
-const { isMember } = require('../utilities/greywire');
+const { normalizeSessionType, checkFreeTierLimit, insertSession } = require('../utilities/sessionRecords');
+const { listProcessing, dismissProcessing } = require('../utilities/sessionUploads');
 const { emitToUser } = require('../utilities/socket');
 const { checkAndFilterContent } = require('../utilities/contentFilter');
 const { sendToUser } = require('../utilities/fcm');
@@ -197,6 +197,20 @@ router.get('/practice-suggestions', authenticateToken, async (req, res) => {
 
 // GET /api/sessions/:id/stream — access-checked proxy from S3 (owner, active band
 // member, or active member of a band that has this session in one of its shortlists)
+// GET /api/sessions/processing — the user's resumable uploads that are still
+// being processed (or finished within the last hour)
+router.get('/processing', authenticateToken, (req, res) => {
+  res.json({ uploads: listProcessing(req.user.id) });
+});
+
+// DELETE /api/sessions/processing/:uploadId — dismiss a finished/failed upload notice
+router.delete('/processing/:uploadId', authenticateToken, (req, res) => {
+  if (!dismissProcessing(req.user.id, req.params.uploadId)) {
+    return res.status(404).json({ message: 'Not found' });
+  }
+  res.json({ message: 'Dismissed' });
+});
+
 router.get('/:id/stream', authenticateToken, async (req, res) => {
   const client = await getClient();
   try {
@@ -213,34 +227,18 @@ router.get('/:id/stream', authenticateToken, async (req, res) => {
   }
 });
 
-// POST /api/sessions — upload a new session
+// POST /api/sessions — upload a new session in a single request. The web
+// file picker uses the resumable upload instead (utilities/sessionUploads.js);
+// this route serves in-browser recordings/mashups and the mobile apps.
 router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res) => {
   if (!req.file) return res.status(400).json({ message: 'No audio file uploaded' });
 
   const { name, recorded_at, band_id, session_type, instrument_id } = req.body;
-  const sessionTypeVal = session_type === 'individual' ? 'individual' : session_type === 'mashup' ? 'mashup' : 'band';
+  const sessionTypeVal = normalizeSessionType(session_type);
 
-  // Enforce free-tier limits: 3 band sessions, 3 individual sessions (per site).
-  // Greywire members have no limits on the Greywire site.
-  const FREE_LIMITS = { band: 3, individual: 3 };
-  const limitClient = await getClient();
-  try {
-    const countResult = await limitClient.query(
-      'SELECT COUNT(*) AS cnt FROM sessions WHERE user_id = $1 AND session_type = $2 AND site = $3',
-      [req.user.id, sessionTypeVal, req.site]
-    );
-    const count = parseInt(countResult.rows[0].cnt, 10);
-    if (count >= FREE_LIMITS[sessionTypeVal] && !(req.site === 'greywire' && await isMember(limitClient, req.user.id))) {
-      const { subscribed } = await isSubscribed(req.user.id);
-      if (!subscribed) {
-        return res.status(402).json({
-          message: `Free accounts are limited to ${FREE_LIMITS[sessionTypeVal]} ${sessionTypeVal} sessions`,
-          requiresSubscription: true,
-        });
-      }
-    }
-  } finally {
-    limitClient.release();
+  const limitError = await checkFreeTierLimit(req.user.id, sessionTypeVal, req.site);
+  if (limitError) {
+    return res.status(limitError.status).json({ message: limitError.message, requiresSubscription: true });
   }
 
   const bandIdVal = band_id ? parseInt(band_id, 10) : null;
@@ -264,30 +262,16 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
     return res.status(500).json({ message: 'Failed to upload to storage: ' + uploadResult.error });
   }
 
-  const client = await getClient();
   try {
-    const insertResult = await client.query(
-      'INSERT INTO sessions (user_id, name, s3_key, file_size, mime_type, recorded_at, band_id, session_type, instrument_id, normalized, duration_ms, site) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)',
-      [req.user.id, name || 'Untitled Session', s3Key, wavBuffer.length, 'audio/wav', recorded_at || null, bandIdVal, sessionTypeVal, instrumentIdVal, 1, durationMs, req.site]
-    );
-    const session = await client.query(
-      `SELECT s.id, s.name, s.s3_key, s.file_size, s.mime_type, s.uploaded_at, s.recorded_at, s.session_type,
-         s.band_id, b.name AS band_name, s.instrument_id, i.name AS instrument_name,
-         s.duration_ms,
-         NULL AS avg_rating, 0 AS rating_count, NULL AS my_rating
-       FROM sessions s
-       LEFT JOIN bands b ON b.id = s.band_id
-       LEFT JOIN instruments i ON i.id = s.instrument_id
-       WHERE s.id = $1`,
-      [insertResult.insertId]
-    );
-    res.status(201).json({ session: session.rows[0] });
+    const session = await insertSession({
+      userId: req.user.id, name, s3Key, fileSize: wavBuffer.length, recordedAt: recorded_at,
+      bandId: bandIdVal, sessionType: sessionTypeVal, instrumentId: instrumentIdVal, durationMs, site: req.site
+    });
+    res.status(201).json({ session });
   } catch (err) {
     console.error('Error saving session:', err);
     await deleteFromS3(s3Key);
     res.status(500).json({ message: 'Failed to save session' });
-  } finally {
-    client.release();
   }
 });
 
