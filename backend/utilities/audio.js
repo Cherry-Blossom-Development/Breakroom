@@ -1,64 +1,129 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
-const crypto = require('crypto');
 
-const FFMPEG_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes
-
-/**
- * Converts any audio buffer to a normalized WAV file using two-pass EBU R128 loudnorm.
- * Output spec: 44100 Hz, 16-bit PCM, original channel count (max 2).
- * Target: -14 LUFS integrated, -1 dBTP true peak, LRA=11.
- *
- * @param {Buffer} inputBuffer - Raw audio file bytes (any format FFmpeg supports)
- * @returns {Promise<{buffer: Buffer, durationMs: number|null}>} - Normalized WAV file and duration in ms
- */
-async function normalizeToWav(inputBuffer) {
-  const tmpPath = `/tmp/br-${crypto.randomUUID()}.audio`;
-
-  try {
-    await fs.promises.writeFile(tmpPath, inputBuffer);
-
-    // Pass 1: analyze loudness, detect channel count, and extract duration
-    const pass1Result = await runFfmpegPass1(tmpPath);
-    const channels = pass1Result.channels;
-    const loudnormStats = pass1Result.stats;
-    const durationMs = pass1Result.durationMs;
-
-    // Pass 2: apply normalization and convert to WAV, stream to stdout
-    const wavBuffer = await runFfmpegPass2(tmpPath, loudnormStats, channels);
-    return { buffer: wavBuffer, durationMs };
-
-  } finally {
-    await fs.promises.unlink(tmpPath).catch(() => {});
-  }
-}
-
-// Large files (up to ~1.2 GB / 2 hours) take far longer than the 3-minute
-// in-memory limit; allow 1 minute of ffmpeg time per 20 MB, at least 10 minutes.
+// Allow 1 minute of ffmpeg time per 20 MB of input, at least 10 minutes
+// (a 2-hour, 1.2 GB recording gets about an hour).
 function timeoutForSize(bytes) {
   return Math.max(10 * 60 * 1000, Math.ceil(bytes / (20 * 1024 * 1024)) * 60 * 1000);
 }
 
+// AAC bitrate for the playback copy: 128 kbps per channel (256k stereo),
+// near-transparent for practice recordings.
+const aacBitrate = channels => `${128 * Math.max(1, Math.min(channels, 2))}k`;
+
 /**
- * Same normalization as normalizeToWav, but disk to disk so large uploads are
- * never held in memory.
+ * Turn an uploaded recording into the two files a session stores:
+ *   - a lossless FLAC master (kept for mashups / downloads)
+ *   - an AAC .m4a copy for playback (about 5x smaller than WAV)
+ * Both are loudness-normalized with two-pass EBU R128 loudnorm
+ * (-14 LUFS integrated, -1 dBTP true peak, LRA 11), 44100 Hz, original
+ * channel count (max 2). The master is 16-bit, matching the WAVs stored before.
+ *
+ * Disk to disk, so large uploads are never held in memory.
  *
  * @param {string} inputPath - Audio file on disk (any format FFmpeg supports)
- * @param {string} outputPath - Where to write the normalized WAV
+ * @param {string} masterPath - Where to write the FLAC master
+ * @param {string} playbackPath - Where to write the AAC .m4a
  * @returns {Promise<{durationMs: number|null}>}
  */
-async function normalizeFileToWav(inputPath, outputPath) {
+async function processSessionAudio(inputPath, masterPath, playbackPath) {
   const { size } = await fs.promises.stat(inputPath);
   const timeoutMs = timeoutForSize(size);
   const { channels, stats, durationMs } = await runFfmpegPass1(inputPath, timeoutMs);
-  await runFfmpegPass2(inputPath, stats, channels, outputPath, timeoutMs);
+
+  // If input was silent (-inf), skip loudness adjustment so FFmpeg doesn't error.
+  const isSilent = stats.input_i === '-inf' || parseFloat(stats.input_i) < -70;
+  const loudnorm = isSilent ? 'anull' : [
+    'loudnorm=I=-14:TP=-1:LRA=11',
+    `measured_I=${stats.input_i}`,
+    `measured_TP=${stats.input_tp}`,
+    `measured_LRA=${stats.input_lra}`,
+    `measured_thresh=${stats.input_thresh}`,
+    `offset=${stats.target_offset}`,
+    'linear=true',
+    'print_format=summary'
+  ].join(':');
+
+  // One decode + normalization, split into both encodes.
+  await runFfmpeg([
+    '-y', '-nostats',
+    '-i', inputPath,
+    '-filter_complex', `[0:a]${loudnorm},aresample=44100,asplit=2[master][play]`,
+    '-map', '[master]', '-ac', String(channels), '-sample_fmt', 's16', '-c:a', 'flac', '-f', 'flac', masterPath,
+    '-map', '[play]', '-ac', String(channels), '-c:a', 'aac', '-b:a', aacBitrate(channels),
+    '-movflags', '+faststart', '-f', 'mp4', playbackPath
+  ], timeoutMs, 'encode');
+
   return { durationMs };
 }
 
-function runFfmpegPass1(inputPath, timeoutMs = FFMPEG_TIMEOUT_MS) {
+/**
+ * Re-encode an already-normalized session file (e.g. an older stored WAV)
+ * into a FLAC master and AAC playback copy, without changing loudness.
+ */
+async function transcodeSessionAudio(inputPath, masterPath, playbackPath, channels) {
+  const { size } = await fs.promises.stat(inputPath);
+  await runFfmpeg([
+    '-y', '-nostats',
+    '-i', inputPath,
+    '-map', '0:a', '-sample_fmt', 's16', '-c:a', 'flac', '-f', 'flac', masterPath,
+    '-map', '0:a', '-c:a', 'aac', '-b:a', aacBitrate(channels), '-movflags', '+faststart', '-f', 'mp4', playbackPath
+  ], timeoutForSize(size), 'transcode');
+}
+
+/** Decode any audio file (e.g. a FLAC master) to a 16-bit WAV file. */
+async function decodeToWav(inputPath, outputPath) {
+  const { size } = await fs.promises.stat(inputPath);
+  await runFfmpeg([
+    '-y', '-nostats',
+    '-i', inputPath,
+    '-map', '0:a', '-c:a', 'pcm_s16le', '-f', 'wav', outputPath
+  ], timeoutForSize(size * 3), 'decode');
+}
+
+/** Channel count of a file's first audio stream (for transcoding stored WAVs). */
+function probeChannels(inputPath) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=channels', '-of', 'csv=p=0', inputPath]);
+    let out = '';
+    proc.stdout.on('data', c => { out += c; });
+    proc.on('close', code => code === 0 ? resolve(parseInt(out, 10) || 1) : reject(new Error('ffprobe failed')));
+    proc.on('error', reject);
+  });
+}
+
+function runFfmpeg(args, timeoutMs, label) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('ffmpeg', args);
+    let stderrTail = '';
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill('SIGKILL');
+      reject(new Error(`FFmpeg ${label} timed out`));
+    }, timeoutMs);
+
+    proc.stderr.on('data', chunk => { stderrTail = (stderrTail + chunk.toString('utf8')).slice(-2000); });
+
+    proc.on('close', code => {
+      clearTimeout(timer);
+      if (timedOut) return;
+      if (code !== 0) return reject(new Error(`FFmpeg ${label} failed (code ${code}): ${stderrTail.slice(-500)}`));
+      resolve();
+    });
+
+    proc.on('error', err => {
+      clearTimeout(timer);
+      reject(new Error(`FFmpeg ${label} spawn error: ${err.message}`));
+    });
+  });
+}
+
+function runFfmpegPass1(inputPath, timeoutMs) {
   return new Promise((resolve, reject) => {
     const args = [
-      '-y',
+      '-y', '-nostats',
       '-i', inputPath,
       '-af', 'loudnorm=I=-14:TP=-1:LRA=11:print_format=json',
       '-f', 'null',
@@ -87,7 +152,10 @@ function runFfmpegPass1(inputPath, timeoutMs = FFMPEG_TIMEOUT_MS) {
         return reject(new Error(`FFmpeg pass 1 failed (code ${code}): ${stderr.slice(-500)}`));
       }
 
-      // Parse channel count from stream info line, e.g. "Audio: pcm_s16le, 48000 Hz, 1 channels"
+      // Parse channel count from stream info line, e.g. "Audio: pcm_s16le, 48000 Hz, 1 channels".
+      // NOTE: ffmpeg prints "mono"/"stereo" rather than "N channels" for common
+      // layouts, so in practice this almost always falls back to 1 (mono). That
+      // is long-standing behavior the mobile mashup code may rely on; change deliberately.
       const channelMatch = stderr.match(/Audio:.*?(\d+)\s+channel/);
       const channels = channelMatch ? Math.min(parseInt(channelMatch[1], 10), 2) : 1;
 
@@ -127,77 +195,4 @@ function runFfmpegPass1(inputPath, timeoutMs = FFMPEG_TIMEOUT_MS) {
   });
 }
 
-// With outputPath, writes the WAV there and resolves null; otherwise resolves the WAV buffer.
-function runFfmpegPass2(inputPath, stats, channels, outputPath = null, timeoutMs = FFMPEG_TIMEOUT_MS) {
-  return new Promise((resolve, reject) => {
-    // Build loudnorm filter with measured values from pass 1.
-    // If input was silent (-inf), fall back to linear=false so FFmpeg doesn't error.
-    const isSilent = stats.input_i === '-inf' || parseFloat(stats.input_i) < -70;
-
-    let audioFilter;
-    if (isSilent) {
-      // Just resample/convert without loudness adjustment
-      audioFilter = 'anull';
-    } else {
-      audioFilter = [
-        `loudnorm=I=-14:TP=-1:LRA=11`,
-        `measured_I=${stats.input_i}`,
-        `measured_TP=${stats.input_tp}`,
-        `measured_LRA=${stats.input_lra}`,
-        `measured_thresh=${stats.input_thresh}`,
-        `offset=${stats.target_offset}`,
-        `linear=true`,
-        `print_format=summary`
-      ].join(':');
-    }
-
-    const args = [
-      '-y',
-      '-i', inputPath,
-      '-af', audioFilter,
-      '-ar', '44100',
-      '-ac', String(channels),
-      '-sample_fmt', 's16',
-      '-f', 'wav',
-      outputPath || 'pipe:1'
-    ];
-
-    const proc = spawn('ffmpeg', args);
-    const stdoutChunks = [];
-    let timedOut = false;
-
-    const timer = setTimeout(() => {
-      timedOut = true;
-      proc.kill('SIGKILL');
-      reject(new Error('FFmpeg pass 2 timed out'));
-    }, timeoutMs);
-
-    proc.stdout.on('data', chunk => stdoutChunks.push(chunk));
-    proc.stderr.on('data', () => {}); // suppress pass 2 stderr
-
-    proc.on('close', code => {
-      clearTimeout(timer);
-      if (timedOut) return;
-
-      if (code !== 0) {
-        return reject(new Error(`FFmpeg pass 2 failed (code ${code})`));
-      }
-
-      if (outputPath) return resolve(null);
-
-      const wavBuffer = Buffer.concat(stdoutChunks);
-      if (wavBuffer.length < 44) {
-        return reject(new Error('FFmpeg pass 2: output too small to be a valid WAV'));
-      }
-
-      resolve(wavBuffer);
-    });
-
-    proc.on('error', err => {
-      clearTimeout(timer);
-      reject(new Error(`FFmpeg pass 2 spawn error: ${err.message}`));
-    });
-  });
-}
-
-module.exports = { normalizeToWav, normalizeFileToWav };
+module.exports = { processSessionAudio, transcodeSessionAudio, decodeToWav, probeChannels };

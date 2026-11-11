@@ -66,6 +66,15 @@ const uploadFileToS3 = async (filePath, key, contentType) => {
 };
 
 /**
+ * Download an S3 object to a file on disk (streamed, never fully in memory).
+ */
+const downloadFromS3 = async (key, filePath) => {
+  const { pipeline } = require('stream/promises');
+  const obj = await s3Client.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+  await pipeline(obj.Body, fs.createWriteStream(filePath));
+};
+
+/**
  * Delete a file from S3
  * @param {string} key - S3 object key to delete
  * @returns {Promise<{success: boolean, error?: string}>}
@@ -170,6 +179,7 @@ const copyInS3 = async (sourceKey, destKey) => {
 module.exports = {
   uploadToS3,
   uploadFileToS3,
+  downloadFromS3,
   deleteFromS3,
   copyInS3,
   getS3Url,

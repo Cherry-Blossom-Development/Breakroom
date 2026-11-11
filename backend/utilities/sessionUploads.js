@@ -5,7 +5,8 @@
 // /api/sessions/uploads and can resume after a dropped connection. Pieces are
 // written to disk (SESSION_UPLOAD_DIR), never held in memory. When the last
 // piece arrives the upload is queued for background processing — ffmpeg
-// normalization, S3 upload, sessions row — and the client polls
+// normalization to a FLAC master + AAC playback copy, S3 upload, sessions
+// row — and the client polls
 // GET /api/sessions/processing to learn when it's ready.
 //
 // Completed uploads stay on disk until processed, so if the backend restarts
@@ -16,9 +17,8 @@ const path = require('path');
 const jwt = require('jsonwebtoken');
 const { getClient } = require('./db');
 const { extractToken } = require('./auth');
-const { normalizeFileToWav } = require('./audio');
-const { uploadFileToS3, deleteFromS3 } = require('./aws-s3');
-const { normalizeSessionType, checkFreeTierLimit, insertSession } = require('./sessionRecords');
+const { deleteFromS3 } = require('./aws-s3');
+const { normalizeSessionType, checkFreeTierLimit, storeSessionAudio, insertSession } = require('./sessionRecords');
 
 const UPLOAD_PATH = '/api/sessions/uploads';
 const MAX_SESSION_UPLOAD_BYTES = Math.round(1.2 * 1024 ** 3); // 1.2 GB
@@ -62,30 +62,19 @@ function enqueue(upload) {
 async function processUpload(upload, job) {
   const meta = upload.metadata || {};
   const inputPath = path.join(UPLOAD_DIR, upload.id);
-  const outputPath = path.join(UPLOAD_DIR, `${upload.id}.normalized.wav`);
-  let s3Key = null;
+  let stored = null;
   job.status = 'processing';
   const started = Date.now();
   try {
-    const { durationMs } = await normalizeFileToWav(inputPath, outputPath);
-
-    s3Key = `sessions/${job.userId}/${Date.now()}.wav`;
-    const s3Result = await uploadFileToS3(outputPath, s3Key, 'audio/wav');
-    if (!s3Result.success) {
-      s3Key = null;
-      throw new Error('Failed to upload to storage: ' + s3Result.error);
-    }
-
+    stored = await storeSessionAudio(inputPath, job.userId, UPLOAD_DIR);
     const session = await insertSession({
       userId: job.userId,
       name: job.name,
-      s3Key,
-      fileSize: s3Result.size,
+      ...stored,
       recordedAt: meta.recorded_at || null,
       bandId: meta.band_id ? parseInt(meta.band_id, 10) : null,
       sessionType: job.sessionType,
       instrumentId: meta.instrument_id ? parseInt(meta.instrument_id, 10) : null,
-      durationMs,
       site: meta.site,
     });
     job.status = 'ready';
@@ -93,14 +82,16 @@ async function processUpload(upload, job) {
     console.log(`Session upload ${upload.id} processed in ${Math.round((Date.now() - started) / 1000)}s -> session ${session.id}`);
   } catch (err) {
     console.error(`Session upload ${upload.id} failed:`, err);
-    if (s3Key) await deleteFromS3(s3Key);
+    if (stored && !job.session) {
+      await deleteFromS3(stored.s3Key);
+      await deleteFromS3(stored.masterS3Key);
+    }
     job.status = 'failed';
     job.error = err.message && err.message.startsWith('FFmpeg')
       ? 'This file could not be read as audio.'
       : 'Processing failed. Please try uploading again.';
   } finally {
     job.finishedAt = Date.now();
-    await fs.promises.unlink(outputPath).catch(() => {});
     await datastore.remove(upload.id).catch(() => {});
   }
 }
@@ -169,8 +160,8 @@ async function init() {
         const isAudio = /^audio\//.test(meta.filetype || '') || ALLOWED_EXTS.test(meta.filename || '');
         if (!isAudio) throw tusError(400, 'Only audio files are allowed');
 
-        // MariaDB shares this disk. Need room for the upload plus its normalized
-        // WAV (can be larger than a compressed original), keeping a reserve free.
+        // MariaDB shares this disk. Need room for the upload plus its FLAC master
+        // and AAC copy (can exceed a compressed original), keeping a reserve free.
         const { bavail, bsize } = await fs.promises.statfs(UPLOAD_DIR);
         const freeBytes = bavail * bsize;
         if (freeBytes - upload.size * 2.5 < DISK_RESERVE_BYTES) {

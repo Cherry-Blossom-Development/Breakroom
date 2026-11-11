@@ -4,10 +4,13 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const path = require('path');
 const { getClient } = require('../utilities/db');
-const { uploadToS3, deleteFromS3, getS3Url, streamFromS3 } = require('../utilities/aws-s3');
-const { normalizeToWav } = require('../utilities/audio');
+const { deleteFromS3, getS3Url, streamFromS3, downloadFromS3 } = require('../utilities/aws-s3');
+const fs = require('fs');
+const os = require('os');
+const crypto = require('crypto');
+const { decodeToWav } = require('../utilities/audio');
 const { extractToken } = require('../utilities/auth');
-const { normalizeSessionType, checkFreeTierLimit, insertSession } = require('../utilities/sessionRecords');
+const { normalizeSessionType, checkFreeTierLimit, storeSessionAudio, insertSession } = require('../utilities/sessionRecords');
 const { listProcessing, dismissProcessing } = require('../utilities/sessionUploads');
 const { emitToUser } = require('../utilities/socket');
 const { checkAndFilterContent } = require('../utilities/contentFilter');
@@ -227,6 +230,50 @@ router.get('/:id/stream', authenticateToken, async (req, res) => {
   }
 });
 
+// GET /api/sessions/:id/master.wav — the lossless master decoded to WAV, for
+// building mashups (the regular /stream is the compressed playback copy).
+// Older sessions without a master are stored as WAV already and stream as-is.
+router.get('/:id/master.wav', authenticateToken, async (req, res) => {
+  const client = await getClient();
+  let row;
+  try {
+    if (!(await hasSessionAccess(client, req.params.id, req.user.id))) {
+      return res.status(404).json({ message: 'Session not found' });
+    }
+    const result = await client.query('SELECT s3_key, master_s3_key FROM sessions WHERE id = $1', [req.params.id]);
+    row = result.rows[0];
+  } catch (err) {
+    console.error('Error loading session master:', err);
+    return res.status(500).json({ message: 'Failed to load session' });
+  } finally {
+    client.release();
+  }
+
+  if (!row.master_s3_key) {
+    try { return await streamFromS3(row.s3_key, req, res); } catch (err) {
+      console.error('Error streaming session master:', err);
+      if (!res.headersSent) res.status(500).json({ message: 'Failed to stream session' });
+      return;
+    }
+  }
+
+  const base = path.join(os.tmpdir(), `br-master-${crypto.randomUUID()}`);
+  const cleanup = () => Promise.all([
+    fs.promises.unlink(`${base}.flac`).catch(() => {}),
+    fs.promises.unlink(`${base}.wav`).catch(() => {}),
+  ]);
+  try {
+    await downloadFromS3(row.master_s3_key, `${base}.flac`);
+    await decodeToWav(`${base}.flac`, `${base}.wav`);
+    await fs.promises.unlink(`${base}.flac`).catch(() => {});
+  } catch (err) {
+    console.error('Error decoding session master:', err);
+    await cleanup();
+    return res.status(500).json({ message: 'Failed to prepare session audio' });
+  }
+  res.sendFile(`${base}.wav`, { headers: { 'Content-Type': 'audio/wav', 'Cache-Control': 'private, no-store' } }, () => cleanup());
+});
+
 // POST /api/sessions — upload a new session in a single request. The web
 // file picker uses the resumable upload instead (utilities/sessionUploads.js);
 // this route serves in-browser recordings/mashups and the mobile apps.
@@ -244,33 +291,29 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
   const bandIdVal = band_id ? parseInt(band_id, 10) : null;
   const instrumentIdVal = instrument_id ? parseInt(instrument_id, 10) : null;
 
-  // Normalize to WAV: convert any format → 44100Hz 16-bit WAV with EBU R128 loudness normalization
-  let wavBuffer, durationMs;
+  // Normalize, then store a FLAC master + AAC playback copy
+  const tmpInput = path.join(os.tmpdir(), `br-${crypto.randomUUID()}.audio`);
+  let stored;
   try {
-    const result = await normalizeToWav(req.file.buffer);
-    wavBuffer = result.buffer;
-    durationMs = result.durationMs;
+    await fs.promises.writeFile(tmpInput, req.file.buffer);
+    stored = await storeSessionAudio(tmpInput, req.user.id, os.tmpdir());
   } catch (err) {
-    console.error('Audio normalization failed:', err);
+    console.error('Audio processing failed:', err);
     return res.status(500).json({ message: 'Failed to process audio: ' + err.message });
-  }
-
-  const s3Key = `sessions/${req.user.id}/${Date.now()}.wav`;
-
-  const uploadResult = await uploadToS3(wavBuffer, s3Key, 'audio/wav');
-  if (!uploadResult.success) {
-    return res.status(500).json({ message: 'Failed to upload to storage: ' + uploadResult.error });
+  } finally {
+    await fs.promises.unlink(tmpInput).catch(() => {});
   }
 
   try {
     const session = await insertSession({
-      userId: req.user.id, name, s3Key, fileSize: wavBuffer.length, recordedAt: recorded_at,
-      bandId: bandIdVal, sessionType: sessionTypeVal, instrumentId: instrumentIdVal, durationMs, site: req.site
+      userId: req.user.id, name, ...stored, recordedAt: recorded_at,
+      bandId: bandIdVal, sessionType: sessionTypeVal, instrumentId: instrumentIdVal, site: req.site
     });
     res.status(201).json({ session });
   } catch (err) {
     console.error('Error saving session:', err);
-    await deleteFromS3(s3Key);
+    await deleteFromS3(stored.s3Key);
+    await deleteFromS3(stored.masterS3Key);
     res.status(500).json({ message: 'Failed to save session' });
   }
 });
@@ -648,14 +691,15 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   const client = await getClient();
   try {
     const existing = await client.query(
-      'SELECT s3_key FROM sessions WHERE id = $1 AND user_id = $2',
+      'SELECT s3_key, master_s3_key FROM sessions WHERE id = $1 AND user_id = $2',
       [req.params.id, req.user.id]
     );
     if (existing.rowCount === 0) return res.status(404).json({ message: 'Session not found' });
 
-    const s3Key = existing.rows[0].s3_key;
+    const { s3_key: s3Key, master_s3_key: masterS3Key } = existing.rows[0];
     await client.query('DELETE FROM sessions WHERE id = $1', [req.params.id]);
     await deleteFromS3(s3Key);
+    if (masterS3Key) await deleteFromS3(masterS3Key);
 
     res.json({ message: 'Session deleted' });
   } catch (err) {

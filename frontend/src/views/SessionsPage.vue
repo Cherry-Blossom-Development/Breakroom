@@ -1438,8 +1438,9 @@ async function saveMerged() {
   isMerging.value = true
   mergeError.value = null
   try {
-    // Fetch backing track from server
-    const backingRes = await fetch(`/api/sessions/${mashupSelectedSession.value.id}/stream`, { credentials: 'include' })
+    // Fetch the backing track's lossless master (decoded to WAV) rather than
+    // the compressed playback copy, so mashups aren't built from lossy audio
+    const backingRes = await fetch(`/api/sessions/${mashupSelectedSession.value.id}/master.wav`, { credentials: 'include' })
     if (!backingRes.ok) throw new Error('Failed to fetch backing track')
     const backingArrayBuffer = await backingRes.arrayBuffer()
 
