@@ -81,6 +81,23 @@ async function decodeToWav(inputPath, outputPath) {
   ], timeoutForSize(size * 3), 'decode');
 }
 
+/**
+ * Output channel count (1 or 2) from ffmpeg's input stream line, e.g.
+ *   "Stream #0:0: Audio: pcm_s16le (...), 44100 Hz, stereo, s16, 1411 kb/s"
+ *   "Stream #0:0: Audio: mp3, 44100 Hz, mono, fltp, 128 kb/s"
+ *   "Stream #0:0: Audio: pcm_s16le, 48000 Hz, 4 channels, s16"
+ * ffmpeg names common layouts (mono, stereo, 5.1, ...) and only says
+ * "N channels" for unnamed ones. Anything with more than one channel keeps
+ * (or is downmixed to) stereo. Before 2026-11-11 this looked only for
+ * "N channels", so stereo uploads were stored as mono.
+ */
+function parseChannels(stderr) {
+  const line = (stderr.match(/Stream #\d+:\d+[^\n]*?Audio:[^\n]*/) || [])[0];
+  if (!line) return 1;
+  if (/,\s*mono\b/.test(line) || /,\s*1 channels?\b/.test(line)) return 1;
+  return 2;
+}
+
 /** Channel count of a file's first audio stream (for transcoding stored WAVs). */
 function probeChannels(inputPath) {
   return new Promise((resolve, reject) => {
@@ -152,12 +169,7 @@ function runFfmpegPass1(inputPath, timeoutMs) {
         return reject(new Error(`FFmpeg pass 1 failed (code ${code}): ${stderr.slice(-500)}`));
       }
 
-      // Parse channel count from stream info line, e.g. "Audio: pcm_s16le, 48000 Hz, 1 channels".
-      // NOTE: ffmpeg prints "mono"/"stereo" rather than "N channels" for common
-      // layouts, so in practice this almost always falls back to 1 (mono). That
-      // is long-standing behavior the mobile mashup code may rely on; change deliberately.
-      const channelMatch = stderr.match(/Audio:.*?(\d+)\s+channel/);
-      const channels = channelMatch ? Math.min(parseInt(channelMatch[1], 10), 2) : 1;
+      const channels = parseChannels(stderr);
 
       // Parse duration from FFmpeg output, e.g. "Duration: 00:03:45.12" or "Duration: 01:23:45.67"
       let durationMs = null;
@@ -195,4 +207,4 @@ function runFfmpegPass1(inputPath, timeoutMs) {
   });
 }
 
-module.exports = { processSessionAudio, transcodeSessionAudio, decodeToWav, probeChannels };
+module.exports = { processSessionAudio, transcodeSessionAudio, decodeToWav, probeChannels, parseChannels };
