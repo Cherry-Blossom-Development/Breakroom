@@ -1,5 +1,16 @@
 import { reactive } from 'vue'
 
+// Must match nginx client_max_body_size for the API (nginx/nginx.ec2.conf).
+// A little headroom is left for the other multipart form fields.
+export const MAX_UPLOAD_MB = 100
+const MAX_UPLOAD_BYTES = (MAX_UPLOAD_MB - 1) * 1024 * 1024
+
+function tooLargeMessage(size) {
+  const mb = Math.round(size / (1024 * 1024))
+  return `This file is ${mb} MB, which is over the ${MAX_UPLOAD_MB} MB upload limit. ` +
+    'Try exporting it as an MP3 or another compressed format, or split it into shorter recordings.'
+}
+
 const state = reactive({
   sessions: [],
   loaded: false
@@ -24,6 +35,10 @@ export const sessions = {
   },
 
   async upload(file, name, recordedAt, bandId, sessionType, instrumentId) {
+    if (file.size > MAX_UPLOAD_BYTES) {
+      throw new Error(tooLargeMessage(file.size))
+    }
+
     const formData = new FormData()
     formData.append('audio', file)
     formData.append('name', name)
@@ -39,8 +54,18 @@ export const sessions = {
     })
 
     if (!res.ok) {
-      const err = await res.json()
-      const error = new Error(err.message || 'Upload failed')
+      // Errors can come from nginx as an HTML page (e.g. 413 when the body is
+      // over client_max_body_size), so don't assume the body is JSON.
+      let err = {}
+      try { err = await res.json() } catch { /* non-JSON error page */ }
+      let message = err.message
+      if (!message) {
+        if (res.status === 413) message = tooLargeMessage(file.size)
+        else if (res.status === 502 || res.status === 503 || res.status === 504) {
+          message = 'The server did not respond in time. Please try again in a moment.'
+        } else message = `Upload failed (error ${res.status}).`
+      }
+      const error = new Error(message)
       if (err.requiresSubscription) error.requiresSubscription = true
       throw error
     }
