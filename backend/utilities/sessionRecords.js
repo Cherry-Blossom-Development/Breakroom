@@ -13,6 +13,34 @@ const { isMember } = require('./greywire');
 
 const FREE_LIMITS = { band: 3, individual: 3 };
 
+// Earliest recording date we accept. Catches a year typed as "26" (stored as
+// 0026, shown as 1926) while still allowing old recordings to be uploaded.
+const MIN_RECORDED_YEAR = 1950;
+
+/**
+ * Check a recorded_at value from a client ("YYYY-MM-DD", optionally followed by
+ * a time). Empty means "no date". Rejects impossible dates, years before
+ * MIN_RECORDED_YEAR, and dates in the future (one day of slack for time zones).
+ * @returns {{ value: string|null } | { error: string }}
+ */
+function validateRecordedAt(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return { value: null };
+  const m = String(raw).trim().match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ].*)?$/);
+  // setUTCFullYear, not Date.UTC: Date.UTC turns years 0-99 into 1900-1999
+  const date = m && new Date(new Date(0).setUTCFullYear(+m[1], +m[2] - 1, +m[3]));
+  if (!m || date.getUTCFullYear() !== +m[1] || date.getUTCMonth() !== +m[2] - 1 || date.getUTCDate() !== +m[3]) {
+    return { error: 'The recording date is not a valid date.' };
+  }
+  const value = `${m[1]}-${m[2]}-${m[3]}`;
+  if (+m[1] < MIN_RECORDED_YEAR) {
+    return { error: `The recording date (${value}) is before ${MIN_RECORDED_YEAR}. Please check the year.` };
+  }
+  if (date.getTime() > Date.now() + 24 * 60 * 60 * 1000) {
+    return { error: `The recording date (${value}) is in the future. Please check the date.` };
+  }
+  return { value };
+}
+
 function normalizeSessionType(sessionType) {
   return sessionType === 'individual' ? 'individual' : sessionType === 'mashup' ? 'mashup' : 'band';
 }
@@ -111,4 +139,4 @@ async function insertSession({ userId, name, s3Key, fileSize, masterS3Key = null
   }
 }
 
-module.exports = { FREE_LIMITS, normalizeSessionType, checkFreeTierLimit, storeSessionAudio, insertSession };
+module.exports = { FREE_LIMITS, MIN_RECORDED_YEAR, normalizeSessionType, validateRecordedAt, checkFreeTierLimit, storeSessionAudio, insertSession };

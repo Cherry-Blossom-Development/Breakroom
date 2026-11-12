@@ -18,7 +18,7 @@ const jwt = require('jsonwebtoken');
 const { getClient } = require('./db');
 const { extractToken } = require('./auth');
 const { deleteFromS3 } = require('./aws-s3');
-const { normalizeSessionType, checkFreeTierLimit, storeSessionAudio, insertSession } = require('./sessionRecords');
+const { normalizeSessionType, validateRecordedAt, checkFreeTierLimit, storeSessionAudio, insertSession } = require('./sessionRecords');
 
 const UPLOAD_PATH = '/api/sessions/uploads';
 const MAX_SESSION_UPLOAD_BYTES = Math.round(1.2 * 1024 ** 3); // 1.2 GB
@@ -157,6 +157,9 @@ async function init() {
         const meta = upload.metadata || {};
         if (!upload.size) throw tusError(400, 'Upload size is required');
 
+        const recordedAt = validateRecordedAt(meta.recorded_at);
+        if (recordedAt.error) throw tusError(400, recordedAt.error);
+
         const isAudio = /^audio\//.test(meta.filetype || '') || ALLOWED_EXTS.test(meta.filename || '');
         if (!isAudio) throw tusError(400, 'Only audio files are allowed');
 
@@ -180,6 +183,7 @@ async function init() {
             ...meta,
             name: (meta.name || '').trim().slice(0, 255) || 'Untitled Session',
             session_type: sessionType,
+            recorded_at: recordedAt.value || '',
             user_id: String(nodeReq.user.id),
             site: nodeReq.site,
           },

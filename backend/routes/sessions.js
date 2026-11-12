@@ -10,7 +10,7 @@ const os = require('os');
 const crypto = require('crypto');
 const { decodeToWav } = require('../utilities/audio');
 const { extractToken } = require('../utilities/auth');
-const { normalizeSessionType, checkFreeTierLimit, storeSessionAudio, insertSession } = require('../utilities/sessionRecords');
+const { normalizeSessionType, validateRecordedAt, checkFreeTierLimit, storeSessionAudio, insertSession } = require('../utilities/sessionRecords');
 const { listProcessing, dismissProcessing } = require('../utilities/sessionUploads');
 const { emitToUser } = require('../utilities/socket');
 const { checkAndFilterContent } = require('../utilities/contentFilter');
@@ -282,6 +282,8 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
 
   const { name, recorded_at, band_id, session_type, instrument_id } = req.body;
   const sessionTypeVal = normalizeSessionType(session_type);
+  const recordedAt = validateRecordedAt(recorded_at);
+  if (recordedAt.error) return res.status(400).json({ message: recordedAt.error });
 
   const limitError = await checkFreeTierLimit(req.user.id, sessionTypeVal, req.site);
   if (limitError) {
@@ -306,7 +308,7 @@ router.post('/', authenticateToken, audioUpload.single('audio'), async (req, res
 
   try {
     const session = await insertSession({
-      userId: req.user.id, name, ...stored, recordedAt: recorded_at,
+      userId: req.user.id, name, ...stored, recordedAt: recordedAt.value,
       bandId: bandIdVal, sessionType: sessionTypeVal, instrumentId: instrumentIdVal, site: req.site
     });
     res.status(201).json({ session });
@@ -589,6 +591,8 @@ router.post('/:id/sources', authenticateToken, async (req, res) => {
 // PATCH /api/sessions/:id — update name, recorded_at, band_id, and/or instrument_id
 router.patch('/:id', authenticateToken, async (req, res) => {
   const { name, recorded_at, band_id, instrument_id } = req.body;
+  const recordedAt = recorded_at === undefined ? null : validateRecordedAt(recorded_at);
+  if (recordedAt?.error) return res.status(400).json({ message: recordedAt.error });
   const client = await getClient();
   try {
     const existing = await client.query(
@@ -601,7 +605,7 @@ router.patch('/:id', authenticateToken, async (req, res) => {
     const values = [];
     let idx = 1;
     if (name !== undefined) { fields.push(`name = $${idx++}`); values.push(name); }
-    if (recorded_at !== undefined) { fields.push(`recorded_at = $${idx++}`); values.push(recorded_at || null); }
+    if (recorded_at !== undefined) { fields.push(`recorded_at = $${idx++}`); values.push(recordedAt.value); }
     if (band_id !== undefined) { fields.push(`band_id = $${idx++}`); values.push(band_id || null); }
     if (instrument_id !== undefined) { fields.push(`instrument_id = $${idx++}`); values.push(instrument_id || null); }
     if (fields.length === 0) return res.status(400).json({ message: 'Nothing to update' });

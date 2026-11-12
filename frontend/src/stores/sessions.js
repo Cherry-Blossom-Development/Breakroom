@@ -15,6 +15,23 @@ const CHUNK_SIZE = 10 * 1024 * 1024 // well under nginx's 100 MB request limit
 // Retry a dropped piece for ~10 minutes before giving up
 const RETRY_DELAYS = [0, 1000, 3000, 5000, 10000, 20000, 30000, 60000, 60000, 60000, 60000, 60000, 60000, 60000, 60000]
 
+// Recording dates must fall between MIN_RECORDED_DATE and today (the server
+// checks the same range, see validateRecordedAt in backend/utilities/sessionRecords.js).
+// Catches a year typed as "26", which ends up stored as the year 0026.
+export const MIN_RECORDED_DATE = '1950-01-01'
+export function todayISO() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+/** A message explaining what's wrong with a recording date, or null if it's fine (or empty). */
+export function recordedDateError(value) {
+  if (!value) return null
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return 'The recording date is not a valid date.'
+  if (value < MIN_RECORDED_DATE) return `The recording date (${value}) is before ${MIN_RECORDED_DATE.slice(0, 4)}. Please check the year.`
+  if (value > todayISO()) return `The recording date (${value}) is in the future. Please check the date.`
+  return null
+}
+
 function tooLargeMessage(size, limitLabel = `${MAX_UPLOAD_MB} MB`) {
   const mb = Math.round(size / (1024 * 1024))
   return `This file is ${mb.toLocaleString()} MB, which is over the ${limitLabel} upload limit. ` +
@@ -49,6 +66,8 @@ export const sessions = {
   },
 
   async upload(file, name, recordedAt, bandId, sessionType, instrumentId) {
+    const dateError = recordedDateError(recordedAt)
+    if (dateError) throw new Error(dateError)
     if (file.size > MAX_UPLOAD_BYTES) {
       throw new Error(tooLargeMessage(file.size))
     }
@@ -90,6 +109,8 @@ export const sessions = {
   },
 
   async update(id, patch) {
+    const dateError = recordedDateError(patch.recorded_at)
+    if (dateError) throw new Error(dateError)
     const res = await fetch(`/api/sessions/${id}`, {
       method: 'PATCH',
       credentials: 'include',
@@ -97,7 +118,11 @@ export const sessions = {
       body: JSON.stringify(patch)
     })
 
-    if (!res.ok) throw new Error('Update failed')
+    if (!res.ok) {
+      let message = 'Update failed'
+      try { message = (await res.json()).message || message } catch { /* not JSON */ }
+      throw new Error(message)
+    }
 
     const data = await res.json()
     const idx = state.sessions.findIndex(s => s.id === id)
@@ -148,6 +173,8 @@ export const sessions = {
    *   processes it in the background (see `processing`).
    */
   uploadResumable(file, { name, recordedAt, bandId, sessionType, instrumentId }, { onProgress, onRetrying } = {}) {
+    const dateError = recordedDateError(recordedAt)
+    if (dateError) return { promise: Promise.reject(new Error(dateError)), abort() {} }
     if (file.size > MAX_RESUMABLE_UPLOAD_BYTES) {
       return { promise: Promise.reject(new Error(tooLargeMessage(file.size, MAX_RESUMABLE_UPLOAD_LABEL))), abort() {} }
     }

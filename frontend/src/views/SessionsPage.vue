@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import draggable from 'vuedraggable'
-import { sessions } from '@/stores/sessions'
+import { sessions, MIN_RECORDED_DATE, todayISO } from '@/stores/sessions'
 import { shortlists } from '@/stores/shortlists'
 import { user } from '@/stores/user.js'
 import { authFetch } from '@/utilities/authFetch'
@@ -1126,9 +1126,14 @@ async function saveName(session, newName) {
   try { await sessions.update(session.id, { name: newName.trim() }) }
   catch (err) { console.error('Failed to update name:', err) }
 }
-async function saveRecordedAt(session, value) {
-  try { await sessions.update(session.id, { recorded_at: value || null }) }
-  catch (err) { console.error('Failed to update date:', err) }
+async function saveRecordedAt(session, input) {
+  try { await sessions.update(session.id, { recorded_at: input.value || null }) }
+  catch (err) {
+    console.error('Failed to update date:', err)
+    // Put the saved date back and say why the new one wasn't accepted
+    input.value = session.recorded_at ? session.recorded_at.slice(0, 10) : ''
+    alert(err.message)
+  }
 }
 async function saveBand(session, value) {
   try { await sessions.update(session.id, { band_id: value ? parseInt(value, 10) : null }) }
@@ -1940,7 +1945,7 @@ onMounted(async () => {
                 </div>
                 <div class="field">
                   <label class="field-label">Original recording date <span class="optional">(optional)</span></label>
-                  <input v-model="indivRecordedAt" type="date" class="text-input" :disabled="indivUploading" />
+                  <input v-model="indivRecordedAt" type="date" :min="MIN_RECORDED_DATE" :max="todayISO()" class="text-input" :disabled="indivUploading" />
                 </div>
               </template>
               <div class="field">
@@ -2043,9 +2048,9 @@ onMounted(async () => {
                         </select>
                       </td>
                       <td>
-                        <input type="date" class="inline-edit date-edit"
+                        <input type="date" :min="MIN_RECORDED_DATE" :max="todayISO()" class="inline-edit date-edit"
                                :value="session.recorded_at ? session.recorded_at.slice(0, 10) : ''"
-                               @change="e => saveRecordedAt(session, e.target.value)" />
+                               @change="e => saveRecordedAt(session, e.target)" />
                       </td>
                       <td class="muted">{{ formatDuration(session.duration_ms) }}</td>
                       <td class="col-rating">
@@ -2408,7 +2413,7 @@ onMounted(async () => {
               </div>
               <div class="field">
                 <label class="field-label">Original recording date <span class="optional">(optional)</span></label>
-                <input v-model="mashupRecordedAt" type="date" class="text-input" :disabled="mashupUploading" />
+                <input v-model="mashupRecordedAt" type="date" :min="MIN_RECORDED_DATE" :max="todayISO()" class="text-input" :disabled="mashupUploading" />
               </div>
               <div class="field">
                 <label class="field-label">Instrument <span class="optional">(optional)</span></label>
@@ -2738,7 +2743,7 @@ onMounted(async () => {
               </div>
               <div class="field">
                 <label class="field-label">Original recording date <span class="optional">(optional)</span></label>
-                <input v-model="recordedAt" type="date" class="text-input" :disabled="uploading" />
+                <input v-model="recordedAt" type="date" :min="MIN_RECORDED_DATE" :max="todayISO()" class="text-input" :disabled="uploading" />
               </div>
             </template>
             <div class="field">
@@ -2964,9 +2969,9 @@ onMounted(async () => {
                       </select>
                     </td>
                     <td>
-                      <input type="date" class="inline-edit date-edit"
+                      <input type="date" :min="MIN_RECORDED_DATE" :max="todayISO()" class="inline-edit date-edit"
                              :value="session.recorded_at ? session.recorded_at.slice(0, 10) : ''"
-                             @change="e => saveRecordedAt(session, e.target.value)" />
+                             @change="e => saveRecordedAt(session, e.target)" />
                     </td>
                     <td class="muted">{{ formatDuration(session.duration_ms) }}</td>
                     <td class="col-rating">
