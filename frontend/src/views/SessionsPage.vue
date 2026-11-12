@@ -3020,6 +3020,108 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- Band Members (same as the Individual tab's; this tab's band picker filters it) -->
+    <div class="indiv-section-heading">Band Members</div>
+    <div class="card sessions-card">
+      <div class="sessions-header">
+        <h2 class="card-title">Band Members' Recordings <span class="count">({{ filteredBandMemberSessions.length }})</span></h2>
+        <div v-if="bandMemberAvailableYears.length > 0" class="year-tabs">
+          <button class="year-tab" :class="{ active: bandMemberSelectedYear === null }" @click="bandMemberSelectedYear = null">All</button>
+          <button v-for="year in bandMemberAvailableYears" :key="year"
+                  class="year-tab" :class="{ active: bandMemberSelectedYear === year }"
+                  @click="bandMemberSelectedYear = year">{{ year }}</button>
+        </div>
+      </div>
+
+      <div v-if="filteredBandMemberSessions.length === 0" class="empty-state">
+        {{ bandMemberEmptyMessage }}
+      </div>
+
+      <div v-else>
+        <div v-for="group in bandMemberYearGroups" :key="group.year" class="year-group">
+          <div v-if="bandMemberSelectedYear === null" class="year-heading">{{ group.year }}</div>
+          <div v-for="mgroup in group.months" :key="mgroup.key" class="month-group">
+            <button class="month-heading" @click="toggleMonth(mgroup.key)">
+              <span class="month-chevron">{{ collapsedMonths.has(mgroup.key) ? '▶' : '▼' }}</span>
+              {{ mgroup.label }}
+              <span class="month-count">{{ mgroup.items.length }}</span>
+            </button>
+            <div v-if="!collapsedMonths.has(mgroup.key)" class="table-wrapper">
+              <table class="sessions-table">
+                <thead>
+                  <tr>
+                    <th class="col-play"></th>
+                    <th>Name</th>
+                    <th>Recorded</th>
+                    <th>Duration</th>
+                    <th>Rating</th>
+                    <th>Band</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <template v-for="session in mgroup.items" :key="session.id">
+                  <tr :class="{ playing: playingId === session.id }">
+                    <td class="col-play">
+                      <button class="play-btn" @click="togglePlay(session)"
+                              :title="playingId === session.id && isPlaying ? 'Pause' : 'Play'">
+                        {{ playingId === session.id && isPlaying ? '⏸' : '▶' }}
+                      </button>
+                    </td>
+                    <td class="col-name">
+                      <span class="session-name-text">{{ session.name }}</span>
+                      <span v-if="session.instrument_name" class="session-sub">{{ session.instrument_name }}</span>
+                      <span v-if="session.uploader_handle" class="session-sub muted">@{{ session.uploader_handle }}</span>
+                    </td>
+                    <td>{{ session.recorded_at ? session.recorded_at.slice(0, 10) : '—' }}</td>
+                    <td class="muted">{{ formatDuration(session.duration_ms) }}</td>
+                    <td class="col-rating">
+                      <div class="rating-cell" @click.stop>
+                        <span class="avg-rating" :class="{ unrated: !session.avg_rating }">
+                          {{ session.avg_rating ? `★ ${session.avg_rating}` : '★ —' }}
+                          <span v-if="session.rating_count > 0" class="rating-count">({{ session.rating_count }})</span>
+                        </span>
+                        <button class="rate-btn" :class="{ rated: session.my_rating }"
+                                @click="openBmRatingPopup(session.id, $event)"
+                                :title="session.my_rating ? `Your rating: ${session.my_rating}/10` : 'Rate this recording'">
+                          {{ session.my_rating ? session.my_rating : 'Rate' }}
+                        </button>
+                        <div v-if="bmRatingPopupId === session.id" class="rating-popup" @click.stop>
+                          <div class="popup-label">Your rating</div>
+                          <div class="popup-numbers">
+                            <button v-for="n in 10" :key="n" class="popup-num"
+                                    :class="{ selected: session.my_rating === n }"
+                                    @click="submitBandMemberRating(session, n)">{{ n }}</button>
+                          </div>
+                          <button v-if="session.my_rating" class="popup-clear" @click="submitBandMemberRating(session, null)">
+                            Clear rating
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+                    <td class="muted">{{ session.band_name || '—' }}</td>
+                    <td>
+                      <ShortlistButton :session="session" :bands="activeBands" />
+                      <button class="share-btn" @click="shareSession(session)" title="Share">⬆</button>
+                    </td>
+                  </tr>
+                  <tr v-if="playingId === session.id" class="player-row">
+                    <td colspan="7">
+                      <audio ref="audioEl" :src="`/api/sessions/${playingId}/stream`"
+                             @play="onAudioPlay" @pause="onAudioPause" @ended="onAudioEnded"
+                             @loadedmetadata="onAudioMetadata"
+                             controls preload="metadata"></audio>
+                    </td>
+                  </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     </template>
 
     <SessionsPaywallModal
