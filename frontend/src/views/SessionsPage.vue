@@ -813,7 +813,9 @@ const isPlaying = ref(false)
 
 // --- Grouping state ---
 const selectedYear = ref(null)
-const collapsedMonths = ref(new Set())
+// Months opened or closed by hand (key -> collapsed). Months not in here use their
+// list's default (collapsedByDefault on the month group).
+const monthCollapseOverrides = ref(new Map())
 
 // --- Rating popup ---
 const ratingPopupId = ref(null)
@@ -868,7 +870,7 @@ const yearGroups = computed(() => {
     if (!byYear[y][m]) byYear[y][m] = []
     byYear[y][m].push(s)
   }
-  return Object.entries(byYear)
+  return collapseAllButNewestMonth(Object.entries(byYear)
     .sort(([a], [b]) => (b === 'Unknown' ? -1 : a === 'Unknown' ? 1 : b - a))
     .map(([year, months]) => ({
       year,
@@ -880,13 +882,22 @@ const yearGroups = computed(() => {
           key: `${year}-${month}`,
           items
         }))
-    }))
+    })))
 })
 
-function toggleMonth(key) {
-  const s = new Set(collapsedMonths.value)
-  if (s.has(key)) s.delete(key); else s.add(key)
-  collapsedMonths.value = s
+function isMonthCollapsed(mgroup) {
+  const overrides = monthCollapseOverrides.value
+  return overrides.has(mgroup.key) ? overrides.get(mgroup.key) : !!mgroup.collapsedByDefault
+}
+function toggleMonth(mgroup) {
+  const overrides = new Map(monthCollapseOverrides.value)
+  overrides.set(mgroup.key, !isMonthCollapsed(mgroup))
+  monthCollapseOverrides.value = overrides
+}
+// Start with only the newest month open (groups are sorted newest first)
+function collapseAllButNewestMonth(groups) {
+  groups.forEach((g, gi) => g.months.forEach((m, mi) => { m.collapsedByDefault = gi > 0 || mi > 0 }))
+  return groups
 }
 
 // --- Playback ---
@@ -1062,22 +1073,32 @@ async function loadBandMemberSessions() {
   finally { bandMemberLoaded.value = true }
 }
 
-const filteredBandMemberSessions = computed(() => {
+const bandFilteredMemberSessions = computed(() => {
   if (practiceBandId.value === null) return bandMemberSessions.value
   // Other members' recordings always belong to a band, so "No band" has none (see /sessions/band-members)
   return bandMemberSessions.value.filter(s => String(s.band_id) === String(practiceBandId.value))
 })
 
-const bandMemberAvailableYears = computed(() => {
-  const years = new Set()
-  for (const s of filteredBandMemberSessions.value) { const y = sessionYear(s); if (y) years.add(y) }
-  return Array.from(years).sort((a, b) => b - a)
-})
+// Like the user's own recordings, a band member's recording shows only on the tab it
+// was made on: band practice recordings on Band Practice, everything else
+// (individual recordings, mashups) on Individual. session_type records which.
+const indivBandMemberSessions = computed(() => bandFilteredMemberSessions.value.filter(s => s.session_type !== 'band'))
+const practiceBandMemberSessions = computed(() => bandFilteredMemberSessions.value.filter(s => s.session_type === 'band'))
+const practiceBandMemberSelectedYear = ref(null)
 
-const bandMemberYearGroups = computed(() => {
-  const list = bandMemberSelectedYear.value
-    ? filteredBandMemberSessions.value.filter(s => sessionYear(s) === bandMemberSelectedYear.value)
-    : filteredBandMemberSessions.value
+function yearsOf(list) {
+  const years = new Set()
+  for (const s of list) { const y = sessionYear(s); if (y) years.add(y) }
+  return Array.from(years).sort((a, b) => b - a)
+}
+const bandMemberAvailableYears = computed(() => yearsOf(indivBandMemberSessions.value))
+const practiceBandMemberAvailableYears = computed(() => yearsOf(practiceBandMemberSessions.value))
+
+const bandMemberYearGroups = computed(() => groupByYearMonth(indivBandMemberSessions.value, bandMemberSelectedYear.value, 'bm'))
+const practiceBandMemberYearGroups = computed(() => groupByYearMonth(practiceBandMemberSessions.value, practiceBandMemberSelectedYear.value, 'pbm'))
+
+function groupByYearMonth(sessionList, year, keyPrefix) {
+  const list = year ? sessionList.filter(s => sessionYear(s) === year) : sessionList
   const byYear = {}
   for (const s of list) {
     const y = sessionYear(s) ?? 'Unknown'
@@ -1094,10 +1115,10 @@ const bandMemberYearGroups = computed(() => {
         .sort(([a], [b]) => (b === 'Unknown' ? -1 : a === 'Unknown' ? 1 : b - a))
         .map(([month, items]) => ({
           month, label: month === 'Unknown' ? 'Unknown Date' : MONTH_NAMES[month],
-          key: `bm-${year}-${month}`, items
+          key: `${keyPrefix}-${year}-${month}`, items
         }))
     }))
-})
+}
 
 function openBmRatingPopup(sessionId, event) {
   event.stopPropagation()
@@ -1205,6 +1226,7 @@ function keepYearValid(year, years) {
 keepYearValid(selectedYear, availableYears)
 keepYearValid(indivSelectedYear, indivAvailableYears)
 keepYearValid(bandMemberSelectedYear, bandMemberAvailableYears)
+keepYearValid(practiceBandMemberSelectedYear, practiceBandMemberAvailableYears)
 
 // What's open or playing belongs to the previous band
 watch(practiceBandId, () => {
@@ -2010,12 +2032,12 @@ onMounted(async () => {
           <div v-for="group in indivYearGroups" :key="group.year" class="year-group">
             <div v-if="indivSelectedYear === null" class="year-heading">{{ group.year }}</div>
             <div v-for="mgroup in group.months" :key="mgroup.key" class="month-group">
-              <button class="month-heading" @click="toggleMonth(mgroup.key)">
-                <span class="month-chevron">{{ collapsedMonths.has(mgroup.key) ? '▶' : '▼' }}</span>
+              <button class="month-heading" @click="toggleMonth(mgroup)">
+                <span class="month-chevron">{{ isMonthCollapsed(mgroup) ? '▶' : '▼' }}</span>
                 {{ mgroup.label }}
                 <span class="month-count">{{ mgroup.items.length }}</span>
               </button>
-              <div v-if="!collapsedMonths.has(mgroup.key)" class="table-wrapper">
+              <div v-if="!isMonthCollapsed(mgroup)" class="table-wrapper">
                 <table class="sessions-table">
                   <thead>
                     <tr>
@@ -2111,7 +2133,7 @@ onMounted(async () => {
       </div>
       <div class="card sessions-card">
         <div class="sessions-header">
-          <h2 class="card-title">Band Members' Recordings <span class="count">({{ filteredBandMemberSessions.length }})</span></h2>
+          <h2 class="card-title">Band Members' Recordings <span class="count">({{ indivBandMemberSessions.length }})</span></h2>
           <div v-if="bandMemberAvailableYears.length > 0" class="year-tabs">
             <button class="year-tab" :class="{ active: bandMemberSelectedYear === null }" @click="bandMemberSelectedYear = null">All</button>
             <button v-for="year in bandMemberAvailableYears" :key="year"
@@ -2120,7 +2142,7 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div v-if="filteredBandMemberSessions.length === 0" class="empty-state">
+        <div v-if="indivBandMemberSessions.length === 0" class="empty-state">
           {{ bandMemberEmptyMessage }}
         </div>
 
@@ -2128,12 +2150,12 @@ onMounted(async () => {
           <div v-for="group in bandMemberYearGroups" :key="group.year" class="year-group">
             <div v-if="bandMemberSelectedYear === null" class="year-heading">{{ group.year }}</div>
             <div v-for="mgroup in group.months" :key="mgroup.key" class="month-group">
-              <button class="month-heading" @click="toggleMonth(mgroup.key)">
-                <span class="month-chevron">{{ collapsedMonths.has(mgroup.key) ? '▶' : '▼' }}</span>
+              <button class="month-heading" @click="toggleMonth(mgroup)">
+                <span class="month-chevron">{{ isMonthCollapsed(mgroup) ? '▶' : '▼' }}</span>
                 {{ mgroup.label }}
                 <span class="month-count">{{ mgroup.items.length }}</span>
               </button>
-              <div v-if="!collapsedMonths.has(mgroup.key)" class="table-wrapper">
+              <div v-if="!isMonthCollapsed(mgroup)" class="table-wrapper">
                 <table class="sessions-table">
                   <thead>
                     <tr>
@@ -2930,13 +2952,13 @@ onMounted(async () => {
           <div v-if="selectedYear === null" class="year-heading">{{ group.year }}</div>
 
           <div v-for="mgroup in group.months" :key="mgroup.key" class="month-group">
-            <button class="month-heading" @click="toggleMonth(mgroup.key)">
-              <span class="month-chevron">{{ collapsedMonths.has(mgroup.key) ? '▶' : '▼' }}</span>
+            <button class="month-heading" @click="toggleMonth(mgroup)">
+              <span class="month-chevron">{{ isMonthCollapsed(mgroup) ? '▶' : '▼' }}</span>
               {{ mgroup.label }}
               <span class="month-count">{{ mgroup.items.length }}</span>
             </button>
 
-            <div v-if="!collapsedMonths.has(mgroup.key)" class="table-wrapper">
+            <div v-if="!isMonthCollapsed(mgroup)" class="table-wrapper">
               <table class="sessions-table">
                 <thead>
                   <tr>
@@ -3025,33 +3047,33 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Band Members (same as the Individual tab's; this tab's band picker filters it) -->
+    <!-- Band Members (band practice recordings only; this tab's band picker filters it) -->
     <div class="indiv-section-heading">Band Members</div>
     <div class="card sessions-card">
       <div class="sessions-header">
-        <h2 class="card-title">Band Members' Recordings <span class="count">({{ filteredBandMemberSessions.length }})</span></h2>
-        <div v-if="bandMemberAvailableYears.length > 0" class="year-tabs">
-          <button class="year-tab" :class="{ active: bandMemberSelectedYear === null }" @click="bandMemberSelectedYear = null">All</button>
-          <button v-for="year in bandMemberAvailableYears" :key="year"
-                  class="year-tab" :class="{ active: bandMemberSelectedYear === year }"
-                  @click="bandMemberSelectedYear = year">{{ year }}</button>
+        <h2 class="card-title">Band Members' Recordings <span class="count">({{ practiceBandMemberSessions.length }})</span></h2>
+        <div v-if="practiceBandMemberAvailableYears.length > 0" class="year-tabs">
+          <button class="year-tab" :class="{ active: practiceBandMemberSelectedYear === null }" @click="practiceBandMemberSelectedYear = null">All</button>
+          <button v-for="year in practiceBandMemberAvailableYears" :key="year"
+                  class="year-tab" :class="{ active: practiceBandMemberSelectedYear === year }"
+                  @click="practiceBandMemberSelectedYear = year">{{ year }}</button>
         </div>
       </div>
 
-      <div v-if="filteredBandMemberSessions.length === 0" class="empty-state">
+      <div v-if="practiceBandMemberSessions.length === 0" class="empty-state">
         {{ bandMemberEmptyMessage }}
       </div>
 
       <div v-else>
-        <div v-for="group in bandMemberYearGroups" :key="group.year" class="year-group">
-          <div v-if="bandMemberSelectedYear === null" class="year-heading">{{ group.year }}</div>
+        <div v-for="group in practiceBandMemberYearGroups" :key="group.year" class="year-group">
+          <div v-if="practiceBandMemberSelectedYear === null" class="year-heading">{{ group.year }}</div>
           <div v-for="mgroup in group.months" :key="mgroup.key" class="month-group">
-            <button class="month-heading" @click="toggleMonth(mgroup.key)">
-              <span class="month-chevron">{{ collapsedMonths.has(mgroup.key) ? '▶' : '▼' }}</span>
+            <button class="month-heading" @click="toggleMonth(mgroup)">
+              <span class="month-chevron">{{ isMonthCollapsed(mgroup) ? '▶' : '▼' }}</span>
               {{ mgroup.label }}
               <span class="month-count">{{ mgroup.items.length }}</span>
             </button>
-            <div v-if="!collapsedMonths.has(mgroup.key)" class="table-wrapper">
+            <div v-if="!isMonthCollapsed(mgroup)" class="table-wrapper">
               <table class="sessions-table">
                 <thead>
                   <tr>
