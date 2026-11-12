@@ -1030,30 +1030,7 @@ const indivAvailableYears = computed(() => {
   for (const s of indivSessions.value) { const y = sessionYear(s); if (y) years.add(y) }
   return Array.from(years).sort((a, b) => b - a)
 })
-const indivYearGroups = computed(() => {
-  const list = indivSelectedYear.value
-    ? indivSessions.value.filter(s => sessionYear(s) === indivSelectedYear.value)
-    : indivSessions.value
-  const byYear = {}
-  for (const s of list) {
-    const y = sessionYear(s) ?? 'Unknown'
-    const m = sessionMonth(s) ?? 'Unknown'
-    if (!byYear[y]) byYear[y] = {}
-    if (!byYear[y][m]) byYear[y][m] = []
-    byYear[y][m].push(s)
-  }
-  return Object.entries(byYear)
-    .sort(([a], [b]) => (b === 'Unknown' ? -1 : a === 'Unknown' ? 1 : b - a))
-    .map(([year, months]) => ({
-      year,
-      months: Object.entries(months)
-        .sort(([a], [b]) => (b === 'Unknown' ? -1 : a === 'Unknown' ? 1 : b - a))
-        .map(([month, items]) => ({
-          month, label: month === 'Unknown' ? 'Unknown Date' : MONTH_NAMES[month],
-          key: `indiv-${year}-${month}`, items
-        }))
-    }))
-})
+const indivYearGroups = computed(() => groupByYearMonth(indivSessions.value, indivSelectedYear.value, 'indiv'))
 
 // --- Band Members sessions ---
 const bandMemberSessions = ref([])
@@ -1097,6 +1074,7 @@ const practiceBandMemberAvailableYears = computed(() => yearsOf(practiceBandMemb
 const bandMemberYearGroups = computed(() => groupByYearMonth(indivBandMemberSessions.value, bandMemberSelectedYear.value, 'bm'))
 const practiceBandMemberYearGroups = computed(() => groupByYearMonth(practiceBandMemberSessions.value, practiceBandMemberSelectedYear.value, 'pbm'))
 
+// Year -> month groups, newest first, with only the newest month open by default
 function groupByYearMonth(sessionList, year, keyPrefix) {
   const list = year ? sessionList.filter(s => sessionYear(s) === year) : sessionList
   const byYear = {}
@@ -1107,7 +1085,7 @@ function groupByYearMonth(sessionList, year, keyPrefix) {
     if (!byYear[y][m]) byYear[y][m] = []
     byYear[y][m].push(s)
   }
-  return Object.entries(byYear)
+  return collapseAllButNewestMonth(Object.entries(byYear)
     .sort(([a], [b]) => (b === 'Unknown' ? -1 : a === 'Unknown' ? 1 : b - a))
     .map(([year, months]) => ({
       year,
@@ -1117,7 +1095,7 @@ function groupByYearMonth(sessionList, year, keyPrefix) {
           month, label: month === 'Unknown' ? 'Unknown Date' : MONTH_NAMES[month],
           key: `${keyPrefix}-${year}-${month}`, items
         }))
-    }))
+    })))
 }
 
 function openBmRatingPopup(sessionId, event) {
