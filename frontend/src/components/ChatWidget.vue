@@ -193,6 +193,19 @@ const closeAttachMenu = () => {
   showAttachMenu.value = false
 }
 
+// The menu is teleported to <body> and fixed-positioned from the button's
+// screen position, so close it on outside clicks and whenever the button
+// could move (scroll/resize) rather than leave it floating in the wrong place.
+const attachMenuRef = ref(null)
+const handleAttachMenuOutsideClick = (e) => {
+  if (!showAttachMenu.value) return
+  if (attachMenuRef.value?.contains(e.target) || attachBtnRef.value?.contains(e.target)) return
+  closeAttachMenu()
+}
+const handleAttachMenuViewportChange = (e) => {
+  if (showAttachMenu.value && !attachMenuRef.value?.contains(e.target)) closeAttachMenu()
+}
+
 // Socket reference
 let socket = null
 let typingTimeout = null
@@ -619,10 +632,16 @@ onMounted(async () => {
   await nextTick()
   messagesContainer.value?.addEventListener('scroll', handleScroll)
   document.addEventListener('click', handleMsgMenuOutsideClick)
+  document.addEventListener('click', handleAttachMenuOutsideClick)
+  window.addEventListener('scroll', handleAttachMenuViewportChange, true)
+  window.addEventListener('resize', handleAttachMenuViewportChange)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleMsgMenuOutsideClick)
+  document.removeEventListener('click', handleAttachMenuOutsideClick)
+  window.removeEventListener('scroll', handleAttachMenuViewportChange, true)
+  window.removeEventListener('resize', handleAttachMenuViewportChange)
   messagesContainer.value?.removeEventListener('scroll', handleScroll)
   cleanupSocket()
 })
@@ -756,8 +775,11 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
       </div>
 
       <div class="input-wrapper">
-        <!-- Attachment menu popup -->
-        <div v-if="showAttachMenu" class="attach-menu" :style="attachMenuStyle">
+        <!-- Attachment menu popup. Teleported to <body>: Breakroom grid items use
+             CSS transforms, which make position:fixed relative to the widget
+             instead of the screen and threw the menu to the top / off-screen. -->
+        <Teleport to="body">
+        <div v-if="showAttachMenu" ref="attachMenuRef" class="attach-menu" :style="attachMenuStyle">
           <button
             type="button"
             class="attach-option"
@@ -777,6 +799,7 @@ watch(() => props.roomId, (newRoomId, oldRoomId) => {
             <span>Video</span>
           </button>
         </div>
+        </Teleport>
 
         <form class="input-area" @submit.prevent="sendMessage">
           <input
