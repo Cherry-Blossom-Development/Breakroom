@@ -78,14 +78,7 @@ async function acceptInvite() {
           <strong>{{ inviteInfo.band_name }}</strong> on {{ siteName }}.
         </p>
 
-        <!-- Greywire: a signed-in non-member claims a pedal first; the claim
-             page accepts this invite afterwards -->
-        <div v-if="isGreywire && user.username && !user.greywireMember" class="invite-auth-options">
-          <p>The Greywire community is for Greywire pedal owners. Claim your pedal to join the band.</p>
-          <RouterLink :to="`/claim?bandInvite=${token}`" class="btn-primary">Claim My Pedal &amp; Join</RouterLink>
-        </div>
-
-        <div v-else-if="user.username" class="invite-actions">
+        <div v-if="user.username" class="invite-actions">
           <div v-if="acceptError" class="error-msg">{{ acceptError }}</div>
           <button class="btn-primary" :disabled="accepting" @click="acceptInvite">
             {{ accepting ? 'Joining…' : `Join ${inviteInfo.band_name}` }}

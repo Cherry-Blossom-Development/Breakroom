@@ -198,9 +198,7 @@ function teardownNotificationSocket() {
 
 recordVisit()
 
-// On the Greywire site only members can use the API, so a signed-in
-// non-member (who sits on the claim page) gets none of the services below.
-const canUseServices = () => user.username && !user.isGuest && (!isGreywire || user.greywireMember)
+const canUseServices = () => user.username && !user.isGuest
 
 // Guests are game-only accounts — they never see chat/blog/friends, so skip
 // all the notification/badge/event machinery that backs those surfaces.
@@ -222,8 +220,7 @@ user.fetchUser().then(() => {
   }
 })
 
-// greywireMember changes without the username changing when a pedal is claimed
-watch(() => [user.username, user.greywireMember], () => {
+watch(() => user.username, () => {
   checkAdminPermission()
   checkMarketingPermission()
   if (canUseServices()) {
@@ -378,8 +375,8 @@ setInterval(() => {
   </template>
 
   <!-- Logged-in: sidebar + bottom bar navigation -->
-  <!-- (On Greywire, only members get the app; others see the public header) -->
-  <template v-else-if="user.username && !route.meta.publicLayout && (!isGreywire || user.greywireMember)">
+  <!-- (On Greywire, guest accounts can't use the app and see the public header) -->
+  <template v-else-if="user.username && !route.meta.publicLayout && (!isGreywire || !user.isGuest)">
     <!-- Impersonation banner -->
     <div v-if="impersonatedUser" class="impersonation-banner">
       <span>⚠ Admin impersonation of <strong>{{ impersonatedUser }}</strong> — all actions are real</span>

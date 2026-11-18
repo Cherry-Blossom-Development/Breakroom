@@ -70,12 +70,6 @@ export default {
 
         // Accept band email invite if one was in the URL
         const bandInviteToken = this.route.query.bandInvite
-        // Greywire non-members can't join a band yet; the claim page accepts
-        // the invite once their pedal is claimed
-        if (bandInviteToken && isGreywire && !user.greywireMember) {
-          this.router.push({ name: 'greywireClaim', query: { bandInvite: bandInviteToken } })
-          return
-        }
         if (bandInviteToken) {
           try {
             await fetch(`${apiBase}/api/bands/invite/${bandInviteToken}/accept`, {

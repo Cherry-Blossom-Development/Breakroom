@@ -171,12 +171,6 @@ export default {
 
           // Accept band email invite if one was in the URL
           const bandInviteToken = this.route.query.bandInvite;
-          // A new Greywire account has no pedal yet: claim first, and the
-          // claim page accepts the invite afterwards
-          if (isGreywire) {
-            this.router.push({ name: 'greywireClaim', query: bandInviteToken ? { bandInvite: bandInviteToken } : {} });
-            return;
-          }
           if (bandInviteToken) {
             try {
               await fetch(`${apiBase}/api/bands/invite/${bandInviteToken}/accept`, {
@@ -188,8 +182,8 @@ export default {
             return;
           }
 
-          // Redirect to breakroom on success
-          this.router.push('/breakroom');
+          // Redirect to breakroom on success (Greywire has no breakroom: chat)
+          this.router.push(isGreywire ? '/chat' : '/breakroom');
 
         } catch (error) {
           // Check if the error response is a 409 Conflict

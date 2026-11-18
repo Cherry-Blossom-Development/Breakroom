@@ -11,8 +11,8 @@ export async function authFetch(url, options = {}) {
   })
 
   if (res.status === 401 || res.status === 403) {
-    // On the Greywire site a signed-in non-member gets 403s everywhere; send
-    // them to the claim page (once, so this can't loop) rather than home.
+    // On the Greywire site a guest account gets 403s everywhere; send it to
+    // the claim page, which tells guests to sign up (once, so this can't loop).
     if (isGreywire && res.status === 403) {
       const body = await res.clone().json().catch(() => ({}))
       if (body.code === 'GREYWIRE_MEMBERSHIP_REQUIRED') {

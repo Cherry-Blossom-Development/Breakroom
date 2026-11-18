@@ -56,9 +56,10 @@ import LegalPage from '@/views/profile/ProfileLegal.vue'
 
 // Greywire community (community.greywirestudio.com) gets its own route table:
 // only the music social features (chat, Sessions, friends, profile). Pages are
-// shared with Prosaurus. meta.requiresMember sends signed-in users without a
-// claimed pedal to the claim page (see the guard below).
-const memberOnly = { requiresAuth: true, requiresMember: true }
+// shared with Prosaurus. Greywire is open to any full account (pedal owners get
+// it free of limits); meta.requiresFullAccount sends guest accounts, which can't
+// use it, to the claim page, which tells them to sign up (see the guard below).
+const fullAccountOnly = { requiresAuth: true, requiresFullAccount: true }
 const greywireRoutes = [
   {
     path: '/',
@@ -80,8 +81,8 @@ const greywireRoutes = [
   { path: '/eula', name: 'eula', component: () => import('../views/EulaPage.vue') },
   { path: '/terms', redirect: '/eula' },
   { path: '/privacy', name: 'privacy', component: () => import('../views/PrivacyPolicyPage.vue') },
-  { path: '/chat', name: 'chat', component: () => import('../views/ChatPage.vue'), meta: memberOnly },
-  { path: '/sessions', name: 'sessions', component: () => import('../views/SessionsPage.vue'), meta: memberOnly },
+  { path: '/chat', name: 'chat', component: () => import('../views/ChatPage.vue'), meta: fullAccountOnly },
+  { path: '/sessions', name: 'sessions', component: () => import('../views/SessionsPage.vue'), meta: fullAccountOnly },
   {
     path: '/sessions/:id',
     name: 'publicSession',
@@ -89,14 +90,14 @@ const greywireRoutes = [
     meta: { publicLayout: true }, // Share links work for anyone
   },
   { path: '/band-invite/:token', name: 'bandInvite', component: () => import('../views/BandInvitePage.vue') },
-  { path: '/friends', name: 'friends', component: () => import('../views/FriendsPage.vue'), meta: memberOnly },
+  { path: '/friends', name: 'friends', component: () => import('../views/FriendsPage.vue'), meta: fullAccountOnly },
   // Profiles are members-only here, so they show inside the app, not publicly
-  { path: '/user/:handle', name: 'publicProfile', component: () => import('../views/PublicProfilePage.vue'), meta: memberOnly },
+  { path: '/user/:handle', name: 'publicProfile', component: () => import('../views/PublicProfilePage.vue'), meta: fullAccountOnly },
   {
     path: '/profile',
     name: 'profile',
     component: ProfileLayout,
-    meta: memberOnly,
+    meta: fullAccountOnly,
     children: [
       { path: '', component: ProfilePage },
       { path: 'billing', component: BillingPage },
@@ -555,15 +556,15 @@ router.beforeEach(async (to, from, next) => {
     await user.fetchUser()
   }
 
-  // Greywire community: signed-out visitors go to its home page, and signed-in
-  // users without a claimed pedal go to the claim page.
+  // Greywire community: signed-out visitors go to its home page, and guest
+  // accounts go to the claim page (which tells them to sign up).
   if (isGreywire) {
     if (to.matched.some(record => record.meta.requiresAuth) && !user.username) {
       next({ name: 'greywireHome' })
-    } else if (to.matched.some(record => record.meta.requiresMember) && !user.greywireMember) {
+    } else if (to.matched.some(record => record.meta.requiresFullAccount) && user.isGuest) {
       next({ name: 'greywireClaim' })
     } else if (to.name === 'greywireHome' && user.username) {
-      next(user.greywireMember ? { name: 'chat' } : { name: 'greywireClaim' })
+      next(user.isGuest ? { name: 'greywireClaim' } : { name: 'chat' })
     } else {
       next()
     }
