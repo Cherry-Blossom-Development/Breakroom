@@ -1,8 +1,14 @@
 /**
- * Greywire membership. Only members can use the Greywire community site
- * (community.greywirestudio.com). A user is a member while they hold a claimed
- * pedal in greywire_pedals, or while an admin's grant stands
- * (users.greywire_granted_at). See data/migrations/090-greywire-pedals.sql.
+ * Greywire membership and Greywire users.
+ *
+ * A member holds a claimed pedal in greywire_pedals, or an admin's grant
+ * (users.greywire_granted_at); see data/migrations/090-greywire-pedals.sql.
+ * Members have no free-tier limits on Greywire.
+ *
+ * Greywire isn't members-only (migration 097): any full account can use it,
+ * with the same free tier and subscription as Prosaurus. A Greywire user is an
+ * account that has used Greywire (users.greywire_joined_at) or is a member;
+ * friends, search, profiles and band invites on Greywire show only them.
  */
 
 /**
@@ -21,6 +27,47 @@ async function isMember(client, userId) {
     [userId]
   );
   return result.rowCount > 0;
+}
+
+/**
+ * SQL condition that's true when the user aliased `alias` is a Greywire user:
+ * they've used Greywire, or they're a member. Guests never count. Uses no
+ * parameters, like memberSql.
+ */
+function greywireUserSql(alias = 'u') {
+  return `(${alias}.is_guest = FALSE AND (${alias}.greywire_joined_at IS NOT NULL OR ${memberSql(alias)}))`;
+}
+
+async function isGreywireUser(client, userId) {
+  const result = await client.query(
+    `SELECT 1 FROM users u WHERE u.id = $1 AND ${greywireUserSql('u')}`,
+    [userId]
+  );
+  return result.rowCount > 0;
+}
+
+/**
+ * Records that an account is using Greywire. The first time, it sets
+ * greywire_joined_at and puts the account in the Greywire default rooms.
+ * Returns false for guest accounts (game-only, never Greywire users) and
+ * unknown users, true otherwise. Called on every signed-in Greywire request
+ * (middleware/greywireAccess.js) and socket connection, so it does one cheap
+ * read and writes only the first time.
+ */
+async function ensureGreywireUser(client, userId) {
+  const user = await client.query(
+    'SELECT is_guest, greywire_joined_at FROM users WHERE id = $1',
+    [userId]
+  );
+  if (user.rowCount === 0 || user.rows[0].is_guest) return false;
+  if (user.rows[0].greywire_joined_at === null) {
+    await client.query(
+      'UPDATE users SET greywire_joined_at = NOW() WHERE id = $1 AND greywire_joined_at IS NULL',
+      [userId]
+    );
+    await joinDefaultRooms(client, userId);
+  }
+  return true;
 }
 
 /**
@@ -54,8 +101,8 @@ async function getMembership(client, userId) {
 }
 
 /**
- * Puts a new member in the Greywire site's default chat rooms. Called when
- * someone claims a pedal or is granted membership; safe to repeat.
+ * Puts a user in the Greywire site's default chat rooms. Called when someone
+ * first uses Greywire, claims a pedal or is granted membership; safe to repeat.
  */
 async function joinDefaultRooms(client, userId) {
   await client.query(
@@ -77,4 +124,7 @@ function normalizeSerial(input) {
   return /^[0-9A-F]{16}$/.test(hex) ? hex : null;
 }
 
-module.exports = { memberSql, isMember, getMembership, joinDefaultRooms, normalizeSerial };
+module.exports = {
+  memberSql, isMember, greywireUserSql, isGreywireUser, ensureGreywireUser,
+  getMembership, joinDefaultRooms, normalizeSerial,
+};
