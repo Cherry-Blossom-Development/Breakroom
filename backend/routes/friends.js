@@ -5,15 +5,16 @@ const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { emitToUser, isOnline } = require('../utilities/socket');
 const { sendToUser } = require('../utilities/fcm');
-const { memberSql, isMember } = require('../utilities/greywire');
+const { greywireUserSql, isGreywireUser } = require('../utilities/greywire');
 
 require('dotenv').config();
 
 const SECRET_KEY = process.env.SECRET_KEY;
 
-// On the Greywire site, friends lists only show Greywire members. Friendships
-// themselves are shared between sites, like accounts.
-const greywireOnly = (req, alias = 'u') => (req.site === 'greywire' ? `AND ${memberSql(alias)}` : '');
+// On the Greywire site, friends lists and search only show Greywire users
+// (accounts that have used Greywire, or members; see utilities/greywire.js).
+// Friendships themselves are shared between sites, like accounts.
+const greywireOnly = (req, alias = 'u') => (req.site === 'greywire' ? `AND ${greywireUserSql(alias)}` : '');
 
 // Auth middleware
 const authenticate = async (req, res, next) => {
@@ -158,8 +159,8 @@ router.post('/request/:userId', authenticate, async (req, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // On the Greywire site you can only befriend other members.
-    if (req.site === 'greywire' && !(await isMember(client, targetUserId))) {
+    // On the Greywire site you can only befriend other Greywire users.
+    if (req.site === 'greywire' && !(await isGreywireUser(client, targetUserId))) {
       return res.status(404).json({ message: 'User not found' });
     }
 
@@ -229,8 +230,8 @@ router.post('/accept/:userId', authenticate, async (req, res) => {
       return res.status(404).json({ message: 'Friend request not found' });
     }
 
-    // Requests from non-members are hidden on the Greywire site (see /requests)
-    if (req.site === 'greywire' && !(await isMember(client, requesterUserId))) {
+    // Requests from non-Greywire users are hidden on the Greywire site (see /requests)
+    if (req.site === 'greywire' && !(await isGreywireUser(client, requesterUserId))) {
       return res.status(404).json({ message: 'Friend request not found' });
     }
 

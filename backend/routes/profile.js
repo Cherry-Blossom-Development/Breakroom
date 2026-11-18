@@ -7,7 +7,7 @@ const jwt = require('jsonwebtoken');
 const { getClient } = require('../utilities/db');
 const { uploadToS3, deleteFromS3 } = require('../utilities/aws-s3');
 const { extractToken } = require('../utilities/auth');
-const { memberSql } = require('../utilities/greywire');
+const { greywireUserSql } = require('../utilities/greywire');
 
 require('dotenv').config();
 
@@ -175,10 +175,10 @@ router.get('/user/:handle', async (req, res) => {
   const client = await getClient();
 
   try {
-    // On the Greywire site, only members have profiles
+    // On the Greywire site, only Greywire users have profiles
     const result = await client.query(
       `SELECT u.id, u.handle, u.first_name, u.last_name, u.bio, u.work_bio, u.photo_path, u.created_at
-       FROM users u WHERE u.handle = $1 ${req.site === 'greywire' ? `AND ${memberSql('u')}` : ''}`,
+       FROM users u WHERE u.handle = $1 ${req.site === 'greywire' ? `AND ${greywireUserSql('u')}` : ''}`,
       [handle]
     );
 

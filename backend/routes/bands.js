@@ -7,7 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
 const { isSubscribed } = require('../utilities/subscription');
-const { isMember } = require('../utilities/greywire');
+const { isMember, isGreywireUser } = require('../utilities/greywire');
 const { sendMail, sendMailToUser } = require('../utilities/aws-ses-email');
 const { uploadToS3, deleteFromS3, getS3Url } = require('../utilities/aws-s3');
 const { emitToUser } = require('../utilities/socket');
@@ -361,9 +361,9 @@ async function inviteExistingUserToBand(client, { bandId, targetUser, inviterId 
   const bandRow = await client.query('SELECT name, site FROM bands WHERE id = $1', [bandId]);
   const { name: bandName, site: bandSite } = bandRow.rows[0];
 
-  // A Greywire band can only take Greywire members (the site is members-only)
-  if (bandSite === 'greywire' && !(await isMember(client, targetUser.id))) {
-    return { error: { status: 400, message: `@${targetUser.handle} isn't a Greywire member yet` } };
+  // A Greywire band can only take Greywire users (accounts that have used Greywire)
+  if (bandSite === 'greywire' && !(await isGreywireUser(client, targetUser.id))) {
+    return { error: { status: 400, message: `@${targetUser.handle} hasn't joined Greywire yet` } };
   }
 
   const existing = await client.query(
