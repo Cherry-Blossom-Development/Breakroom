@@ -1,5 +1,6 @@
 <template>
-  <!-- Greywire site: membership is free with a pedal, so there are no plans -->
+  <!-- Greywire site: membership is free with a pedal. Plans for accounts
+       without one (the shared subscription) are roadmap step 1.10. -->
   <section v-if="plan && plan.greywire" class="billing-page">
     <h2>Billing &amp; Membership</h2>
 
@@ -9,7 +10,7 @@
     </div>
     <div v-else class="current-plan-banner banner--free">
       <span class="current-plan-label">Not a member yet</span>
-      <span class="current-plan-detail">Claim your pedal's serial to join.</span>
+      <span class="current-plan-detail">Own a Greywire pedal? <RouterLink to="/claim">Claim it</RouterLink> to remove the free limits.</span>
     </div>
 
     <ul v-if="plan.greywire.member" class="membership-list">

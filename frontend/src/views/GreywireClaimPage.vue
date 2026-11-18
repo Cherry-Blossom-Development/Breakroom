@@ -1,8 +1,9 @@
 <script setup>
 // Where a signed-in user claims a Greywire pedal's serial to become a member
-// (POST /api/greywire/claim). The router sends non-members here from every
-// members-only page. Members can come back to claim another pedal. A band
-// invite token in ?bandInvite= is accepted once the claim goes through.
+// (POST /api/greywire/claim), which lifts the free-tier limits. Members can
+// come back to claim another pedal. The router also sends guest accounts here,
+// and the page tells them to sign up. A band invite token in ?bandInvite= is
+// accepted once the claim goes through.
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { user } from '@/stores/user.js'
@@ -59,9 +60,8 @@ async function claim() {
   }
 }
 
-// The user store learns about the new membership only on the way out: once
-// it does, App.vue swaps the public layout for the member one, which remounts
-// this page and would wipe the "You're in!" message.
+// The user store learns about the new membership only on the way out, so the
+// "You're in!" message stays up until the user moves on.
 async function enterCommunity(path) {
   await user.fetchUser()
   router.push(path)
@@ -97,11 +97,11 @@ function formatDate(str) {
 
       <template v-else>
         <h1 v-if="membership?.member">Claim another pedal</h1>
-        <h1 v-else>Access needs a Greywire pedal</h1>
+        <h1 v-else>Claim your pedal</h1>
 
         <p v-if="!membership?.member" class="claim-lede">
-          The Greywire community is for people who own a Greywire pedal. Claim yours to get in.
-          It's free, with no subscription, for as long as you own the pedal.
+          Every Greywire pedal comes with a free membership: no limits on recordings or bands,
+          and no subscription, for as long as you own the pedal.
         </p>
 
         <ul v-if="membership?.member" class="claim-pedals">
@@ -133,7 +133,7 @@ function formatDate(str) {
         <p class="claim-footnote">
           Bought a pedal second-hand and it's already claimed? Contact support and we'll move it to your account.
         </p>
-        <RouterLink v-if="membership?.member" to="/chat" class="claim-back">Back to the community</RouterLink>
+        <RouterLink to="/chat" class="claim-back">Back to the community</RouterLink>
       </template>
     </div>
   </main>

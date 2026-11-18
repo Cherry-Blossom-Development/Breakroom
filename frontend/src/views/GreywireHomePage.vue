@@ -1,7 +1,7 @@
 <script setup>
 // Front door of the Greywire community for signed-out visitors. Signed-in
-// users never see it: the router sends members to Chat and everyone else to
-// the claim page.
+// users never see it: the router sends them to Chat (guest accounts to the
+// claim page, which tells them to sign up).
 </script>
 
 <template>
@@ -11,7 +11,7 @@
       <h1>The Greywire Community</h1>
       <p class="gw-lede">
         Chat, share recordings and practice with your band, alongside other Greywire players.
-        Membership is free with every Greywire pedal.
+        Free to start, and free of limits with every Greywire pedal.
       </p>
       <div class="gw-actions">
         <RouterLink to="/signup" class="gw-btn gw-btn-primary">Create an account</RouterLink>
@@ -37,9 +37,9 @@
     <section class="gw-join">
       <h2>How to join</h2>
       <ol>
-        <li>Create an account.</li>
-        <li>Find your pedal's serial number: a 16-character code of digits and the letters A to F.</li>
-        <li>Claim it here. Each pedal can be claimed once, and it gets you in for as long as you own it.</li>
+        <li>Create an account, and start right away. Free accounts have a few limits on recordings and bands; a subscription removes them.</li>
+        <li>Own a Greywire pedal? Find its serial number: a 16-character code of digits and the letters A to F.</li>
+        <li>Claim it here. Each pedal can be claimed once, and your account has no limits, with no subscription, for as long as you own it.</li>
       </ol>
       <p class="gw-note">
         Greywire pedals are still in development. Follow along at

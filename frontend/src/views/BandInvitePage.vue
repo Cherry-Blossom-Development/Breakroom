@@ -86,7 +86,7 @@ async function acceptInvite() {
         </div>
 
         <div v-else class="invite-auth-options">
-          <p v-if="isGreywire">You need a Greywire community account and a Greywire pedal to join the band.</p>
+          <p v-if="isGreywire">You need a Greywire community account to join the band.</p>
           <p v-else>You need a Prosaurus account to join the band.</p>
           <RouterLink :to="`/signup?bandInvite=${token}`" class="btn-primary">Create Account &amp; Join</RouterLink>
           <RouterLink :to="`/login?bandInvite=${token}`" class="btn-secondary">Log In &amp; Join</RouterLink>

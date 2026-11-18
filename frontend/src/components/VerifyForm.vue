@@ -18,7 +18,7 @@
         <h2>Email Verified!</h2>
         <p class="subtitle">Your email address has been successfully verified.</p>
         <template v-if="isGreywire">
-          <p class="message">Next, claim your Greywire pedal to get into the community.</p>
+          <p class="message">Your account is ready. Own a Greywire pedal? Claim it from Billing &amp; Membership to remove the free limits.</p>
           <router-link to="/" class="btn-primary">Continue</router-link>
         </template>
         <template v-else>
