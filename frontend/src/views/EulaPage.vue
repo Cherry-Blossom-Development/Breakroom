@@ -15,7 +15,7 @@
     </div>
     <h1>End User License Agreement</h1>
     <p class="app-subtitle">{{ isGreywire ? 'Greywire Studio community — community.greywirestudio.com' : 'Prosaurus — prosaurus.com' }}</p>
-    <p class="effective-date">Effective Date: {{ isGreywire ? 'October 22, 2026' : 'March 18, 2026' }}</p>
+    <p class="effective-date">Effective Date: {{ isGreywire ? 'November 20, 2026' : 'March 18, 2026' }}</p>
 
     <p class="intro">
       This End User License Agreement ("EULA" or "Agreement") is a legal agreement between you
@@ -51,22 +51,25 @@
     </div>
 
     <div v-if="isGreywire" class="section">
-      <h2>3. Greywire Membership</h2>
+      <h2>3. Free Accounts, Subscriptions and Greywire Membership</h2>
       <p>
-        The community is open to members only. Membership is free and comes with a Greywire Studio
-        pedal: you join by claiming your pedal's serial number, or by invitation from us.
+        Anyone with a full account can use the community. Free accounts have limits on recordings and
+        bands. A subscription removes them; it is the same subscription as Prosaurus, so one
+        subscription covers both sites. Greywire members have no limits and pay nothing: membership is
+        free and comes with a Greywire Studio pedal. You become a member by claiming your pedal's
+        serial number, or by invitation from us.
       </p>
       <ul>
         <li>
           <strong>One account per serial.</strong> Each serial number can be claimed by one account.
           Claim only a pedal you own. Claiming a serial that isn't yours, or sharing one so others can
-          get in, is a violation of this Agreement.
+          avoid the limits, is a violation of this Agreement.
         </li>
         <li>
           <strong>Membership follows the pedal.</strong> Membership belongs to the account that holds
           the serial. If you sell or give away your pedal, contact us and we can move the serial to the
-          new owner's account; your account then loses membership unless you hold another pedal or an
-          invitation.
+          new owner's account; your account then loses membership, and the free limits apply again,
+          unless you hold another pedal, an invitation or a subscription.
         </li>
         <li>
           <strong>Revocation.</strong> We may revoke membership for any violation of this Agreement.
@@ -87,7 +90,8 @@
         to the site where they were created and are not shown on the other.
       </p>
       <p>
-        This Agreement covers your account on both sites. A suspension or termination applies to the
+        This Agreement covers your account on both sites. A subscription also covers your account on
+        both sites. A suspension or termination applies to the
         whole account.
       </p>
     </div>

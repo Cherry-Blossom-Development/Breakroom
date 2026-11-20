@@ -2,7 +2,7 @@
   <section class="privacy-page page-container">
     <h1>Privacy Policy</h1>
     <p class="app-subtitle">{{ isGreywire ? 'Greywire Studio community — community.greywirestudio.com' : 'Prosaurus — Mobile Application' }}</p>
-    <p class="effective-date">Effective Date: {{ isGreywire ? 'October 22, 2026' : 'February 20, 2026' }}</p>
+    <p class="effective-date">Effective Date: {{ isGreywire ? 'November 20, 2026' : 'February 20, 2026' }}</p>
 
     <p v-if="isGreywire" class="intro">
       This Privacy Policy describes how Cherry Blossom Development LLC ("we," "us," or "our"),
@@ -40,7 +40,7 @@
         <template v-if="isGreywire">
           <li><strong>User Content:</strong> Chat messages, recordings, band pages, setlists, comments, ratings, and other content you create or share within the Community.</li>
           <li><strong>Pedal Information:</strong> The serial number and model of any Greywire pedal you claim, and when you claimed it.</li>
-          <li><strong>Payment Information:</strong> Greywire membership is free, and we collect no payment details for it. If you use paid Prosaurus features with the same account, billing details are processed by our payment provider. We do not store full payment card numbers on our servers.</li>
+          <li><strong>Payment Information:</strong> Greywire membership is free, and we collect no payment details for it. If you subscribe (one subscription covers Greywire and Prosaurus), billing details are processed by our payment provider or app store. We do not store full payment card numbers on our servers.</li>
         </template>
         <template v-else>
           <li><strong>User Content:</strong> Posts, blog entries, artwork, comments, messages, and other content you create or share within the App.</li>
@@ -84,7 +84,7 @@
       <p>We may share your information only in the following limited circumstances:</p>
       <ul>
         <li v-if="isGreywire">
-          <strong>With Other Users:</strong> Your username and profile are visible to other members. Recordings
+          <strong>With Other Users:</strong> Your username and profile are visible to other Greywire users. Recordings
           you share with a public link can be heard by anyone who has the link.
         </li>
         <li v-if="isGreywire">
