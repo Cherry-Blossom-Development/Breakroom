@@ -328,7 +328,13 @@ router.post('/invite', async (req, res) => {
   res.status(201).json({ message: 'Invitation sent to user.' });
 });
 
-router.put('/:id', authenticate, checkPermission('admin_access'), async (req, res) => {
+// The admin routes below take a numeric user id. Routes with fixed paths
+// registered after them (PUT /notification-settings, PUT /audio-defaults)
+// would otherwise be caught by '/:id' and refused for non-admins, so any
+// other value skips to the later routes.
+const numericId = (req, res, next) => (/^\d+$/.test(req.params.id) ? next() : next('route'));
+
+router.put('/:id', numericId, authenticate, checkPermission('admin_access'), async (req, res) => {
   const { id } = req.params;
   const { user, permissions, groups } = req.body;
 
@@ -438,7 +444,7 @@ router.put('/:id', authenticate, checkPermission('admin_access'), async (req, re
   }
 });
 
-router.delete('/:id', authenticate, checkPermission('admin_access'), async (req, res) => {
+router.delete('/:id', numericId, authenticate, checkPermission('admin_access'), async (req, res) => {
   const { id } = req.params;
   const client = await getClient();
 
@@ -530,7 +536,7 @@ router.get('/permissionMatrix/:id', authenticate, checkPermission('admin_access'
 
 
 
-router.put('/:id/password', authenticate, checkPermission('admin_access'), async (req, res) => {
+router.put('/:id/password', numericId, authenticate, checkPermission('admin_access'), async (req, res) => {
   const { id } = req.params;
   const { password } = req.body;
 
