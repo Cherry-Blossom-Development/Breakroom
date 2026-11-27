@@ -479,4 +479,43 @@ router.get('/search', authenticate, async (req, res) => {
   }
 });
 
+// Find people to add as friends: matches handle, first or last name, and
+// leaves out yourself, guests, and anyone you already have a relationship with
+// (friends, a pending request either way, or a block either way). On the
+// Greywire site only Greywire users are returned. Used by the mobile apps
+// instead of loading every account (/api/user/all) and filtering on the device.
+router.get('/find', authenticate, async (req, res) => {
+  const q = (req.query.q || '').trim();
+  if (q.length < 2) {
+    return res.status(400).json({ message: 'Type at least 2 characters' });
+  }
+
+  const client = await getClient();
+  try {
+    const escaped = q.toLowerCase().replace(/[\\%_]/g, c => `\\${c}`);
+    const search = `%${escaped}%`;
+    const results = await client.query(
+      `SELECT u.id, u.handle, u.first_name, u.last_name, u.photo_path
+       FROM users u
+       WHERE u.id <> $1
+         AND u.is_guest = FALSE
+         AND (LOWER(u.handle) LIKE $2 OR LOWER(u.first_name) LIKE $3 OR LOWER(u.last_name) LIKE $4)
+         AND NOT EXISTS (
+           SELECT 1 FROM friends f
+           WHERE (f.user_id = $5 AND f.friend_id = u.id) OR (f.friend_id = $6 AND f.user_id = u.id)
+         )
+         ${greywireOnly(req)}
+       ORDER BY u.handle
+       LIMIT 20`,
+      [req.user.id, search, search, search, req.user.id, req.user.id]
+    );
+    res.json({ users: results.rows });
+  } catch (err) {
+    console.error('Error finding users:', err);
+    res.status(500).json({ message: 'Failed to search for people' });
+  } finally {
+    client.release();
+  }
+});
+
 module.exports = router;
