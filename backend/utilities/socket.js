@@ -60,6 +60,50 @@ let ioInstance = null;
 
 const getIO = () => ioInstance;
 
+/**
+ * Emits chat_badge_update to each member of a room except the sender, so
+ * their unread counts update: members who accepted, haven't muted the room,
+ * and have chat notifications on. Fire-and-forget, so a failure never blocks
+ * the message. Called for every new message, whether it came over the socket
+ * or through the REST routes (the mobile apps send over REST).
+ */
+function emitChatBadgeUpdates(roomId, senderId) {
+  if (!ioInstance) return;
+  const io = ioInstance;
+  ;(async () => {
+    try {
+      const badgeClient = await getClient();
+      try {
+        const membersResult = await badgeClient.query(
+          `SELECT ur.user_id
+           FROM users_rooms ur
+           WHERE ur.room_id = $1
+             AND ur.accepted = TRUE
+             AND ur.user_id != $2
+             AND ur.notifications_muted = FALSE`,
+          [roomId, senderId]
+        );
+        for (const member of membersResult.rows) {
+          const settingResult = await badgeClient.query(
+            `SELECT notifications_enabled, notify_chat_messages
+             FROM user_settings WHERE user_id = $1`,
+            [member.user_id]
+          );
+          const s = settingResult.rows[0];
+          const enabled = !s || (s.notifications_enabled && s.notify_chat_messages);
+          if (enabled) {
+            io.to(`user_${member.user_id}`).emit('chat_badge_update', { roomId: Number(roomId) });
+          }
+        }
+      } finally {
+        badgeClient.release();
+      }
+    } catch (badgeErr) {
+      console.error('Badge update failed (non-fatal):', badgeErr.message);
+    }
+  })();
+}
+
 const initializeSocket = (io) => {
   ioInstance = io;
 
@@ -313,40 +357,8 @@ const initializeSocket = (io) => {
           }
         })();
 
-        // Emit chat_badge_update to each room member — fire-and-forget so a
-        // failure here never blocks or rolls back the message send.
-        ;(async () => {
-          try {
-            const badgeClient = await getClient();
-            try {
-              const membersResult = await badgeClient.query(
-                `SELECT ur.user_id
-                 FROM users_rooms ur
-                 WHERE ur.room_id = $1
-                   AND ur.accepted = TRUE
-                   AND ur.user_id != $2
-                   AND ur.notifications_muted = FALSE`,
-                [roomId, socket.user.id]
-              );
-              for (const member of membersResult.rows) {
-                const settingResult = await badgeClient.query(
-                  `SELECT notifications_enabled, notify_chat_messages
-                   FROM user_settings WHERE user_id = $1`,
-                  [member.user_id]
-                );
-                const s = settingResult.rows[0];
-                const enabled = !s || (s.notifications_enabled && s.notify_chat_messages);
-                if (enabled) {
-                  io.to(`user_${member.user_id}`).emit('chat_badge_update', { roomId });
-                }
-              }
-            } finally {
-              badgeClient.release();
-            }
-          } catch (badgeErr) {
-            console.error('Badge update failed (non-fatal):', badgeErr.message);
-          }
-        })();
+        // Tell the other members' unread badges (see emitChatBadgeUpdates)
+        emitChatBadgeUpdates(roomId, socket.user.id);
       } catch (err) {
         console.error('Error sending message:', err);
         socket.emit('error', { message: 'Failed to send message' });
@@ -500,4 +512,4 @@ const emitHaulonautSectorArrival = (sectorId, character) => {
   });
 };
 
-module.exports = { initializeSocket, userSockets, isOnline, getOnlineUserIds, getIO, emitToUser, emitHaulonautSectorArrival };
+module.exports = { initializeSocket, userSockets, isOnline, getOnlineUserIds, getIO, emitToUser, emitHaulonautSectorArrival, emitChatBadgeUpdates };

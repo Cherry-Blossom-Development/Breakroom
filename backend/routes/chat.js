@@ -5,7 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const { getClient } = require('../utilities/db');
 const { checkPermission } = require('../middleware/checkPermission');
-const { getIO } = require('../utilities/socket');
+const { getIO, emitChatBadgeUpdates } = require('../utilities/socket');
 const { uploadToS3 } = require('../utilities/aws-s3');
 const { extractToken } = require('../utilities/auth');
 const { checkAndFilterContent } = require('../utilities/contentFilter');
@@ -391,6 +391,7 @@ router.post('/rooms/:roomId/messages', authenticateToken, async (req, res) => {
         message: messageData
       });
     }
+    emitChatBadgeUpdates(roomId, req.user.id);
 
     // Push notification to room members who are offline
     const roomResult = await client.query('SELECT name FROM chat_rooms WHERE id = $1', [roomId]);
@@ -480,6 +481,7 @@ router.post('/rooms/:roomId/image', authenticateToken, upload.single('image'), a
         message: messageData
       });
     }
+    emitChatBadgeUpdates(roomId, req.user.id);
 
     res.status(201).json({
       message: messageData
@@ -554,6 +556,7 @@ router.post('/rooms/:roomId/video', authenticateToken, videoUpload.single('video
         message: messageData
       });
     }
+    emitChatBadgeUpdates(roomId, req.user.id);
 
     res.status(201).json({
       message: messageData
