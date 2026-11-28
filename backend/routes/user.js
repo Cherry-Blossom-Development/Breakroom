@@ -11,7 +11,7 @@ const { sendMail: sendMailSES } = require('../utilities/aws-ses-email');
 
 const { getClient } = require('../utilities/db');
 const { extractToken } = require('../utilities/auth');
-const { checkPermission } = require('../middleware/checkPermission');
+const { checkPermission, hasPermission } = require('../middleware/checkPermission');
 const { findIdentifierCollision } = require('../utilities/userIdentifiers');
 const { getOnlineUserIds } = require('../utilities/socket');
 const { getSystemEmail } = require('../utilities/systemEmail');
@@ -45,9 +45,22 @@ router.get('/online-ids', authenticate, (req, res) => {
   res.json({ onlineUserIds: getOnlineUserIds() });
 });
 
-router.get('/all', async (req, res) => {
+// Every account. Needs a signed-in user. Admins (admin_access) get the full
+// rows for the admin pages; everyone else gets only the public fields that
+// the pickers use (invites, DM search, band invites, the mobile apps), never
+// emails or subscriptions.
+router.get('/all', authenticate, async (req, res) => {
   const client = await getClient();
   try {
+    if (!(await hasPermission(client, 'admin_access', req.user.id))) {
+      const users = await client.query(
+        `SELECT u.id, u.handle, u.first_name, u.last_name, u.photo_path, u.is_guest
+         FROM users u
+         ORDER BY u.id`
+      );
+      return res.status(200).json({ message: 'Users retrieved', users: users.rows });
+    }
+
     const users = await client.query(
       `SELECT
          u.id, u.handle, u.first_name, u.last_name, u.email, u.is_internal, u.is_guest,

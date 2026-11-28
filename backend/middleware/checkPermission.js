@@ -1,6 +1,30 @@
 const { getClient } = require('../utilities/db');
 
 /**
+ * Whether a user has a permission, directly or through one of their groups.
+ * @param {object} client - A database client from getClient()
+ * @param {string} permissionName - Name of the permission
+ * @param {number} userId
+ */
+async function hasPermission(client, permissionName, userId) {
+  const result = await client.query(`
+    SELECT 1 FROM permissions p
+    WHERE p.name = $1 AND p.is_active = true AND (
+      EXISTS (
+        SELECT 1 FROM user_permissions up
+        WHERE up.permission_id = p.id AND up.user_id = $2
+      )
+      OR EXISTS (
+        SELECT 1 FROM group_permissions gp
+        JOIN user_groups ug ON ug.group_id = gp.group_id
+        WHERE gp.permission_id = p.id AND ug.user_id = $3
+      )
+    )
+  `, [permissionName, userId, userId]);
+  return result.rowCount > 0;
+}
+
+/**
  * Middleware factory that checks if user has a specific permission
  * @param {string} permissionName - Name of the required permission
  */
@@ -12,23 +36,7 @@ const checkPermission = (permissionName) => {
 
     const client = await getClient();
     try {
-      // Check direct user permissions and group permissions
-      const result = await client.query(`
-        SELECT 1 FROM permissions p
-        WHERE p.name = $1 AND p.is_active = true AND (
-          EXISTS (
-            SELECT 1 FROM user_permissions up
-            WHERE up.permission_id = p.id AND up.user_id = $2
-          )
-          OR EXISTS (
-            SELECT 1 FROM group_permissions gp
-            JOIN user_groups ug ON ug.group_id = gp.group_id
-            WHERE gp.permission_id = p.id AND ug.user_id = $3
-          )
-        )
-      `, [permissionName, req.user.id, req.user.id]);
-
-      if (result.rowCount === 0) {
+      if (!(await hasPermission(client, permissionName, req.user.id))) {
         return res.status(403).json({ message: 'Permission denied' });
       }
 
@@ -42,4 +50,4 @@ const checkPermission = (permissionName) => {
   };
 };
 
-module.exports = { checkPermission };
+module.exports = { checkPermission, hasPermission };
