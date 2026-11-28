@@ -4,9 +4,9 @@ import { useRouter } from 'vue-router'
 import { friends } from '@/stores/friends.js'
 import LoadingSpinner from '@/components/LoadingSpinner.vue'
 import OnlineStatusDot from '@/components/OnlineStatusDot.vue'
-import { user } from '@/stores/user.js'
 import { badges } from '@/stores/badges.js'
 import { presence } from '@/stores/presence.js'
+import { authFetch } from '@/utilities/authFetch'
 
 const router = useRouter()
 
@@ -42,40 +42,36 @@ onMounted(() => {
   badges.markFriendsRead()
 })
 
-async function searchUsers() {
-  if (!searchQuery.value.trim()) {
+// Find Users searches on the server (GET /api/friends/find), which leaves
+// out yourself and anyone you're already connected to. On Greywire it only
+// returns Greywire users. Searches after a short pause, from 2 characters.
+let searchTimeout = null
+const searchedQuery = ref('')
+
+function searchUsers() {
+  clearTimeout(searchTimeout)
+  const query = searchQuery.value.trim()
+  if (query.length < 2) {
     searchResults.value = []
+    searchedQuery.value = ''
+    searching.value = false
     return
   }
+  searchTimeout = setTimeout(() => runSearch(query), 250)
+}
 
+async function runSearch(query) {
   searching.value = true
   searchError.value = null
 
   try {
-    const res = await fetch('/api/user/all', { credentials: 'include' })
+    const res = await authFetch(`/api/friends/find?q=${encodeURIComponent(query)}`)
     if (!res.ok) throw new Error('Failed to search users')
     const data = await res.json()
-    const users = data.users || []
-
-    // Filter by search query and exclude current friends/pending
-    const friendIds = new Set(friends.friends.map(f => f.id))
-    const sentIds = new Set(friends.sent.map(s => s.id))
-    const requestIds = new Set(friends.requests.map(r => r.id))
-    const blockedIds = new Set(friends.blocked.map(b => b.id))
-
-    const query = searchQuery.value.toLowerCase()
-    searchResults.value = users.filter(u => {
-      // Exclude current user
-      if (u.handle === user.username) return false
-
-      const matchesQuery = u.handle.toLowerCase().includes(query) ||
-        (u.first_name && u.first_name.toLowerCase().includes(query)) ||
-        (u.last_name && u.last_name.toLowerCase().includes(query)) ||
-        (u.email && u.email.toLowerCase().includes(query))
-      const notConnected = !friendIds.has(u.id) && !sentIds.has(u.id) &&
-        !requestIds.has(u.id) && !blockedIds.has(u.id)
-      return matchesQuery && notConnected
-    })
+    // Ignore an answer for a query that has since changed
+    if (query !== searchQuery.value.trim()) return
+    searchResults.value = data.users || []
+    searchedQuery.value = query
   } catch (err) {
     searchError.value = err.message
   } finally {
@@ -298,8 +294,8 @@ function goToProfile(handle) {
 
         <div v-if="searching" class="loading"><LoadingSpinner size="small" /> Searching...</div>
         <div v-else-if="searchError" class="error">{{ searchError }}</div>
-        <div v-else-if="searchQuery && searchResults.length === 0" class="empty-state">
-          No users found matching "{{ searchQuery }}"
+        <div v-else-if="searchedQuery && searchResults.length === 0" class="empty-state">
+          No users found matching "{{ searchedQuery }}"
         </div>
         <div v-else class="user-list">
           <div v-for="u in searchResults" :key="u.id" class="user-card">
